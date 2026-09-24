@@ -21,7 +21,7 @@ jobs:
     name: Problem & legal ID anchors intact
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check kill-list anchors (doc 05)
         run: |
           f="preresearch/architecture/05-Problem-Register.md"
@@ -46,7 +46,7 @@ jobs:
     name: Mermaid blocks are renderable
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Lint mermaid fences
         run: |
           fail=0
@@ -61,7 +61,7 @@ jobs:
     name: Internal links resolve
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: lycheeverse/lychee-action@v2
         with:
           args: >-
@@ -76,7 +76,7 @@ jobs:
     name: README repo map matches disk
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify every mapped file exists
         run: |
           for f in \
