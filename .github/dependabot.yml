@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Keep CI actions pinned and current
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci"
+      - "dependencies"
+    open-pull-requests-limit: 5
+
+  # Activate automatically when the pilot app scaffold lands
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "web"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct"
+
+  # Activate automatically when the Anchor workspace lands (Cargo.lock committed)
+  - package-ecosystem: "cargo"
+    directory: "/programs"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5

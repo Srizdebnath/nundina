@@ -1,0 +1,33 @@
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+research:
+  - changed-files:
+      - any-glob-to-any-file: "preresearch/research/**"
+
+architecture:
+  - changed-files:
+      - any-glob-to-any-file: "preresearch/architecture/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+legal:
+  - changed-files:
+      - any-glob-to-any-file: "preresearch/architecture/07-*"
+
+onchain:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "programs/**"
+          - "Anchor.toml"
+
+web:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/**"
+          - "web/**"

@@ -1,0 +1,91 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  # Doc 06 §14 and doc 07 require that problem IDs (A1..M8) and legal IDs
+  # referenced in prose are never silently renumbered. Guard the anchors.
+  id-anchors:
+    name: Problem & legal ID anchors intact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check kill-list anchors (doc 05)
+        run: |
+          f="preresearch/architecture/05-Problem-Register.md"
+          for id in A1 A5 C1 C2 C4 C13 C17 D1 E1 F8 K1 M1 M2; do
+            grep -q "\*\*${id}\*\*" "$f" || { echo "MISSING problem ID: ${id}"; exit 1; }
+          done
+          echo "All kill-list anchors present."
+      - name: Check legal register anchors (doc 07)
+        run: |
+          f="preresearch/architecture/07-Legal-Topology-and-Compliance.md"
+          for id in L1 L6 L7 L9 L12 L13 L17 L21 L27; do
+            grep -q "\*\*${id}\*\*" "$f" || { echo "MISSING legal ID: ${id}"; exit 1; }
+          done
+          for q in Q1 Q3 Q6 Q7 Q14 Q20; do
+            grep -q "\*\*${q}\*\*" "$f" || { echo "MISSING counsel gate: ${q}"; exit 1; }
+          done
+          echo "All legal anchors present."
+
+  # Mermaid blocks must render on GitHub: every ```mermaid fence needs a
+  # recognized diagram type on its first line.
+  mermaid:
+    name: Mermaid blocks are renderable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint mermaid fences
+        run: |
+          fail=0
+          while IFS= read -r file; do
+            awk '/^```mermaid/{inblock=1; getline; if ($0 !~ /^(flowchart|stateDiagram-v2|sequenceDiagram|graph)/) { print FILENAME": bad mermaid first line -> "$0; fail=1 } } /^```$/{inblock=0}' "$file"
+          done < <(find . -name "*.md" -not -path "./node_modules/*")
+          exit $fail
+
+  # Relative links inside the corpus must resolve. (Offline: only local
+  # links are checked — external citations stay unvalidated by design.)
+  links:
+    name: Internal links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --offline --no-progress
+            --exclude '^https?://'
+            --exclude '^mailto:'
+            './**/*.md'
+          fail: true
+
+  # Front-page accuracy: the repo map is hand-maintained; make it checkable.
+  readme-map:
+    name: README repo map matches disk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify every mapped file exists
+        run: |
+          for f in \
+            preresearch/architecture/00-README.md \
+            preresearch/architecture/05-Problem-Register.md \
+            preresearch/architecture/06-Solution-Architecture-v2.md \
+            preresearch/architecture/07-Legal-Topology-and-Compliance.md \
+            preresearch/architecture/08-SRS-Pilot-Rails.md \
+            preresearch/research/12-Validation-2026-Reality-Check.md; do
+            test -f "$f" || { echo "README maps a missing file: $f"; exit 1; }
+          done
+          echo "README repo map OK."
