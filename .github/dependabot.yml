@@ -10,24 +10,24 @@ updates:
       - "dependencies"
     open-pull-requests-limit: 5
 
-  # Activate automatically when the pilot app scaffold lands
-  - package-ecosystem: "npm"
-    directory: "/app"
-    schedule:
-      interval: "weekly"
-    labels:
-      - "web"
-      - "dependencies"
-    open-pull-requests-limit: 5
-    allow:
-      - dependency-type: "direct"
+  # UNCOMMENT at P0 scaffold (doc 08 §12) when app/ lands — Dependabot errors on missing dirs
+  # - package-ecosystem: "npm"
+  #   directory: "/app"
+  #   schedule:
+  #     interval: "weekly"
+  #   labels:
+  #     - "web"
+  #     - "dependencies"
+  #   open-pull-requests-limit: 5
+  #   allow:
+  #     - dependency-type: "direct"
 
-  # Activate automatically when the Anchor workspace lands (Cargo.lock committed)
-  - package-ecosystem: "cargo"
-    directory: "/programs"
-    schedule:
-      interval: "weekly"
-    labels:
-      - "onchain"
-      - "dependencies"
-    open-pull-requests-limit: 5
+  # UNCOMMENT at P1 when the Anchor workspace lands (Cargo.lock committed)
+  # - package-ecosystem: "cargo"
+  #   directory: "/programs"
+  #   schedule:
+  #     interval: "weekly"
+  #   labels:
+  #     - "onchain"
+  #     - "dependencies"
+  #   open-pull-requests-limit: 5
