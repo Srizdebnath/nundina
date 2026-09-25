@@ -1,0 +1,29 @@
+# LiteSVM integration tests for payment-rails (R1+).
+#
+# Deliberately its OWN workspace (excluded from ../Cargo.toml): litesvm pulls
+# a large solana runtime tree, and sharing a lockfile with the program would
+# let it bump crates the SBF build depends on. Run after `anchor build`:
+#   cargo test --manifest-path tests-svm/Cargo.toml
+[package]
+name = "payment-rails-svm-tests"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+
+[dev-dependencies]
+payment-rails = { path = "../programs/payment-rails", features = ["no-entrypoint"] }
+anchor-lang = { version = "=1.1.2" }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022"] }
+litesvm = "0.16"
+solana-keypair = "3"
+solana-signer = "3"
+solana-transaction = "4"
+solana-account = "4"
+solana-program-pack = "3"
+solana-instruction-error = "2"
+solana-transaction-error = "3"

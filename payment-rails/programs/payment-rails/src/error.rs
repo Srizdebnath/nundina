@@ -66,6 +66,38 @@ pub enum RailsError {
     /// `credit-math` allocation would exceed the whole.
     #[msg("Math: over-allocation")]
     MathOverAllocation,
+
+    // ── escrow / sessions (R1, appended) ─────────────────────────────────
+    /// Signer is not the config/session operator.
+    #[msg("Signer is not the session operator")]
+    NotOperator,
+    /// Session deadlines must satisfy now < commit_end < reveal_end < settle_deadline.
+    #[msg("Session schedule is not strictly increasing from now")]
+    InvalidSchedule,
+    /// Amount must be non-zero.
+    #[msg("Amount must be greater than zero")]
+    ZeroAmount,
+    /// Deposit above the session's per-investor cash cap (AE-P3).
+    #[msg("Deposit exceeds the per-investor cash cap")]
+    CashCapExceeded,
+    /// Session was failed; only refunds remain.
+    #[msg("Session is not open")]
+    SessionNotOpen,
+    /// Action outside its phase window (deposit after commit, reveal outside reveal window).
+    #[msg("Outside the permitted phase window")]
+    OutsideWindow,
+    /// Reveal already reported for this escrow.
+    #[msg("Escrow already revealed")]
+    AlreadyRevealed,
+    /// Bond is not forfeitable (revealed, window open, or already taken).
+    #[msg("Bond is not forfeitable")]
+    BondNotForfeitable,
+    /// Refund destination is not a token account of the escrow owner.
+    #[msg("Refund destination is not owned by the escrow owner")]
+    NotEscrowOwner,
+    /// Bond destination is not the session's snapshotted reserve.
+    #[msg("Account is not the session reserve")]
+    ReserveMismatch,
 }
 
 impl From<MathError> for RailsError {
@@ -105,5 +137,7 @@ mod tests {
         // Append-only discipline: pin the first codes so a reorder fails CI.
         assert_eq!(u32::from(RailsError::Unauthorized), 6000);
         assert_eq!(u32::from(RailsError::DepegBreakerTripped), 6006);
+        assert_eq!(u32::from(RailsError::MathOverAllocation), 6016);
+        assert_eq!(u32::from(RailsError::NotOperator), 6017);
     }
 }

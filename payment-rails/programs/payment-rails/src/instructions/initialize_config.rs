@@ -17,6 +17,9 @@ pub fn handler(ctx: Context<InitializeConfig>) -> Result<()> {
         usdc_mint: ctx.accounts.usdc_mint.key(),
         fee_receiver: ctx.accounts.fee_receiver.key(),
         reserve: ctx.accounts.reserve.key(),
+        // Authority operates sessions until the auction engine's signer PDA
+        // is wired in via `set_operator`.
+        operator: authority_key,
         // Start halted-clear: R1+ instructions consult `ensure_accepting`.
         paused: false,
         depeg_breaker: false,
