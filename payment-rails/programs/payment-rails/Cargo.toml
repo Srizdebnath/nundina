@@ -1,0 +1,26 @@
+[package]
+name = "payment-rails"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "USDC money layer for NUNDINA: escrow, bonds, refunds, DvP cash leg, payouts to attested wallets only (SRS 08 §4.2/§4.4/§4.5). Audit-scope-critical."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "payment_rails"
+
+[features]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+# Exact pins: caret "1.1.2" resolves to 1.2.x, which uses the split
+# solana-program 3.x crates — a different anchor generation. SRS locks 1.1.x.
+anchor-lang = { version = "=1.1.2" }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["associated_token", "token", "token_2022"] }
+# Read-only: owned by programs/ on main. Never edited from this folder.
+credit-math = { path = "../../../programs/credit-math" }
+
+[dev-dependencies]
+# Intentionally empty: forces cargo-build-sbf to use our workspace resolution.

@@ -1,0 +1,36 @@
+# NUNDINA payment-rails — Anchor workspace configuration
+# Toolchain: anchor 1.1.2 (avm) · solana-cli 2.3.0 · matches root Anchor.toml
+
+[features]
+resolution = true
+skip-lint = false
+
+# Only the rails program. credit-math is a read-only path dependency outside
+# this workspace and is never treated as a program here.
+[workspace]
+members = ["programs/payment-rails"]
+
+[programs.localnet]
+payment-rails = "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn"
+
+[programs.devnet]
+payment-rails = "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+# R5 targets devnet; localnet until then.
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[test]
+startup_wait = 10_000
+shutdown_wait = 2_000
+
+# [scripts] deferred to R1: the rails harness is LiteSVM (Rust), not
+# anchor's ts-mocha layout, and anchor 1.1 rejects an empty scripts key.
+
+[toolchain]
+anchor_version = "1.1.2"
+solana_version = "2.3.0"
