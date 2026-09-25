@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    # P0: shared math crate (doc 09 §6).
+    "programs/credit-math",
+    # P0: gate program skeleton (CG-P2 anchor; CG-P1..P6 land in P1).
+    "programs/credit-gate",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+
+[profile.release]
+overflow-checks = true      # D8: arithmetic must panic, never wrap
+lto = "fat"

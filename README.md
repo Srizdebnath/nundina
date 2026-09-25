@@ -33,7 +33,8 @@ preresearch/
 │   ├── 05-Problem-Register.md              ← ~100 failure modes, 13 domains, ranked kill-list
 │   ├── 06-Solution-Architecture-v2.md      ← the answer to every row of 05; six programs
 │   ├── 07-Legal-Topology-and-Compliance.md ← L1–L27 legal register + 20 counsel gates
-│   └── 08-SRS-Pilot-Rails.md               ← build spec: 12 acceptance scenarios, 24-week plan
+│   ├── 08-SRS-Pilot-Rails.md               ← build spec: 12 acceptance scenarios, 24-week plan
+│   └── 09-NPCS-Asset-Spec.md               ← the pilot asset: token structure, invariants, deployment
 └── research/
     └── 12-Validation-2026-Reality-Check.md ← dated market evidence, competitor map, TSV order
 ```
@@ -53,7 +54,7 @@ All diagrams are Mermaid — they render natively on GitHub.
 
 | Milestone | Doc |
 |---|---|
-| Pilot build P0–P5: gate + marks + auction + claims + facility + tranching | `08` §12 |
+| Pilot build P0–P5: gate + asset + marks + auction + claims + facility + tranching | `08` §12, `09` |
 | External audit (gate / auction / facility / math) | `08` §11 |
 | Mainnet pilot: 12 acceptance scenarios, real USDC, recorded demo | `08` §1, §12 |
 | Counsel gates Q1/Q3/Q7 (venue, exemption, repurchase) | `07` §Part IV |

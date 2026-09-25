@@ -1,0 +1,16 @@
+[package]
+name = "credit-math"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "Shared fixed-point arithmetic for NUNDINA — u128 only, floors against the initiator, zero dependencies (doc 09 §6; SRS D8)."
+
+[dependencies]
+
+[features]
+# Required by `anchor build`'s IDL generation pass across workspace members.
+idl-build = []
+
+[dev-dependencies]
+proptest = "1"
