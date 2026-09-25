@@ -1,0 +1,23 @@
+{
+  "name": "@nundina/npcs-asset",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "init-mint": "tsx scripts/init-mint.ts",
+    "verify": "tsx scripts/verify.ts",
+    "test": "tsx --test tests/*.spec.ts"
+  },
+  "dependencies": {
+    "@solana-program/system": "^0.15.0",
+    "@solana-program/token-2022": "^0.19.0",
+    "@solana/kit": "^8.3.0",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/spl-token-metadata": "^0.1.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

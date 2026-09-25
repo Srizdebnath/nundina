@@ -235,7 +235,7 @@ stateDiagram-v2
 ## 9 · Repo layout ("the token has its own folder")
 
 ```
-asset/npcs/                    ← the asset, everything about it, nothing else
+token/                    ← the asset, everything about it, nothing else
 ├── params.toml                # decimals=6, cap=8 investor_ids, seasoning=7d, fee_bps=10,
 │                              #   nav_cadence=weekly, policy=PILOT_506C_TEST, cluster overrides
 ├── metadata.json              # name, symbol, URI content; PILOT-DEMO-ASSET — NOT AN OFFER
@@ -276,7 +276,7 @@ NPCS is **not a program** — it is a mint plus scripts plus config. All *behavi
 
 ## 12 · Acceptance hooks
 
-This doc is satisfied when: **AC-1** passes E2E on devnet (attestation → thaw through gate; ineligible wallet rejected with typed reason), **AC-6/AC-7** pass (lot seasoning + governor on NPCS), `asset/npcs/scripts/verify.ts` asserts the §2 extension manifest **and** the §2.1 provenance check on a live mint, and every §6 function is property-tested. NAV math (I2) is covered by `credit-math` from P0.
+This doc is satisfied when: **AC-1** passes E2E on devnet (attestation → thaw through gate; ineligible wallet rejected with typed reason), **AC-6/AC-7** pass (lot seasoning + governor on NPCS), `token/scripts/verify.ts` asserts the §2 extension manifest **and** the §2.1 provenance check on a live mint, and every §6 function is property-tested. NAV math (I2) is covered by `credit-math` from P0.
 
 ---
 

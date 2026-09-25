@@ -28,13 +28,13 @@ url = "https://api.apr.dev"
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
-# Scripts live under asset/npcs/scripts (doc 09 §9) once P1 begins.
+# Scripts live under token/scripts (doc 09 §9) once P1 begins.
 [test]
 startup_wait = 10_000
 shutdown_wait = 2_000
 
 # [scripts] block deferred to P1: the pilot's test harness is the TS E2E
-# suite (SRS §13) driven from asset/npcs + tests/, not anchor's default
+# suite (SRS §13) driven from token + tests/, not anchor's default
 # ts-mocha layout. Anchor 1.1 parses an empty scripts key as `""`, which
 # fails; the block returns when the P1 harness lands.
 

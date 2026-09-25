@@ -1,0 +1,46 @@
+# NPCS pilot parameters — single source of truth (doc 09 §3; SRS 08 §3.1)
+# Kept in sync with credit-math constants and the app's NAV display.
+
+[mint]
+name = "NUNDINA Pilot Credit Sleeve"
+symbol = "NPCS"
+decimals = 6
+uri = "https://nundina.com/npcs/metadata.json"  # placeholder until hosted; label also lives on-chain in metadata
+label = "PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL"
+
+[extensions]
+# Doc 09 §2 manifest — verify.ts asserts every line of this.
+default_account_state = "frozen"
+metadata_pointer = true
+token_metadata = true
+permanent_delegate = true
+transfer_hook = false
+transfer_fee = false
+interest_bearing = false
+confidential_transfer = false
+non_transferable = false
+
+[policy]
+# PILOT_506C_TEST policy class (CG-P2)
+policy_class = 1
+holder_cap = 8                # distinct investor_ids (CG-P4)
+seasoning_seconds = 604_800   # 7 days — compressed Rule-144 analog (CG-1)
+settlement_horizon_seconds = 86_400
+
+[nav]
+# I2 (doc 09 §3): pico precision (10^12 per whole NPCS) — credit-math/nav.rs
+precision_pico = 1_000_000_000_000
+fee_bps = 10                  # 10bps/yr, NAV-side accrual
+cadence = "weekly"
+rounding = "floor-against-initiator"
+
+[treasury]
+backing = "USDC 1:1 (I1)"
+venue = "Kamino USDC supply vault (permissionless); backup: program-owned USDC PDA, flat NAV"
+supply_cap_rule = "supply_base == confirmed_deposits_usdc * 10^6"
+
+[clusters]
+[clusters.devnet]
+rpc = "https://api.devnet.solana.com"
+[clusters.mainnet]
+rpc = "https://api.mainnet-beta.solana.com"  # unused until P8; fresh mint in key ceremony
