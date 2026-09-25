@@ -1,0 +1,23 @@
+[package]
+name = "credit-gate"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "Gate Program for Token ACL (sRFC37): eligibility, block-list, holder governor, lot ledger (SRS 08 §4.1, doc 09). Audit-scope-critical."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "credit_gate"
+
+[features]
+default = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+# Exact pin: caret "1.1.2" resolves to 1.2.x, which uses the split
+# solana-program 3.x crates — a different anchor generation. SRS locks 1.1.x.
+anchor-lang = { version = "=1.1.2" }
+credit-math = { path = "../credit-math" }
+
+[dev-dependencies]

@@ -43,3 +43,6 @@ tmp/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# NPCS asset keypairs & deployment records — never commit
+token/keys/
