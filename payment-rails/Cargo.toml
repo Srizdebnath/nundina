@@ -1,0 +1,20 @@
+# payment-rails — standalone Cargo workspace (PHASES.md §2).
+#
+# Deliberately NOT a member of the root workspace until merge: the root
+# Cargo.toml / Anchor.toml / CI gain this program only at merge time.
+# credit-math is consumed read-only as a path dependency, never edited here.
+[workspace]
+resolver = "2"
+members = [
+    # R0: USDC money layer skeleton (SRS 08 §4.2 AE-P3/P8/P10, §4.4, §4.5).
+    "programs/payment-rails",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+
+[profile.release]
+overflow-checks = true      # D8: arithmetic must panic, never wrap
+lto = "fat"
