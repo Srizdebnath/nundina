@@ -43,8 +43,8 @@ decisions and on a payout registry that only admits attested wallets.
 |---|---|---|
 | `MarketConfig` PDA at `["config", mint]` (gate program `7yRE…Qa9c`), readable to snapshot policy at session open | R2 settle-time re-check | ✅ skeleton on devnet |
 | Final re-check before each fill (attestation still valid, block-list miss, seasoning OK). Rails should require this to have **passed in the same transaction** before releasing cash | AE-P8 | 🔜 gate P1. **`settle_fill` does not verify it yet**; it lands once the gate exposes the check (Q2) |
-| A payout destination is admitted to the rails registry only with a gate-valid owner. The registry stores `{owner, token_account, attestation_ref_hash}`, with the hash only and no raw ids | R3 private payouts | 🔜 R3 |
-| Block-list takes precedence: a blocklisted owner's registry entry is unusable immediately, and refunds to it go to the escrow of record (never to a new address) | CG-P5 | 🔜 R3 |
+| A payout destination is admitted to the rails registry only with a gate-valid owner. The registry stores `{owner, token_account, attestation_ref_hash, expires_at, active}`, with the hash only and no raw ids | R3 private payouts | ✅ R3. Today the **registrar** key (`set_registrar`) attests. Once the gate's SAS read is on-chain (Q2), registration should also verify it |
+| Block-list takes precedence: a blocklisted owner's registry entry is unusable immediately (`revoke_destination` → `DestinationRevoked` on every R3 payout path), and escrow refunds still go only to the escrow owner of record, never to a new address | CG-P5 | ✅ R3. The registrar must mirror gate block-list changes; there's no automatic sync yet |
 
 ## 4 · From `auction-engine` (caller of the rails)
 
@@ -83,20 +83,21 @@ checks that total USDC **and** total asset are unchanged after every fill and
 every refund. `FillAlreadySettled` stays reserved in the error set; a replay
 is actually rejected by the receipt account already existing.
 
-## 5 · From `queue-claim` / `liquidity-facility`
+## 5 · From `queue-claim` / `liquidity-facility` / `tranche-engine`
 
 | Expectation | Rails behaviour | Phase |
 |---|---|---|
-| Claim sale proceeds identify an optional pledge `(facility, advance)` | Sweep order: **facility repayment first, then the claim holder** (QC-P4), as `PayoutMade{FacilityRepayment}` then `PayoutMade{ClaimProceeds}` | 🔜 R3 |
-| Facility fund PDA (seeded from the team treasury in the pilot) | `FacilityAdvance` payout only to a registered destination | 🔜 R3 |
-| Interest parameters (pilot: fixed 12% APR) | Accrued with `credit_math::accrue_interest`, never local math | 🔜 R3 |
-| Tranche period cash plus `WaterfallParams` | `credit_math::distribute_cash`, where the lines must sum exactly to cash in | 🔜 R3 |
+| The facility engine signs as the **curator** (the config operator at `open_facility`). Underwriting (advance rate vs `MARK_PROTECTIVE`, the 50% hard ceiling, health checks, the liquidation ladder) stays in that engine | `open_facility(id, rate_bps ≤ 50%)` creates a fund and its vault. `fund_facility` is open to anyone. `advance_funds(amount, collateral_ref_hash)` pays **only** the borrower's registered destination, one live advance per `(facility, borrower)`, blocked while paused or depegged | ✅ R3 |
+| Interest parameters (pilot: fixed 12% APR) | Accrued with `credit_math::accrue_interest` (simple, floored). `repay` applies interest first, never collects more than is owed, and closes the advance at zero | ✅ R3 |
+| Queue-claim: the proceeds of a **pledged** claim's sale, signed for by whoever holds them | `sweep_proceeds(amount)`: **facility repayment first**, then the remainder to the holder's registered destination (QC-P4), emitted as `PayoutMade{FacilityRepayment}` then `PayoutMade{ClaimProceeds}`. The two legs sum exactly to `amount` | ✅ R3 |
+| Proceeds of an **unpledged** claim | Nothing extra: `settle_fill` already pays the seller directly | ✅ R2 |
+| Tranche-engine: period cash plus `CouponParams` (a Borsh mirror of `credit_math::WaterfallParams`, including its reserve ledger level), signed by the config operator | `distribute_coupon(period, cash, params, ref_hash)`: fees → fee receiver, reserve top-up → reserve, senior coupon + amortization → senior's registered destination, junior coupon + residual → junior's. **Fails unless the lines sum exactly to `cash`**. One receipt per `(distributor, period)` | ✅ R3 |
 
 ## 6 · What the rails offer everyone
 
 - **Config:** `RailsConfig` at `["rails_config"]`. Read `paused` / `depeg_breaker` / `operator`. Sessions snapshot `usdc_mint` and `reserve` at open. ✅
 - **Errors:** `RailsError` codes are append-only and wire-stable (6000+). `credit_math::MathError` maps 1:1 onto the `Math*` variants. ✅
-- **Events:** `RailsConfigUpdated`, `BreakerChanged`, `SessionEvent`, `EscrowEvent` (including `AssetDeposited` / `AssetReturned`) and `FillSettled` (one per fill, with the full split) are emitted. `PayoutMade` (R3) is defined but not emitted yet. Each carries wallets and amounts plus 32-byte hashes, with no PII. Every cash movement emits exactly one event, and `CashSession.total_cash` / `total_bonds` track live escrows, so the R4 ledger can reconcile `sum(open escrows) == vault balances`. ✅
+- **Events:** all families are emitted as of R3: `RailsConfigUpdated`, `BreakerChanged`, `SessionEvent`, `EscrowEvent`, `FillSettled`, `PayoutMade` (advances, repayments, sweeps and coupon lines), `DestinationEvent` (registry writes, hash only) and `FacilityEvent`. Each carries wallets and amounts plus 32-byte hashes, with no PII. Every cash movement emits exactly one event, and `CashSession.total_cash` / `total_bonds` track live escrows, so the R4 ledger can reconcile `sum(open escrows) == vault balances`. ✅
 - **Liveness guarantee:** a user can always get unfilled cash back through a permissionless refund, even when the rails are paused, the breaker is tripped, or the crank is dead. ✅ R1 (LiteSVM: `refunds_work_while_paused_and_depegged`, `third_party_refund_cannot_redirect_cash`)
 
 ## 7 · Authorities (SRS §8)
@@ -105,6 +106,8 @@ is actually rejected by the receipt account already existing.
 |---|---|---|---|
 | Rails authority | Program upgrade authority at init (Squads 2-of-2 from P1) | Init config; set the operator, pause, depeg breaker, and fees (≤ hard caps) | Move escrowed user cash or asset; block refunds; exceed fee caps |
 | Operator | Auction-engine signer (the authority until Q1 lands) | Open, fail and finish sessions; report reveals; settle fills between escrows | Move or redirect value outside a fill's parties and the recorded fee/reserve accounts |
+| Registrar | Set by the authority (`set_registrar`); meant to be the SAS attester's key | Register, renew and revoke payout destinations | Move any cash |
+| Curator | The facility engine's signer (the config operator at `open_facility`) | Advance to registered destinations; its facility's rent | Pay an unregistered wallet; exceed the rate cap |
 | Issuer (ROFR) | `rofr_authority` recorded per session (optional) | Buy a seller's escrowed asset at the fill price with its own cash | Touch any buyer's escrow |
 | Crank | Any keypair | Settle / refund once conditions hold | Anything discretionary |
 | Participants | Wallets | Deposit, refund their own or anyone's escrow after the deadline | Admin functions |

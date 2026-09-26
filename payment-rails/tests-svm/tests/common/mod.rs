@@ -12,8 +12,8 @@ use anchor_spl::token_2022::spl_token_2022;
 use litesvm::types::TransactionMetadata;
 use litesvm::LiteSVM;
 use payment_rails::{
-    accounts as acc, instruction as ix, Breaker, CashSession, Escrow, FillReceipt, RailsConfig,
-    RailsError, SessionParams,
+    accounts as acc, instruction as ix, Advance, Breaker, CashSession, CouponParams, CouponReceipt,
+    Escrow, Facility, FillReceipt, PayoutDestination, RailsConfig, RailsError, SessionParams,
 };
 use solana_account::Account;
 use solana_instruction_error::InstructionError;
@@ -119,6 +119,30 @@ pub fn vault_pda(escrow: &Pubkey) -> Pubkey {
 
 pub fn asset_vault_pda(escrow: &Pubkey) -> Pubkey {
     pda(&[Escrow::ASSET_VAULT_SEED, escrow.as_ref()])
+}
+
+pub fn dest_pda(owner: &Pubkey) -> Pubkey {
+    pda(&[PayoutDestination::SEED, owner.as_ref()])
+}
+
+pub fn facility_pda(curator: &Pubkey, id: u64) -> Pubkey {
+    pda(&[Facility::SEED, curator.as_ref(), &id.to_le_bytes()])
+}
+
+pub fn facility_vault_pda(facility: &Pubkey) -> Pubkey {
+    pda(&[Facility::VAULT_SEED, facility.as_ref()])
+}
+
+pub fn advance_pda(facility: &Pubkey, borrower: &Pubkey) -> Pubkey {
+    pda(&[Advance::SEED, facility.as_ref(), borrower.as_ref()])
+}
+
+pub fn coupon_pda(distributor: &Pubkey, period: u64) -> Pubkey {
+    pda(&[
+        CouponReceipt::SEED,
+        distributor.as_ref(),
+        &period.to_le_bytes(),
+    ])
 }
 
 pub fn receipt_pda(session: &Pubkey, fill_index: u32) -> Pubkey {
@@ -847,6 +871,303 @@ impl Env {
             .data(),
         };
         self.send(&[ix], &[&op, &issuer.key])
+    }
+
+    // ── R3 · payout registry ────────────────────────────────────────────
+
+    pub fn set_registrar(&mut self, registrar: Pubkey) -> Res {
+        let ix = self.admin_ix(
+            &self.authority.pubkey(),
+            ix::SetRegistrar { registrar }.data(),
+        );
+        let a = self.authority.insecure_clone();
+        self.send(&[ix], &[&a])
+    }
+
+    pub fn register_as(
+        &mut self,
+        registrar: &Keypair,
+        owner: &Pubkey,
+        token_account: &Pubkey,
+        expires_at: i64,
+    ) -> Res {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::RegisterDestination {
+                config: self.config,
+                destination: dest_pda(owner),
+                owner: *owner,
+                token_account: *token_account,
+                registrar: registrar.pubkey(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::RegisterDestination {
+                attestation_ref_hash: [0xAB; 32],
+                expires_at,
+            }
+            .data(),
+        };
+        self.send(&[ix], &[registrar])
+    }
+
+    /// Register `p` (its USDC account) with the authority as registrar.
+    pub fn register(&mut self, p: &Party, expires_at: i64) -> Res {
+        let a = self.authority.insecure_clone();
+        self.register_as(&a, &p.key.pubkey(), &p.usdc, expires_at)
+    }
+
+    pub fn renew(&mut self, owner: &Pubkey, token_account: &Pubkey, expires_at: i64) -> Res {
+        let a = self.authority.insecure_clone();
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::RenewDestination {
+                config: self.config,
+                destination: dest_pda(owner),
+                token_account: *token_account,
+                registrar: a.pubkey(),
+            }
+            .to_account_metas(None),
+            data: ix::RenewDestination {
+                attestation_ref_hash: [0xCD; 32],
+                expires_at,
+            }
+            .data(),
+        };
+        self.send(&[ix], &[&a])
+    }
+
+    pub fn revoke_as(&mut self, registrar: &Keypair, owner: &Pubkey) -> Res {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::RevokeDestination {
+                config: self.config,
+                destination: dest_pda(owner),
+                registrar: registrar.pubkey(),
+            }
+            .to_account_metas(None),
+            data: ix::RevokeDestination {}.data(),
+        };
+        self.send(&[ix], &[registrar])
+    }
+
+    pub fn revoke(&mut self, owner: &Pubkey) -> Res {
+        let a = self.authority.insecure_clone();
+        self.revoke_as(&a, owner)
+    }
+
+    pub fn destination(&self, owner: &Pubkey) -> PayoutDestination {
+        self.read(&dest_pda(owner))
+    }
+
+    // ── R3 · facility ───────────────────────────────────────────────────
+
+    pub fn open_facility_as(
+        &mut self,
+        operator: &Keypair,
+        id: u64,
+        rate_bps: u64,
+    ) -> Result<Pubkey, Fail> {
+        let facility = facility_pda(&operator.pubkey(), id);
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::OpenFacility {
+                config: self.config,
+                facility,
+                vault: facility_vault_pda(&facility),
+                usdc_mint: self.mint,
+                operator: operator.pubkey(),
+                token_program: self.tp.id(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::OpenFacility {
+                facility_id: id,
+                rate_bps,
+            }
+            .data(),
+        };
+        self.send(&[ix], &[operator]).map(|_| facility)
+    }
+
+    pub fn open_facility(&mut self, id: u64, rate_bps: u64) -> Pubkey {
+        let a = self.authority.insecure_clone();
+        self.open_facility_as(&a, id, rate_bps)
+            .expect("open_facility")
+    }
+
+    pub fn fund_facility(&mut self, facility: &Pubkey, funder: &Party, amount: u64) -> Res {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::FundFacility {
+                facility: *facility,
+                vault: facility_vault_pda(facility),
+                usdc_mint: self.mint,
+                funder_token: funder.usdc,
+                funder: funder.key.pubkey(),
+                token_program: self.tp.id(),
+            }
+            .to_account_metas(None),
+            data: ix::FundFacility { amount }.data(),
+        };
+        self.send(&[ix], &[&funder.key])
+    }
+
+    /// Advance with explicit destination accounts (for spoofing tests).
+    pub fn advance_to(
+        &mut self,
+        curator: &Keypair,
+        facility: &Pubkey,
+        borrower: &Pubkey,
+        destination: &Pubkey,
+        destination_token: &Pubkey,
+        amount: u64,
+    ) -> Res {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::AdvanceFunds {
+                config: self.config,
+                facility: *facility,
+                advance: advance_pda(facility, borrower),
+                vault: facility_vault_pda(facility),
+                borrower: *borrower,
+                destination: *destination,
+                destination_token: *destination_token,
+                usdc_mint: self.mint,
+                curator: curator.pubkey(),
+                token_program: self.tp.id(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::AdvanceFunds {
+                amount,
+                collateral_ref_hash: [0xC1; 32],
+            }
+            .data(),
+        };
+        self.send(&[ix], &[curator])
+    }
+
+    pub fn advance(&mut self, facility: &Pubkey, borrower: &Party, amount: u64) -> Res {
+        let a = self.authority.insecure_clone();
+        let owner = borrower.key.pubkey();
+        self.advance_to(
+            &a,
+            facility,
+            &owner,
+            &dest_pda(&owner),
+            &borrower.usdc,
+            amount,
+        )
+    }
+
+    pub fn repay(
+        &mut self,
+        facility: &Pubkey,
+        borrower: &Pubkey,
+        payer: &Party,
+        amount: u64,
+    ) -> Res {
+        let curator = self.read::<Facility>(facility).curator;
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::Repay {
+                facility: *facility,
+                advance: advance_pda(facility, borrower),
+                vault: facility_vault_pda(facility),
+                curator,
+                payer_token: payer.usdc,
+                payer: payer.key.pubkey(),
+                usdc_mint: self.mint,
+                token_program: self.tp.id(),
+            }
+            .to_account_metas(None),
+            data: ix::Repay { amount }.data(),
+        };
+        self.send(&[ix], &[&payer.key])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn sweep(
+        &mut self,
+        facility: &Pubkey,
+        borrower: &Pubkey,
+        proceeds: &Party,
+        holder_destination: &Pubkey,
+        holder_token: &Pubkey,
+        amount: u64,
+    ) -> Res {
+        let curator = self.read::<Facility>(facility).curator;
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::SweepProceeds {
+                facility: *facility,
+                advance: advance_pda(facility, borrower),
+                vault: facility_vault_pda(facility),
+                curator,
+                proceeds_token: proceeds.usdc,
+                proceeds_authority: proceeds.key.pubkey(),
+                holder_destination: *holder_destination,
+                holder_token: *holder_token,
+                usdc_mint: self.mint,
+                token_program: self.tp.id(),
+            }
+            .to_account_metas(None),
+            data: ix::SweepProceeds { amount }.data(),
+        };
+        self.send(&[ix], &[&proceeds.key])
+    }
+
+    pub fn facility(&self, facility: &Pubkey) -> Facility {
+        self.read(facility)
+    }
+
+    pub fn advance_state(&self, facility: &Pubkey, borrower: &Pubkey) -> Advance {
+        self.read(&advance_pda(facility, borrower))
+    }
+
+    // ── R3 · coupons ────────────────────────────────────────────────────
+
+    /// Distribute from `source` (a USDC account the authority/operator
+    /// owns) to explicit destination accounts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn distribute(
+        &mut self,
+        source: &Pubkey,
+        period: u64,
+        cash: u64,
+        params: CouponParams,
+        senior: (&Pubkey, &Pubkey),
+        junior: (&Pubkey, &Pubkey),
+    ) -> Res {
+        let a = self.authority.insecure_clone();
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::DistributeCoupon {
+                config: self.config,
+                receipt: coupon_pda(&a.pubkey(), period),
+                source: *source,
+                fee_receiver: self.fee,
+                reserve: self.reserve,
+                senior_destination: *senior.0,
+                senior_token: *senior.1,
+                junior_destination: *junior.0,
+                junior_token: *junior.1,
+                usdc_mint: self.mint,
+                operator: a.pubkey(),
+                token_program: self.tp.id(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::DistributeCoupon {
+                period_id: period,
+                cash,
+                params,
+                period_ref_hash: [0x77; 32],
+            }
+            .data(),
+        };
+        self.send(&[ix], &[&a])
     }
 
     /// Sum of balances over `accounts` — the conservation probe.

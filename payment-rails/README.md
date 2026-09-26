@@ -15,20 +15,23 @@ here.
 - **No PII on-chain.** Every off-chain reference (claim id, advance id, disclosure policy, evidence) is a 32-byte hash.
 - **No Confidential Transfers.** They're incompatible with the permissioned book (05 D2, 09 §2). Privacy comes from commit–reveal plus aggregate-only prints.
 
-## Status: R2 DvP settlement
+## Status: R3 payout router
 
 | Piece | Phase | State |
 |---|---|---|
-| `RailsConfig` (`["rails_config"]`): authority, usdc_mint, fee_receiver, reserve, operator, **fee_bps, reserve_bps**, paused, depeg_breaker | R0–R2 | ✅ |
+| `RailsConfig` (`["rails_config"]`): authority, usdc_mint, fee_receiver, reserve, operator, **registrar**, fee_bps, reserve_bps, paused, depeg_breaker | R0–R3 | ✅ |
 | `initialize_config`, gated to the program's **upgrade authority** | R0 | ✅ |
-| `set_operator`, `set_breaker`, `set_fees` (hard caps: fee ≤ 200 bps, reserve ≤ 200 bps), authority-only and evented | R1/R2 | ✅ |
+| `set_operator`, `set_breaker`, `set_fees` (hard caps: fee ≤ 200 bps, reserve ≤ 200 bps), **`set_registrar`**, authority-only and evented | R1–R3 | ✅ |
 | `CashSession` (`["session", operator, id]`): records at open the deadlines, bond, cap, **asset mint and decimals, fee receiver, fee bps, ROFR authority**, none of which can change later | R1/R2 | ✅ |
 | `open_session`, `mark_revealed`, `fail_session`, **`finish_session`** (operator only; none of them move value) | R1/R2 | ✅ |
 | Bid escrow: `deposit` (cash + bond) · **ask escrow: `deposit_ask`** (asset + USDC bond; separate asset vault) | R1/R2 | ✅ |
 | `forfeit_bond` (either side) · `refund` (bids) · **`refund_ask`** (asks: asset + bond). Anyone can call them, and they're never pausable | R1/R2 | ✅ |
 | **`settle_fill`**: atomic DvP, one fill per instruction. A fill-receipt PDA `["fill", session, index]` makes a replayed fill fail | R2 | ✅ |
 | **`settle_rofr_fill`**: the issuer pays cash from its own account and takes the seller's escrowed asset (AE-P7) | R2 | ✅ |
-| Payout registry, sweep order, facility, coupons | R3 | — |
+| **Payout registry** `PayoutDestination` (`["payout", owner]`): `register_destination`, `renew_destination`, `revoke_destination` (registrar only; attestation hash + expiry, no PII) | R3 | ✅ |
+| **Facility** `Facility` + vault, `Advance` (`["advance", facility, borrower]`): `open_facility`, `fund_facility`, `advance_funds`, `repay` | R3 | ✅ |
+| **`sweep_proceeds`** (QC-P4): claim-sale proceeds repay the facility first; the remainder goes to the holder | R3 | ✅ |
+| **`distribute_coupon`** (TE-P4): one period down the `credit-math` waterfall; one receipt per period | R3 | ✅ |
 
 ### How a fill settles
 
@@ -58,6 +61,46 @@ correctly. It **can't** send value anywhere else:
 
 These rules are pinned down by `operator_cannot_redirect_any_leg`.
 
+### Payout router (R3): "private" payouts
+
+Every R3 payout to a person goes **only** to a wallet in the payout
+registry. That covers facility advances, the holder's share of a sweep, and
+senior and junior coupons.
+
+- **Registry.** A `PayoutDestination` holds `{owner, token_account,
+  attestation_ref_hash, expires_at, active}`. Only the **registrar** writes it;
+  the registrar stands in for the SAS attester until the gate's attestation
+  read is on-chain. The payout account must be the owner's own USDC account.
+  Nothing but a 32-byte hash of the off-chain attestation is stored.
+- **Typed rejections.** A payout checks the destination by hand instead of
+  through an automatic anchor check, so that *every* way of not being
+  allowlisted fails with a typed reason:
+
+  | Situation | Error |
+  |---|---|
+  | never registered · not a registry account · another wallet's entry · a token account other than the registered one | `DestinationNotAllowlisted` |
+  | revoked (checked first; revocation takes precedence) | `DestinationRevoked` |
+  | attestation expired | `DestinationExpired` |
+
+- **Facility** (LF-P1/P2/P6, cash side). The curator (the facility engine's
+  signer; underwriting stays in that engine) opens a fund with its own vault.
+  Anyone can fund it. `advance_funds` pays only a registered destination and
+  is blocked while paused or depegged. `repay` accrues interest with
+  `credit_math::accrue_interest` (simple, floored), applies payment
+  **interest first**, never takes more than is owed, and closes the advance
+  once it's repaid.
+- **Sweep** (QC-P4). Claim-sale proceeds repay the facility **first**
+  (interest, then principal), and the remainder goes to the holder's
+  registered destination. `to_facility + to_holder == proceeds` exactly. If
+  the holder is revoked, a sweep that would pay them anything is refused
+  outright. A sweep that only repays the facility still goes through.
+- **Coupons** (TE-P4). `credit_math::distribute_cash` runs fees → senior
+  coupon → reserve top-up → senior amortization → junior coupon → junior
+  residual. The rails group those lines into fee receiver / reserve / senior
+  / junior and **fail unless they sum exactly to the cash in**. Holder lines
+  that receive anything must be allowlisted. A receipt per
+  `(distributor, period)` makes a replay fail.
+
 ### Escrow rules
 
 | When | Unrevealed escrow | Revealed escrow |
@@ -86,10 +129,10 @@ payment-rails/
 ├── keys/                    program keypair: gitignored, back it up
 ├── programs/payment-rails/src/
 │   ├── lib.rs               entrypoints
-│   ├── state.rs             RailsConfig, CashSession, Escrow, FillReceipt, FillSplit + refund rules
+│   ├── state.rs             config, sessions, escrows, fills, payout registry, facility, coupons
 │   ├── error.rs             RailsError (append-only codes)
 │   ├── events.rs            event families
-│   └── instructions/        initialize_config · admin · session · escrow · settle · token (CPI helpers)
+│   └── instructions/        initialize_config · admin · session · escrow · settle · payout · facility · coupon · token
 └── tests-svm/               LiteSVM integration tests (own workspace + lockfile)
 ```
 

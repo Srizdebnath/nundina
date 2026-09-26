@@ -19,6 +19,20 @@ pub fn process_set_operator(ctx: Context<AdminConfig>, operator: Pubkey) -> Resu
     Ok(())
 }
 
+/// Re-point the payout registrar (R3). Existing destinations stay valid;
+/// only the new key can admit, renew or revoke from now on.
+pub fn process_set_registrar(ctx: Context<AdminConfig>, registrar: Pubkey) -> Result<()> {
+    let authority_key = ctx.accounts.authority.key();
+    let cfg = &mut ctx.accounts.config;
+    cfg.registrar = registrar;
+    emit!(RailsConfigUpdated {
+        change: ConfigChange::Registrar,
+        new_config_hash: cfg.fingerprint(),
+        authority: authority_key,
+    });
+    Ok(())
+}
+
 /// Set the fee and reserve cut (bps of each fill's gross). Bounded by the
 /// hard on-chain ceilings — governance can never exceed them. Sessions
 /// snapshot these at open, so a change never re-prices a live session.

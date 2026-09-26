@@ -21,6 +21,8 @@ pub enum ConfigChange {
     Operator,
     /// Fee / reserve bps changed (appended R2).
     Fees,
+    /// Payout registrar re-pointed (appended R3).
+    Registrar,
 }
 
 /// Emitted on every config write.
@@ -181,4 +183,58 @@ pub struct SessionEvent {
     pub settle_deadline: i64,
     /// Cluster time of the step.
     pub ts: i64,
+}
+
+/// Payout-registry step (R3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+pub enum DestinationAction {
+    /// First admission of a wallet.
+    Registered,
+    /// Attestation refreshed / token account re-pointed; re-activates.
+    Renewed,
+    /// Revoked (block-list precedence).
+    Revoked,
+}
+
+/// Emitted on every payout-registry write (R3). Hash only — no PII.
+#[event]
+#[derive(Debug)]
+pub struct DestinationEvent {
+    /// Step.
+    pub action: DestinationAction,
+    /// Wallet.
+    pub owner: Pubkey,
+    /// Registered USDC token account.
+    pub token_account: Pubkey,
+    /// Attestation reference hash.
+    pub attestation_ref_hash: [u8; 32],
+    /// Expiry.
+    pub expires_at: i64,
+    /// Registrar that performed it.
+    pub registrar: Pubkey,
+}
+
+/// Facility lifecycle step (R3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+pub enum FacilityAction {
+    /// Facility + vault created.
+    Opened,
+    /// Cash added to the vault.
+    Funded,
+    /// An advance was fully repaid and closed.
+    AdvanceClosed,
+}
+
+/// Emitted for facility steps that are not payouts (R3).
+#[event]
+#[derive(Debug)]
+pub struct FacilityEvent {
+    /// Step.
+    pub action: FacilityAction,
+    /// Facility PDA.
+    pub facility: Pubkey,
+    /// Micro-USDC involved (0 for `Opened`).
+    pub amount: u64,
+    /// Signer.
+    pub actor: Pubkey,
 }
