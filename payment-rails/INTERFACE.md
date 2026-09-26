@@ -21,14 +21,17 @@ Status legend: ✅ exists on this branch · 🔜 planned in the named phase · �
 
 ## 2 · From `token/` (NPCS, Token-2022)
 
-The rails never hold NPCS custody accounts or sign for them. The one exception
-is the DvP token leg, which the rails either sequence or delegate (❓ below).
+Since R2, the rails **do** hold the traded asset, but only inside a seller's
+own ask escrow (`["asset_vault", escrow]`, authority = the escrow PDA), and
+only between commit and settlement or refund. `settle_fill` moves it to the
+buyer in the same instruction as the cash (true DvP).
 
 | Expectation | Source | Status |
 |---|---|---|
 | NPCS mint: 6 dp, `DefaultAccountState=Frozen`, `PermanentDelegate`, no transfer hook, no transfer fee, no Confidential Transfers | `token/params.toml` `[extensions]` | ✅ on devnet (`DEPLOYMENTS.md`) |
-| A participant's NPCS account is **thawed by the gate** before any fill that credits it | CG-P1 via Token ACL | ❓ Q2: does the token branch expose thaw before ~2 Oct? |
-| Before merge, rails tests run against a **local mint built from the same extension manifest** | PHASES.md §2 | 🔜 R2 |
+| A buyer's NPCS account is **thawed by the gate** before any fill that credits it (otherwise `settle_fill` fails and nothing moves) | CG-P1 via Token ACL | ❓ Q2: does the token branch expose thaw before ~2 Oct? |
+| **The rails' ask-escrow asset vaults must be thawed too.** With `DefaultAccountState=Frozen` a new vault starts frozen, so `deposit_ask` fails until the gate thaws it. The gate has to recognise rails vault PDAs (owner = an escrow PDA of program `GdWm…Pocn`) as eligible escrow holders, and **never** count them toward the holder cap (they aren't investors) | CG-P1/CG-P4 | ❓ new ask for the gate (R2) |
+| Before merge, rails tests run against a **local mint built from the same extension manifest** | PHASES.md §2 | 🔜 R5. The R2 LiteSVM tests use a plain Token-2022 6-dp asset mint, so frozen-default is **not** exercised yet |
 | The permanent delegate is **never** used by the rails. It's an issuer recovery tool, not a settlement path | SRS §8 | ✅ (the rails have no code path that could) |
 
 ## 3 · From `credit-gate`
@@ -39,7 +42,7 @@ decisions and on a payout registry that only admits attested wallets.
 | Expectation | Used by | Status |
 |---|---|---|
 | `MarketConfig` PDA at `["config", mint]` (gate program `7yRE…Qa9c`), readable to snapshot policy at session open | R2 settle-time re-check | ✅ skeleton on devnet |
-| Final re-check before each fill (attestation still valid, block-list miss, seasoning OK). Rails require this to have **passed in the same transaction** before releasing cash | AE-P8 | 🔜 gate P1 · rails R2 |
+| Final re-check before each fill (attestation still valid, block-list miss, seasoning OK). Rails should require this to have **passed in the same transaction** before releasing cash | AE-P8 | 🔜 gate P1. **`settle_fill` does not verify it yet**; it lands once the gate exposes the check (Q2) |
 | A payout destination is admitted to the rails registry only with a gate-valid owner. The registry stores `{owner, token_account, attestation_ref_hash}`, with the hash only and no raw ids | R3 private payouts | 🔜 R3 |
 | Block-list takes precedence: a blocklisted owner's registry entry is unusable immediately, and refunds to it go to the escrow of record (never to a new address) | CG-P5 | 🔜 R3 |
 
@@ -59,19 +62,26 @@ deadlines, and the **operator** (`RailsConfig.operator`, re-pointable with
 | Reveal outcome: `mark_revealed` for each preimage that checked out, inside the reveal window | Unrevealed escrows become forfeitable at `reveal_end`: `forfeit_bond` (permissionless) or `refund` sends the bond to the reserve (AE-P4) | ✅ R1 |
 | Abort (insufficient commits, no cross ≥ floor): `fail_session` | Every escrow is refundable at once. Bonds are forfeited only if reveals had already closed | ✅ R1 |
 | Nothing, since the rails read their own deadlines | `refund` is **permissionless and never pausable**. It pays only the owner's token account and closes the vault and escrow (AE-P10, AC-11) | ✅ R1 |
-| One fill: `(fill_index, buyer, seller, qty, clearing_price, rofr)` | `settle_fill` releases `qty × price` to the seller, splits fee and reserve, and refunds the excess `(limit − price) × qty` to the buyer. A fill-receipt PDA `["fill", session, fill_index]` makes a replay fail with `FillAlreadySettled` | 🔜 R2 |
-| ROFR exercise at the clearing price | The issuer multisig pays cash through the same `settle_fill` path (`rofr = true`) | 🔜 R2 |
+| Sellers' asks: the seller escrows `qty` asset | `deposit_ask(qty)`: asset plus a USDC bond into the seller's own vaults. Same one-escrow-per-owner rule, so a wallet can't be both buyer and seller in one session | ✅ R2 |
+| One fill: `(fill_index, buyer, seller, qty, price)` | `settle_fill`, atomic DvP. The buyer's escrow pays `gross = ceil(qty × price / 10^dec)`, split into seller / fee / reserve through `credit-math`, and `qty` asset goes seller → buyer. Only revealed escrows on opposite sides, within their escrowed amounts, inside `[reveal_end, settle_deadline)`, and not while paused or depegged. A fill-receipt PDA `["fill", session, fill_index]` is created per fill, so a **replayed index fails** (the account already exists) and pays nothing | ✅ R2 |
+| Settlement done | `finish_session` (operator, after `reveal_end`). The session becomes `Settled`, and buyer excess, unsold asset and bonds are refundable at once, through the same permissionless `refund` / `refund_ask` | ✅ R2 |
+| ROFR exercise at the clearing price | `settle_rofr_fill`. The session's `rofr_authority` (set at open, or disabled) signs and pays cash from its own account, and takes the seller's escrowed asset into its own asset account | ✅ R2 |
 | `ClearingPrint` (engine event) | Nothing. The rails emit `FillSettled` per fill and never an aggregate print | — |
 
-**Trust assumption (R1):** the operator reports reveals. An operator that
-withholds `mark_revealed` can make an honest bidder's bond forfeit. It can
-never move or redirect cash. When the engine is a program, the operator is
+**Trust assumption:** the operator reports reveals and chooses fills. An
+operator that withholds `mark_revealed` can make an honest bidder's bond
+forfeit, and it could apply a wrong clearing (a different matching or price)
+within escrowed amounts. It can **never** move value to anyone outside the
+fill's parties and the fee and reserve accounts recorded at session open. When the engine is a program, the operator is
 its PDA, and this assumption reduces to trusting the audited engine.
 
-**Conservation invariant (R2):** for every fill,
-`to_seller + fee + to_reserve + buyer_refund == escrow_released`, computed in
-u128 through `credit-math` with rounding against the initiator. Otherwise the
-fill fails with `ConservationViolated`.
+**Conservation invariant (R2, ✅):** for every fill,
+`to_seller + fee + to_reserve == gross`, computed in u128 through
+`credit-math`. The buyer pays the ceiling, and fee and reserve are floored,
+so nothing is created or lost. The fill receipt records the split. LiteSVM
+checks that total USDC **and** total asset are unchanged after every fill and
+every refund. `FillAlreadySettled` stays reserved in the error set; a replay
+is actually rejected by the receipt account already existing.
 
 ## 5 · From `queue-claim` / `liquidity-facility`
 
@@ -86,14 +96,15 @@ fill fails with `ConservationViolated`.
 
 - **Config:** `RailsConfig` at `["rails_config"]`. Read `paused` / `depeg_breaker` / `operator`. Sessions snapshot `usdc_mint` and `reserve` at open. ✅
 - **Errors:** `RailsError` codes are append-only and wire-stable (6000+). `credit_math::MathError` maps 1:1 onto the `Math*` variants. ✅
-- **Events:** `RailsConfigUpdated`, `BreakerChanged`, `SessionEvent` and `EscrowEvent` are emitted as of R1. `FillSettled` (R2) and `PayoutMade` (R3) are defined but not emitted yet. Each carries wallets and amounts plus 32-byte hashes, with no PII. Every cash movement emits exactly one event, and `CashSession.total_cash` / `total_bonds` track live escrows, so the R4 ledger can reconcile `sum(open escrows) == vault balances`. ✅
+- **Events:** `RailsConfigUpdated`, `BreakerChanged`, `SessionEvent`, `EscrowEvent` (including `AssetDeposited` / `AssetReturned`) and `FillSettled` (one per fill, with the full split) are emitted. `PayoutMade` (R3) is defined but not emitted yet. Each carries wallets and amounts plus 32-byte hashes, with no PII. Every cash movement emits exactly one event, and `CashSession.total_cash` / `total_bonds` track live escrows, so the R4 ledger can reconcile `sum(open escrows) == vault balances`. ✅
 - **Liveness guarantee:** a user can always get unfilled cash back through a permissionless refund, even when the rails are paused, the breaker is tripped, or the crank is dead. ✅ R1 (LiteSVM: `refunds_work_while_paused_and_depegged`, `third_party_refund_cannot_redirect_cash`)
 
 ## 7 · Authorities (SRS §8)
 
 | Role | Key | Can | Cannot |
 |---|---|---|---|
-| Rails authority | Program upgrade authority at init (Squads 2-of-2 from P1) | Init config; set the operator, pause and depeg breaker (treasury re-pointing: R2) | Move escrowed user cash; block refunds |
-| Operator | Auction-engine signer (the authority until Q1 lands) | Open sessions, report reveals, fail a session | Move or redirect cash |
+| Rails authority | Program upgrade authority at init (Squads 2-of-2 from P1) | Init config; set the operator, pause, depeg breaker, and fees (≤ hard caps) | Move escrowed user cash or asset; block refunds; exceed fee caps |
+| Operator | Auction-engine signer (the authority until Q1 lands) | Open, fail and finish sessions; report reveals; settle fills between escrows | Move or redirect value outside a fill's parties and the recorded fee/reserve accounts |
+| Issuer (ROFR) | `rofr_authority` recorded per session (optional) | Buy a seller's escrowed asset at the fill price with its own cash | Touch any buyer's escrow |
 | Crank | Any keypair | Settle / refund once conditions hold | Anything discretionary |
 | Participants | Wallets | Deposit, refund their own or anyone's escrow after the deadline | Admin functions |

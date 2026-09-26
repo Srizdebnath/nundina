@@ -98,6 +98,29 @@ pub enum RailsError {
     /// Bond destination is not the session's snapshotted reserve.
     #[msg("Account is not the session reserve")]
     ReserveMismatch,
+
+    // ── DvP settlement (R2, appended) ────────────────────────────────────
+    /// Fee or reserve bps above the hard on-chain ceiling.
+    #[msg("Fee or reserve bps above the hard ceiling")]
+    FeeTooHigh,
+    /// Escrow is on the wrong side for this operation.
+    #[msg("Escrow is on the wrong side for this operation")]
+    WrongSide,
+    /// Only revealed escrows can be filled.
+    #[msg("Escrow has not been revealed")]
+    NotRevealed,
+    /// Fill exceeds what the escrow holds (buyer cash or seller asset).
+    #[msg("Fill exceeds the escrowed amount")]
+    InsufficientEscrow,
+    /// Token account/mint is not the session's traded asset.
+    #[msg("Account is not the session asset")]
+    AssetMismatch,
+    /// Signer is not the session's ROFR authority, or ROFR is disabled.
+    #[msg("Signer is not the session ROFR authority")]
+    NotRofrAuthority,
+    /// Account is not the session's snapshotted fee receiver.
+    #[msg("Account is not the session fee receiver")]
+    FeeReceiverMismatch,
 }
 
 impl From<MathError> for RailsError {
@@ -139,5 +162,7 @@ mod tests {
         assert_eq!(u32::from(RailsError::DepegBreakerTripped), 6006);
         assert_eq!(u32::from(RailsError::MathOverAllocation), 6016);
         assert_eq!(u32::from(RailsError::NotOperator), 6017);
+        assert_eq!(u32::from(RailsError::ReserveMismatch), 6026);
+        assert_eq!(u32::from(RailsError::FeeTooHigh), 6027);
     }
 }

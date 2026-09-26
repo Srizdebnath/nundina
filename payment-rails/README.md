@@ -15,37 +15,67 @@ here.
 - **No PII on-chain.** Every off-chain reference (claim id, advance id, disclosure policy, evidence) is a 32-byte hash.
 - **No Confidential Transfers.** They're incompatible with the permissioned book (05 D2, 09 §2). Privacy comes from commit–reveal plus aggregate-only prints.
 
-## Status: R1 escrow vaults
+## Status: R2 DvP settlement
 
 | Piece | Phase | State |
 |---|---|---|
-| `RailsConfig` PDA (`["rails_config"]`): authority, usdc_mint, fee_receiver, reserve, **operator**, paused, depeg_breaker | R0/R1 | ✅ |
-| `initialize_config`, gated to the program's **upgrade authority** so the singleton can't be front-run | R0 | ✅ |
-| `set_operator`, `set_breaker` (pause / depeg), authority-only and evented | R1 | ✅ |
-| `CashSession` (`["session", operator, id]`): snapshotted deadlines, bond, per-investor cap, mint, reserve | R1 | ✅ |
-| `open_session`, `mark_revealed`, `fail_session` (operator only; none of them move cash) | R1 | ✅ |
-| `Escrow` (`["escrow", session, owner]`) + its own vault (`["vault", escrow]`, authority = escrow PDA) | R1 | ✅ |
-| `deposit` (cash + bond), `forfeit_bond` (permissionless), `refund` (**permissionless, never pausable**) | R1 | ✅ |
-| `settle_fill` cash leg, fill receipts, ROFR cash, depeg check at settle | R2 | — |
+| `RailsConfig` (`["rails_config"]`): authority, usdc_mint, fee_receiver, reserve, operator, **fee_bps, reserve_bps**, paused, depeg_breaker | R0–R2 | ✅ |
+| `initialize_config`, gated to the program's **upgrade authority** | R0 | ✅ |
+| `set_operator`, `set_breaker`, `set_fees` (hard caps: fee ≤ 200 bps, reserve ≤ 200 bps), authority-only and evented | R1/R2 | ✅ |
+| `CashSession` (`["session", operator, id]`): records at open the deadlines, bond, cap, **asset mint and decimals, fee receiver, fee bps, ROFR authority**, none of which can change later | R1/R2 | ✅ |
+| `open_session`, `mark_revealed`, `fail_session`, **`finish_session`** (operator only; none of them move value) | R1/R2 | ✅ |
+| Bid escrow: `deposit` (cash + bond) · **ask escrow: `deposit_ask`** (asset + USDC bond; separate asset vault) | R1/R2 | ✅ |
+| `forfeit_bond` (either side) · `refund` (bids) · **`refund_ask`** (asks: asset + bond). Anyone can call them, and they're never pausable | R1/R2 | ✅ |
+| **`settle_fill`**: atomic DvP, one fill per instruction. A fill-receipt PDA `["fill", session, index]` makes a replayed fill fail | R2 | ✅ |
+| **`settle_rofr_fill`**: the issuer pays cash from its own account and takes the seller's escrowed asset (AE-P7) | R2 | ✅ |
 | Payout registry, sweep order, facility, coupons | R3 | — |
 
-### Escrow rules (what the tests pin down)
+### How a fill settles
+
+For a fill of `qty` asset base units at `price` (micro-USDC per whole unit),
+the program computes, using `credit-math`:
+
+```
+gross      = ceil(qty × price / 10^asset_decimals)   ← buyer's escrow pays (rounds against the buyer)
+fee        = floor(gross × fee_bps / 10⁴)            → fee_receiver (recorded at session open)
+to_reserve = floor(gross × reserve_bps / 10⁴)        → reserve (recorded at session open)
+to_seller  = gross − fee − to_reserve                → seller's own USDC account
+qty                                                  → buyer's own asset account (same instruction)
+```
+
+`to_seller + fee + to_reserve == gross` always holds. That's checked
+exhaustively in the unit tests and against real balances in LiteSVM. The
+buyer's unfilled cash and bond come back through `refund` after
+`finish_session` (or at the hard deadline). Unsold asset comes back through
+`refund_ask`.
+
+**What the operator can and can't do.** The operator picks the matching
+(buyer, seller, qty, price) and is trusted to apply the auction's clearing
+correctly. It **can't** send value anywhere else:
+- the seller is paid only into their own account, and the buyer receives only into theirs;
+- fees and the reserve go only to the accounts recorded at session open;
+- a seller is paid only by delivering asset that's already escrowed, and a buyer pays only from their own escrow, capped at what they deposited.
+
+These rules are pinned down by `operator_cannot_redirect_any_leg`.
+
+### Escrow rules
 
 | When | Unrevealed escrow | Revealed escrow |
 |---|---|---|
 | Before `commit_end` | deposits accepted; locked | — |
 | `commit_end` ≤ now < `reveal_end` | locked | locked |
-| now ≥ `reveal_end` (session open) | refundable: **cash → owner, bond → reserve** | locked (awaiting settlement) |
-| now ≥ `settle_deadline` | cash → owner, bond → reserve | refundable: **cash + bond → owner** |
-| Session failed **before** `reveal_end` | cash + bond → owner | cash + bond → owner |
-| Session failed **after** `reveal_end` | cash → owner, bond → reserve | cash + bond → owner |
+| `reveal_end` ≤ now < `settle_deadline` (open) | refundable: **cash/asset → owner, bond → reserve** | locked; **fills settle here** |
+| Session `Settled` (`finish_session`) | cash/asset → owner, bond → reserve | refundable: **remaining cash/asset + bond → owner** |
+| now ≥ `settle_deadline` | cash/asset → owner, bond → reserve | remaining cash/asset + bond → owner |
+| Session failed **before** `reveal_end` | everything → owner | everything → owner |
+| Session failed **after** `reveal_end` | cash/asset → owner, bond → reserve | everything → owner |
 
-- Refunds and forfeits can be called by **anyone**. The cash can only go to a token account owned by the escrow owner, and the bond only to the reserve snapshotted at session open.
-- `paused` and `depeg_breaker` block `open_session` and `deposit`. They **never** block `refund` (AE-P10, AC-11).
-- Tokens donated into a vault can't block its close. Anything above the recorded amounts goes to the owner.
-- A deposit checks that the vault received exactly `cash + bond`, so a lossy mint (for example one with a transfer fee) is refused.
+- Refunds and forfeits can be called by **anyone**. Every destination is fixed to the escrow owner's accounts, or to the reserve recorded at open.
+- `paused` and `depeg_breaker` block `open_session`, deposits and **settlement**. They **never** block refunds (AE-P10, AC-11).
+- Tokens donated into a vault can't block its close. The surplus goes to the owner.
+- Deposits check that the vault received exactly what was recorded, so a lossy mint is refused.
 - The bid stays sealed. The rails only see the cash amount (`qty × limit`), never qty or limit separately.
-- **Trust assumption:** the operator reports reveals. An operator that withholds `mark_revealed` can make an honest bidder's bond forfeit. The operator is set by the config authority and is meant to be the auction engine's signer PDA (PHASES Q1).
+- **Trust assumption:** the operator reports reveals and chooses the fills (see above). It's meant to be the auction engine's signer PDA (PHASES Q1).
 
 ## Layout
 
@@ -56,10 +86,10 @@ payment-rails/
 ├── keys/                    program keypair: gitignored, back it up
 ├── programs/payment-rails/src/
 │   ├── lib.rs               entrypoints
-│   ├── state.rs             RailsConfig, CashSession, Escrow + refund rules
+│   ├── state.rs             RailsConfig, CashSession, Escrow, FillReceipt, FillSplit + refund rules
 │   ├── error.rs             RailsError (append-only codes)
 │   ├── events.rs            event families
-│   └── instructions/        initialize_config · admin · session · escrow
+│   └── instructions/        initialize_config · admin · session · escrow · settle · token (CPI helpers)
 └── tests-svm/               LiteSVM integration tests (own workspace + lockfile)
 ```
 

@@ -1,6 +1,7 @@
 //! Shared LiteSVM harness: loads the real `anchor build` artifact as an
 //! upgradeable program, fabricates a 6-dp settlement mint under either token
-//! program, and wraps every rails instruction.
+//! program plus a Token-2022 asset mint (like NPCS), and wraps every rails
+//! instruction.
 
 #![allow(dead_code)]
 
@@ -11,7 +12,8 @@ use anchor_spl::token_2022::spl_token_2022;
 use litesvm::types::TransactionMetadata;
 use litesvm::LiteSVM;
 use payment_rails::{
-    accounts as acc, instruction as ix, Breaker, CashSession, Escrow, RailsConfig, RailsError,
+    accounts as acc, instruction as ix, Breaker, CashSession, Escrow, FillReceipt, RailsConfig,
+    RailsError, SessionParams,
 };
 use solana_account::Account;
 use solana_instruction_error::InstructionError;
@@ -31,7 +33,7 @@ pub const MAX_CASH: u64 = 1_000_000_000; // 1,000 USDC
 
 const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 
-/// Which token program owns the settlement mint.
+/// Which token program owns a mint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tp {
     Spl,
@@ -65,11 +67,35 @@ impl Fail {
 
 pub type Res = Result<TransactionMetadata, Fail>;
 
+/// A participant: wallet + USDC account + asset account.
+pub struct Party {
+    pub key: Keypair,
+    pub usdc: Pubkey,
+    pub asset: Pubkey,
+}
+
+/// Account set for one `settle_fill`, defaulted from the parties; tests
+/// override fields to attempt spoofing.
+#[derive(Clone, Copy)]
+pub struct Fill {
+    pub session: Pubkey,
+    pub buyer_owner: Pubkey,
+    pub seller_owner: Pubkey,
+    pub seller_usdc: Pubkey,
+    pub buyer_asset: Pubkey,
+    pub fee_receiver: Pubkey,
+    pub reserve: Pubkey,
+}
+
 pub struct Env {
     pub svm: LiteSVM,
+    /// Token program of the settlement mint (varies per test run).
     pub tp: Tp,
+    /// Token program of the traded asset: always Token-2022, like NPCS.
+    pub asset_tp: Tp,
     pub authority: Keypair,
     pub mint: Pubkey,
+    pub asset_mint: Pubkey,
     pub fee: Pubkey,
     pub reserve: Pubkey,
     pub config: Pubkey,
@@ -89,6 +115,18 @@ pub fn escrow_pda(session: &Pubkey, owner: &Pubkey) -> Pubkey {
 
 pub fn vault_pda(escrow: &Pubkey) -> Pubkey {
     pda(&[Escrow::VAULT_SEED, escrow.as_ref()])
+}
+
+pub fn asset_vault_pda(escrow: &Pubkey) -> Pubkey {
+    pda(&[Escrow::ASSET_VAULT_SEED, escrow.as_ref()])
+}
+
+pub fn receipt_pda(session: &Pubkey, fill_index: u32) -> Pubkey {
+    pda(&[
+        FillReceipt::SEED,
+        session.as_ref(),
+        &fill_index.to_le_bytes(),
+    ])
 }
 
 impl Env {
@@ -116,17 +154,21 @@ impl Env {
         let mut env = Env {
             svm,
             tp,
+            asset_tp: Tp::T22,
             authority,
             mint: Pubkey::default(),
+            asset_mint: Pubkey::default(),
             fee: Pubkey::default(),
             reserve: Pubkey::default(),
             config: pda(&[RailsConfig::SEED]),
         };
         env.set_time(T0);
         env.mint = env.new_mint(6);
+        env.asset_mint = env.new_mint_in(Tp::T22, 6);
         let auth = env.authority.pubkey();
-        env.fee = env.token_account(&env.mint.clone(), &auth, 0);
-        env.reserve = env.token_account(&env.mint.clone(), &auth, 0);
+        let mint = env.mint;
+        env.fee = env.token_account(&mint, &auth, 0);
+        env.reserve = env.token_account(&mint, &auth, 0);
 
         let ix = Instruction {
             program_id: PROGRAM_ID,
@@ -193,6 +235,10 @@ impl Env {
     // ── token fabrication (state written directly; programs are real) ───
 
     pub fn new_mint(&mut self, decimals: u8) -> Pubkey {
+        self.new_mint_in(self.tp, decimals)
+    }
+
+    pub fn new_mint_in(&mut self, program: Tp, decimals: u8) -> Pubkey {
         let key = Pubkey::new_unique();
         let mut data = vec![0u8; spl_token_2022::state::Mint::LEN];
         spl_token_2022::state::Mint {
@@ -203,11 +249,28 @@ impl Env {
             freeze_authority: None.into(),
         }
         .pack_into_slice(&mut data);
-        self.put(key, data);
+        self.put(key, data, program);
         key
     }
 
+    /// Settlement-mint (USDC) account.
     pub fn token_account(&mut self, mint: &Pubkey, owner: &Pubkey, amount: u64) -> Pubkey {
+        self.token_account_in(self.tp, mint, owner, amount)
+    }
+
+    /// Asset (Token-2022) account.
+    pub fn asset_account(&mut self, owner: &Pubkey, amount: u64) -> Pubkey {
+        let mint = self.asset_mint;
+        self.token_account_in(self.asset_tp, &mint, owner, amount)
+    }
+
+    pub fn token_account_in(
+        &mut self,
+        program: Tp,
+        mint: &Pubkey,
+        owner: &Pubkey,
+        amount: u64,
+    ) -> Pubkey {
         let key = Pubkey::new_unique();
         let mut data = vec![0u8; spl_token_2022::state::Account::LEN];
         spl_token_2022::state::Account {
@@ -221,11 +284,11 @@ impl Env {
             close_authority: None.into(),
         }
         .pack_into_slice(&mut data);
-        self.put(key, data);
+        self.put(key, data, program);
         key
     }
 
-    fn put(&mut self, key: Pubkey, data: Vec<u8>) {
+    fn put(&mut self, key: Pubkey, data: Vec<u8>, program: Tp) {
         let lamports = self.svm.minimum_balance_for_rent_exemption(data.len());
         self.svm
             .set_account(
@@ -233,7 +296,7 @@ impl Env {
                 Account {
                     lamports,
                     data,
-                    owner: self.tp.id(),
+                    owner: program.id(),
                     executable: false,
                     rent_epoch: 0,
                 },
@@ -253,7 +316,7 @@ impl Env {
         }
     }
 
-    /// Plain token transfer by `from_owner` (used to grief vaults).
+    /// Plain settlement-mint transfer by `owner` (used to grief vaults).
     pub fn raw_transfer(
         &mut self,
         from: &Pubkey,
@@ -275,6 +338,28 @@ impl Env {
         self.send(&[ix], &[owner])
     }
 
+    /// Plain asset transfer by `owner` (used to grief asset vaults).
+    pub fn raw_asset_transfer(
+        &mut self,
+        from: &Pubkey,
+        to: &Pubkey,
+        owner: &Keypair,
+        amount: u64,
+    ) -> Res {
+        let ix = spl_token_2022::instruction::transfer_checked(
+            &self.asset_tp.id(),
+            from,
+            &self.asset_mint,
+            to,
+            &owner.pubkey(),
+            &[],
+            amount,
+            6,
+        )
+        .unwrap();
+        self.send(&[ix], &[owner])
+    }
+
     // ── account readers ─────────────────────────────────────────────────
 
     pub fn read<T: AccountDeserialize>(&self, key: &Pubkey) -> T {
@@ -286,43 +371,65 @@ impl Env {
         self.read(key)
     }
 
+    pub fn escrow(&self, session: &Pubkey, owner: &Pubkey) -> Escrow {
+        self.read(&escrow_pda(session, owner))
+    }
+
     pub fn config(&self) -> RailsConfig {
         self.read(&self.config)
     }
 
-    // ── rails instructions ──────────────────────────────────────────────
+    pub fn receipt(&self, session: &Pubkey, fill_index: u32) -> FillReceipt {
+        self.read(&receipt_pda(session, fill_index))
+    }
 
-    pub fn set_breaker(&mut self, breaker: Breaker, engaged: bool) -> Res {
-        let ix = Instruction {
+    // ── admin ───────────────────────────────────────────────────────────
+
+    fn admin_ix(&self, signer: &Pubkey, data: Vec<u8>) -> Instruction {
+        Instruction {
             program_id: PROGRAM_ID,
             accounts: acc::AdminConfig {
                 config: self.config,
-                authority: self.authority.pubkey(),
+                authority: *signer,
             }
             .to_account_metas(None),
-            data: ix::SetBreaker {
-                breaker,
-                engaged,
-                evidence_hash: [7; 32],
-            }
-            .data(),
-        };
+            data,
+        }
+    }
+
+    pub fn set_breaker(&mut self, breaker: Breaker, engaged: bool) -> Res {
+        let data = ix::SetBreaker {
+            breaker,
+            engaged,
+            evidence_hash: [7; 32],
+        }
+        .data();
+        let ix = self.admin_ix(&self.authority.pubkey(), data);
         let a = self.authority.insecure_clone();
         self.send(&[ix], &[&a])
     }
 
     pub fn set_operator_as(&mut self, signer: &Keypair, operator: Pubkey) -> Res {
-        let ix = Instruction {
-            program_id: PROGRAM_ID,
-            accounts: acc::AdminConfig {
-                config: self.config,
-                authority: signer.pubkey(),
-            }
-            .to_account_metas(None),
-            data: ix::SetOperator { operator }.data(),
-        };
+        let ix = self.admin_ix(&signer.pubkey(), ix::SetOperator { operator }.data());
         self.send(&[ix], &[signer])
     }
+
+    pub fn set_fees_as(&mut self, signer: &Keypair, fee_bps: u16, reserve_bps: u16) -> Res {
+        let data = ix::SetFees {
+            fee_bps,
+            reserve_bps,
+        }
+        .data();
+        let ix = self.admin_ix(&signer.pubkey(), data);
+        self.send(&[ix], &[signer])
+    }
+
+    pub fn set_fees(&mut self, fee_bps: u16, reserve_bps: u16) -> Res {
+        let a = self.authority.insecure_clone();
+        self.set_fees_as(&a, fee_bps, reserve_bps)
+    }
+
+    // ── sessions ────────────────────────────────────────────────────────
 
     pub fn open_session_as(
         &mut self,
@@ -332,23 +439,39 @@ impl Env {
         bond: u64,
         max_cash: u64,
     ) -> Result<Pubkey, Fail> {
+        let asset = self.asset_mint;
+        let params = SessionParams {
+            commit_end: schedule.0,
+            reveal_end: schedule.1,
+            settle_deadline: schedule.2,
+            bond_amount: bond,
+            max_cash,
+            rofr_authority: Pubkey::default(),
+        };
+        self.open_session_full(operator, id, params, asset)
+    }
+
+    pub fn open_session_full(
+        &mut self,
+        operator: &Keypair,
+        id: u64,
+        params: SessionParams,
+        asset_mint: Pubkey,
+    ) -> Result<Pubkey, Fail> {
         let session = session_pda(&operator.pubkey(), id);
         let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts: acc::OpenSession {
                 config: self.config,
                 session,
+                asset_mint,
                 operator: operator.pubkey(),
                 system_program: anchor_lang::system_program::ID,
             }
             .to_account_metas(None),
             data: ix::OpenSession {
                 session_id: id,
-                commit_end: schedule.0,
-                reveal_end: schedule.1,
-                settle_deadline: schedule.2,
-                bond_amount: bond,
-                max_cash,
+                params,
             }
             .data(),
         };
@@ -368,6 +491,89 @@ impl Env {
         .expect("open_session")
     }
 
+    /// Standard session with an issuer ROFR authority.
+    pub fn open_session_with_rofr(&mut self, id: u64, rofr_authority: Pubkey) -> Pubkey {
+        let a = self.authority.insecure_clone();
+        let params = SessionParams {
+            commit_end: COMMIT_END,
+            reveal_end: REVEAL_END,
+            settle_deadline: SETTLE_DEADLINE,
+            bond_amount: BOND,
+            max_cash: MAX_CASH,
+            rofr_authority,
+        };
+        let asset = self.asset_mint;
+        self.open_session_full(&a, id, params, asset)
+            .expect("open_session")
+    }
+
+    fn operator_session_ix(
+        &self,
+        session: &Pubkey,
+        operator: &Pubkey,
+        data: Vec<u8>,
+    ) -> Instruction {
+        Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::OperatorSession {
+                session: *session,
+                operator: *operator,
+            }
+            .to_account_metas(None),
+            data,
+        }
+    }
+
+    pub fn fail_session_as(&mut self, operator: &Keypair, session: &Pubkey) -> Res {
+        let ix = self.operator_session_ix(session, &operator.pubkey(), ix::FailSession {}.data());
+        self.send(&[ix], &[operator])
+    }
+
+    pub fn finish_session_as(&mut self, operator: &Keypair, session: &Pubkey) -> Res {
+        let ix = self.operator_session_ix(session, &operator.pubkey(), ix::FinishSession {}.data());
+        self.send(&[ix], &[operator])
+    }
+
+    pub fn finish_session(&mut self, session: &Pubkey) -> Res {
+        let a = self.authority.insecure_clone();
+        self.finish_session_as(&a, session)
+    }
+
+    fn operator_escrow_ix(
+        &self,
+        session: &Pubkey,
+        owner: &Pubkey,
+        operator: &Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::OperatorEscrow {
+                session: *session,
+                escrow: escrow_pda(session, owner),
+                operator: *operator,
+            }
+            .to_account_metas(None),
+            data: ix::MarkRevealed {}.data(),
+        }
+    }
+
+    pub fn mark_revealed_as(
+        &mut self,
+        operator: &Keypair,
+        session: &Pubkey,
+        owner: &Pubkey,
+    ) -> Res {
+        let ix = self.operator_escrow_ix(session, owner, &operator.pubkey());
+        self.send(&[ix], &[operator])
+    }
+
+    pub fn mark_revealed(&mut self, session: &Pubkey, owner: &Pubkey) -> Res {
+        let a = self.authority.insecure_clone();
+        self.mark_revealed_as(&a, session, owner)
+    }
+
+    // ── participants ────────────────────────────────────────────────────
+
     /// A bidder with `usdc` micro-USDC in a fresh token account.
     pub fn bidder(&mut self, usdc: u64) -> (Keypair, Pubkey) {
         let k = self.funded();
@@ -375,6 +581,19 @@ impl Env {
         let t = self.token_account(&mint, &k.pubkey(), usdc);
         (k, t)
     }
+
+    /// A participant with USDC and asset accounts.
+    pub fn party(&mut self, usdc: u64, asset: u64) -> Party {
+        let (key, usdc_acct) = self.bidder(usdc);
+        let asset_acct = self.asset_account(&key.pubkey(), asset);
+        Party {
+            key,
+            usdc: usdc_acct,
+            asset: asset_acct,
+        }
+    }
+
+    // ── escrow ──────────────────────────────────────────────────────────
 
     pub fn deposit_with_mint(
         &mut self,
@@ -415,50 +634,29 @@ impl Env {
         self.deposit_with_mint(session, owner, owner_token, mint, cash)
     }
 
-    fn operator_escrow_ix(
-        &self,
-        session: &Pubkey,
-        owner: &Pubkey,
-        operator: &Pubkey,
-    ) -> Instruction {
-        Instruction {
-            program_id: PROGRAM_ID,
-            accounts: acc::OperatorEscrow {
-                session: *session,
-                escrow: escrow_pda(session, owner),
-                operator: *operator,
-            }
-            .to_account_metas(None),
-            data: ix::MarkRevealed {}.data(),
-        }
-    }
-
-    pub fn mark_revealed_as(
-        &mut self,
-        operator: &Keypair,
-        session: &Pubkey,
-        owner: &Pubkey,
-    ) -> Res {
-        let ix = self.operator_escrow_ix(session, owner, &operator.pubkey());
-        self.send(&[ix], &[operator])
-    }
-
-    pub fn mark_revealed(&mut self, session: &Pubkey, owner: &Pubkey) -> Res {
-        let a = self.authority.insecure_clone();
-        self.mark_revealed_as(&a, session, owner)
-    }
-
-    pub fn fail_session_as(&mut self, operator: &Keypair, session: &Pubkey) -> Res {
+    pub fn deposit_ask(&mut self, session: &Pubkey, who: &Party, qty: u64) -> Res {
+        let escrow = escrow_pda(session, &who.key.pubkey());
         let ix = Instruction {
             program_id: PROGRAM_ID,
-            accounts: acc::FailSession {
+            accounts: acc::DepositAsk {
+                config: self.config,
                 session: *session,
-                operator: operator.pubkey(),
+                escrow,
+                vault: vault_pda(&escrow),
+                asset_vault: asset_vault_pda(&escrow),
+                usdc_mint: self.mint,
+                asset_mint: self.asset_mint,
+                owner_usdc: who.usdc,
+                owner_asset: who.asset,
+                owner: who.key.pubkey(),
+                token_program: self.tp.id(),
+                asset_token_program: self.asset_tp.id(),
+                system_program: anchor_lang::system_program::ID,
             }
             .to_account_metas(None),
-            data: ix::FailSession {}.data(),
+            data: ix::DepositAsk { qty }.data(),
         };
-        self.send(&[ix], &[operator])
+        self.send(&[ix], &[&who.key])
     }
 
     pub fn forfeit_bond(&mut self, caller: &Keypair, session: &Pubkey, owner: &Pubkey) -> Res {
@@ -518,6 +716,137 @@ impl Env {
     ) -> Res {
         let reserve = self.reserve;
         self.refund_to(caller, session, owner, owner_token, &reserve)
+    }
+
+    pub fn refund_ask(&mut self, caller: &Keypair, session: &Pubkey, who: &Party) -> Res {
+        let escrow = escrow_pda(session, &who.key.pubkey());
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::RefundAsk {
+                caller: caller.pubkey(),
+                session: *session,
+                escrow,
+                vault: vault_pda(&escrow),
+                asset_vault: asset_vault_pda(&escrow),
+                owner: who.key.pubkey(),
+                owner_usdc: who.usdc,
+                owner_asset: who.asset,
+                reserve: self.reserve,
+                usdc_mint: self.mint,
+                asset_mint: self.asset_mint,
+                token_program: self.tp.id(),
+                asset_token_program: self.asset_tp.id(),
+            }
+            .to_account_metas(None),
+            data: ix::RefundAsk {}.data(),
+        };
+        self.send(&[ix], &[caller])
+    }
+
+    // ── settlement ──────────────────────────────────────────────────────
+
+    pub fn fill(&self, session: &Pubkey, buyer: &Party, seller: &Party) -> Fill {
+        Fill {
+            session: *session,
+            buyer_owner: buyer.key.pubkey(),
+            seller_owner: seller.key.pubkey(),
+            seller_usdc: seller.usdc,
+            buyer_asset: buyer.asset,
+            fee_receiver: self.fee,
+            reserve: self.reserve,
+        }
+    }
+
+    pub fn settle_as(
+        &mut self,
+        operator: &Keypair,
+        f: &Fill,
+        fill_index: u32,
+        qty: u64,
+        price: u64,
+    ) -> Res {
+        let buyer_escrow = escrow_pda(&f.session, &f.buyer_owner);
+        let seller_escrow = escrow_pda(&f.session, &f.seller_owner);
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::SettleFill {
+                config: self.config,
+                session: f.session,
+                operator: operator.pubkey(),
+                receipt: receipt_pda(&f.session, fill_index),
+                buyer_escrow,
+                buyer_vault: vault_pda(&buyer_escrow),
+                seller_escrow,
+                seller_asset_vault: asset_vault_pda(&seller_escrow),
+                seller_usdc: f.seller_usdc,
+                buyer_asset: f.buyer_asset,
+                fee_receiver: f.fee_receiver,
+                reserve: f.reserve,
+                usdc_mint: self.mint,
+                asset_mint: self.asset_mint,
+                token_program: self.tp.id(),
+                asset_token_program: self.asset_tp.id(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::SettleFill {
+                fill_index,
+                qty,
+                price,
+                disclosure_hash: [9; 32],
+            }
+            .data(),
+        };
+        self.send(&[ix], &[operator])
+    }
+
+    pub fn settle(&mut self, f: &Fill, fill_index: u32, qty: u64, price: u64) -> Res {
+        let a = self.authority.insecure_clone();
+        self.settle_as(&a, f, fill_index, qty, price)
+    }
+
+    pub fn settle_rofr(
+        &mut self,
+        issuer: &Party,
+        session: &Pubkey,
+        seller: &Party,
+        fill_index: u32,
+        qty: u64,
+        price: u64,
+    ) -> Res {
+        let seller_escrow = escrow_pda(session, &seller.key.pubkey());
+        let op = self.authority.insecure_clone();
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::SettleRofrFill {
+                config: self.config,
+                session: *session,
+                operator: op.pubkey(),
+                issuer: issuer.key.pubkey(),
+                receipt: receipt_pda(session, fill_index),
+                seller_escrow,
+                seller_asset_vault: asset_vault_pda(&seller_escrow),
+                seller_usdc: seller.usdc,
+                issuer_usdc: issuer.usdc,
+                issuer_asset: issuer.asset,
+                fee_receiver: self.fee,
+                reserve: self.reserve,
+                usdc_mint: self.mint,
+                asset_mint: self.asset_mint,
+                token_program: self.tp.id(),
+                asset_token_program: self.asset_tp.id(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::SettleRofrFill {
+                fill_index,
+                qty,
+                price,
+                disclosure_hash: [9; 32],
+            }
+            .data(),
+        };
+        self.send(&[ix], &[&op, &issuer.key])
     }
 
     /// Sum of balances over `accounts` — the conservation probe.
