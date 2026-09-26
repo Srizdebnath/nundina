@@ -658,9 +658,46 @@ impl Env {
         self.deposit_with_mint(session, owner, owner_token, mint, cash)
     }
 
+    pub fn open_asset_vault_ix(&self, session: &Pubkey, owner: &Pubkey) -> Instruction {
+        let escrow = escrow_pda(session, owner);
+        Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::OpenAssetVault {
+                config: self.config,
+                session: *session,
+                escrow,
+                asset_vault: asset_vault_pda(&escrow),
+                asset_mint: self.asset_mint,
+                owner: *owner,
+                asset_token_program: self.asset_tp.id(),
+                system_program: anchor_lang::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: ix::OpenAssetVault {}.data(),
+        }
+    }
+
+    pub fn open_asset_vault(&mut self, session: &Pubkey, who: &Party) -> Res {
+        let ix = self.open_asset_vault_ix(session, &who.key.pubkey());
+        self.send(&[ix], &[&who.key])
+    }
+
+    /// Open the asset vault and deposit in one transaction (unfrozen mint).
     pub fn deposit_ask(&mut self, session: &Pubkey, who: &Party, qty: u64) -> Res {
+        let open = self.open_asset_vault_ix(session, &who.key.pubkey());
+        let deposit = self.deposit_ask_ix(session, who, qty);
+        self.send(&[open, deposit], &[&who.key])
+    }
+
+    /// `deposit_ask` alone, into a vault opened earlier.
+    pub fn deposit_ask_only(&mut self, session: &Pubkey, who: &Party, qty: u64) -> Res {
+        let ix = self.deposit_ask_ix(session, who, qty);
+        self.send(&[ix], &[&who.key])
+    }
+
+    fn deposit_ask_ix(&self, session: &Pubkey, who: &Party, qty: u64) -> Instruction {
         let escrow = escrow_pda(session, &who.key.pubkey());
-        let ix = Instruction {
+        Instruction {
             program_id: PROGRAM_ID,
             accounts: acc::DepositAsk {
                 config: self.config,
@@ -679,8 +716,7 @@ impl Env {
             }
             .to_account_metas(None),
             data: ix::DepositAsk { qty }.data(),
-        };
-        self.send(&[ix], &[&who.key])
+        }
     }
 
     pub fn forfeit_bond(&mut self, caller: &Keypair, session: &Pubkey, owner: &Pubkey) -> Res {

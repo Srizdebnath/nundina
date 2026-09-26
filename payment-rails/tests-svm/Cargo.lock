@@ -297,8 +297,11 @@ checksum = "2f698a45d424351ff695df413adcb3fa603f2c791a0b4a937ebcd2e93a052c77"
 dependencies = [
  "anchor-lang",
  "spl-associated-token-account-interface",
+ "spl-pod",
  "spl-token-2022-interface",
+ "spl-token-group-interface",
  "spl-token-interface",
+ "spl-token-metadata-interface",
 ]
 
 [[package]]
