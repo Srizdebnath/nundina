@@ -37,7 +37,7 @@ NUNDINA never moves the security off Solana; **only cash moves** (HACKATHON.md �
 | **R2 DvP cash leg** | 29 Sep–2 Oct | `settle_fill` (one fill per ix, fill-receipt PDA for idempotency), seller payout, fee/reserve split, buyer excess refund, ROFR cash path, depeg breaker flag | Settlement conserves every micro-USDC; replayed fill rejected; AC-3 cash leg green locally |
 | **R3 Payout router ("private")** | 2–4 Oct | Payout-destination registry (attested wallets only, hashed refs), sweep order (facility → holder), facility advance/repay, coupon distribution via `credit-math` | Non-allowlisted destination rejected with typed reason; waterfall sums exactly to cash in |
 | **R4 Crank + ledger (TS)** | 4–6 Oct | Settlement/refund crank (idempotent, retry + priority fees), reconciliation (escrow balances == open obligations), evidence export for cash events | Kill-the-crank drill: refunds complete via any participant |
-| **R5 Devnet + integration** | 6–8 Oct | Deploy to devnet, E2E with devnet USDC; after friend's merge, swap test mint → NPCS | Demo script runs: commit → settle → payout on devnet |
+| **R5 Devnet + integration** ✅ | 6–8 Oct | Deploy to devnet, E2E with devnet USDC; after friend's merge, swap test mint → NPCS | Demo script runs: commit → settle → payout on devnet — **met** (DEPLOYMENTS.md). NPCS leg validated against a manifest mint; live NPCS swap waits on the gate thaw |
 | **R6 Tempo payout (stretch)** | 8–11 Oct | USDC payout to a Tempo address (cash only; the security never leaves Solana) | Only if R5 is green **and** Colosseum confirms multi-track eligibility |
 | **Freeze** | 11–12 Oct | Docs, demo recording support, merge PR | — |
 

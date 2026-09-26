@@ -199,8 +199,10 @@ async function main(): Promise<void> {
     { index: 1, buyer: Y.address, seller: H.address, qty: FILLS.Y, price: PRICE, sellerUsdc: hProceeds, buyerAsset: yClaim },
   ]);
   for (const f of fills) {
-    if (f.result !== "sent") throw new Error(`${f.target}: ${f.result} ${f.detail ?? ""}`);
-    record(rpcUrl, `3 · SETTLE (DvP): ${f.target}`, f.signature);
+    // "already-done": the send landed but its confirmation was lost and the
+    // retry hit the fill receipt — idempotency working, not a failure.
+    if (f.result !== "sent" && f.result !== "already-done") throw new Error(`${f.target}: ${f.result} ${f.detail ?? ""}`);
+    record(rpcUrl, `3 · SETTLE (DvP): ${f.target}${f.result === "already-done" ? " (landed; confirmation lost, receipt verified)" : ""}`, f.signature);
   }
 
   // Exact sale proceeds, captured before refunds (H's bond refund may land
