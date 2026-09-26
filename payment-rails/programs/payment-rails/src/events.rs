@@ -1,5 +1,6 @@
-//! Event families. Every rails state change emits exactly one event from
-//! these families; the R4 ledger reconciles escrow balances against them.
+//! Event families. Every cash movement and every state change emits exactly
+//! one event from these families (a refund that also forfeits a bond emits
+//! one per movement); the R4 ledger reconciles escrow balances against them.
 //!
 //! Privacy rule for every event: wallets and amounts only (both are already
 //! public in the token transfer itself). Anything that identifies a person
@@ -16,6 +17,8 @@ pub enum ConfigChange {
     Treasury,
     /// Authority handed over.
     Authority,
+    /// Session operator re-pointed (appended R1).
+    Operator,
 }
 
 /// Emitted on every config write.
@@ -39,7 +42,7 @@ pub enum Breaker {
     Depeg,
 }
 
-/// Emitted when `paused` or `depeg_breaker` flips (R2).
+/// Emitted when `paused` or `depeg_breaker` flips (`set_breaker`).
 #[event]
 #[derive(Debug)]
 pub struct BreakerChanged {
@@ -64,6 +67,8 @@ pub enum EscrowAction {
     BondForfeited,
     /// Timeout / failed-session refund to the depositor (AE-P10, AC-11).
     Refunded,
+    /// Operator reported the escrow's bid revealed (no cash moves; amount 0).
+    Revealed,
 }
 
 /// Emitted for every escrow/bond movement (R1).
@@ -144,4 +149,29 @@ pub struct PayoutMade {
     pub amount: u64,
     /// Hash of the off-chain reference (claim id, advance id, period).
     pub reference_hash: [u8; 32],
+}
+
+/// Cash-session lifecycle step (R1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+pub enum SessionAction {
+    /// Session opened with snapshotted deadlines.
+    Opened,
+    /// Operator aborted the session; all escrows refundable.
+    Failed,
+}
+
+/// Emitted when a cash session opens or fails (R1).
+#[event]
+#[derive(Debug)]
+pub struct SessionEvent {
+    /// Lifecycle step.
+    pub action: SessionAction,
+    /// Session PDA.
+    pub session: Pubkey,
+    /// Operator.
+    pub operator: Pubkey,
+    /// Hard refund deadline (AE-P10).
+    pub settle_deadline: i64,
+    /// Cluster time of the step.
+    pub ts: i64,
 }

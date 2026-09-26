@@ -9,6 +9,8 @@ members = [
     # R0: USDC money layer skeleton (SRS 08 §4.2 AE-P3/P8/P10, §4.4, §4.5).
     "programs/payment-rails",
 ]
+# Own workspace + lockfile so litesvm never re-resolves SBF build deps.
+exclude = ["tests-svm"]
 
 [workspace.package]
 edition = "2021"
