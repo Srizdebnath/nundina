@@ -12,12 +12,13 @@
 //! 05 D2 / 09 §2).
 //!
 //! Built so far: R0 — the governed `RailsConfig` (upgrade-authority init,
-//! typed errors, event families); R1 — cash sessions and per-escrow vaults:
-//! deposit (cash + forfeitable bond), operator-reported reveals, bond
-//! forfeit to the reserve, and a permissionless refund that no pause,
-//! breaker or dead crank can block. The DvP cash leg (R2) and the payout
-//! router (R3) land on this frame. No `unsafe`; the only CPIs are SPL
-//! Token / Token-2022 `transfer_checked` and `close_account`.
+//! typed errors, event families); R1 — cash sessions and per-escrow vaults
+//! with permissionless, never-pausable refunds; R2 — seller asset escrow and
+//! atomic DvP settlement (`settle_fill`, one fill per instruction,
+//! idempotent via a fill-receipt PDA), the fee/reserve split through
+//! `credit-math`, the issuer ROFR cash path and depeg-breaker halting. The
+//! payout router (R3) lands on this frame. No `unsafe`; the only CPIs are
+//! SPL Token / Token-2022 `transfer_checked` and `close_account`.
 
 #![deny(unsafe_code)]
 // missing_docs activates once the hand-written account surface dominates;
@@ -73,30 +74,28 @@ pub mod payment_rails {
         instructions::admin::process_set_breaker(ctx, breaker, engaged, evidence_hash)
     }
 
-    /// AE-P1/P3: open a cash session with snapshotted deadlines (operator).
+    /// Set fee / reserve bps within the hard ceilings (authority; evented).
+    pub fn set_fees(ctx: Context<AdminConfig>, fee_bps: u16, reserve_bps: u16) -> Result<()> {
+        instructions::admin::process_set_fees(ctx, fee_bps, reserve_bps)
+    }
+
+    /// AE-P1/P3: open a cash session with snapshotted parameters (operator).
     pub fn open_session(
         ctx: Context<OpenSession>,
         session_id: u64,
-        commit_end: i64,
-        reveal_end: i64,
-        settle_deadline: i64,
-        bond_amount: u64,
-        max_cash: u64,
+        params: SessionParams,
     ) -> Result<()> {
-        instructions::session::process_open_session(
-            ctx,
-            session_id,
-            commit_end,
-            reveal_end,
-            settle_deadline,
-            bond_amount,
-            max_cash,
-        )
+        instructions::session::process_open_session(ctx, session_id, params)
     }
 
     /// AE-P3: lock cash + bond in a per-escrow vault (depositor signs).
     pub fn deposit(ctx: Context<Deposit>, cash: u64) -> Result<()> {
         instructions::escrow::process_deposit(ctx, cash)
+    }
+
+    /// AE-P3 sell side: lock asset + bond in per-escrow vaults (seller signs).
+    pub fn deposit_ask(ctx: Context<DepositAsk>, qty: u64) -> Result<()> {
+        instructions::escrow::process_deposit_ask(ctx, qty)
     }
 
     /// AE-P4: operator reports a successful reveal.
@@ -105,8 +104,35 @@ pub mod payment_rails {
     }
 
     /// AE-P2/P4: operator aborts the session; all escrows refundable.
-    pub fn fail_session(ctx: Context<FailSession>) -> Result<()> {
+    pub fn fail_session(ctx: Context<OperatorSession>) -> Result<()> {
         instructions::session::process_fail_session(ctx)
+    }
+
+    /// R2: operator closes settlement; remaining escrow refundable at once.
+    pub fn finish_session(ctx: Context<OperatorSession>) -> Result<()> {
+        instructions::session::process_finish_session(ctx)
+    }
+
+    /// AE-P8: one atomic DvP fill between escrows (operator; idempotent).
+    pub fn settle_fill(
+        ctx: Context<SettleFill>,
+        fill_index: u32,
+        qty: u64,
+        price: u64,
+        disclosure_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::settle::process_settle_fill(ctx, fill_index, qty, price, disclosure_hash)
+    }
+
+    /// AE-P7: issuer ROFR fill — issuer pays cash, takes the seller's asset.
+    pub fn settle_rofr_fill(
+        ctx: Context<SettleRofrFill>,
+        fill_index: u32,
+        qty: u64,
+        price: u64,
+        disclosure_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::settle::process_settle_rofr_fill(ctx, fill_index, qty, price, disclosure_hash)
     }
 
     /// AE-P4: unrevealed bond → reserve after reveals close (permissionless).
@@ -114,8 +140,13 @@ pub mod payment_rails {
         instructions::escrow::process_forfeit_bond(ctx)
     }
 
-    /// AE-P10 / AC-11: permissionless refund; never pausable.
+    /// AE-P10 / AC-11: permissionless buy-side refund; never pausable.
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         instructions::escrow::process_refund(ctx)
+    }
+
+    /// AE-P10: permissionless sell-side refund (asset + bond); never pausable.
+    pub fn refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
+        instructions::escrow::process_refund_ask(ctx)
     }
 }

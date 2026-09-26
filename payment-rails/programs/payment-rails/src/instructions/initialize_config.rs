@@ -20,6 +20,9 @@ pub fn handler(ctx: Context<InitializeConfig>) -> Result<()> {
         // Authority operates sessions until the auction engine's signer PDA
         // is wired in via `set_operator`.
         operator: authority_key,
+        // No fees until governance sets them (`set_fees`, hard-capped).
+        fee_bps: 0,
+        reserve_bps: 0,
         // Start halted-clear: R1+ instructions consult `ensure_accepting`.
         paused: false,
         depeg_breaker: false,

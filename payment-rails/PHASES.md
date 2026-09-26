@@ -45,3 +45,4 @@ NUNDINA never moves the security off Solana; **only cash moves** (HACKATHON.md Â
 
 1. **Auction ownership:** the rails implement the **cash layer** that `auction-engine` / `queue-claim` / `liquidity-facility` call into. Who builds the auction state machine (commit/reveal/clear)?
 2. **Token leg of DvP:** the rails CPI into Token-2022 for the NPCS transfer, which needs the gate thaw to be working. Does the token branch expose that before ~2 Oct?
+3. **Gate thaw for rails escrow vaults (from R2):** NPCS has `DefaultAccountState=Frozen`, so the rails' ask-escrow asset vaults (`["asset_vault", escrow]`, owned by an escrow PDA of the rails program) start frozen. The gate must thaw them as escrow holders **without** counting them toward the 12(g) holder cap. Otherwise `deposit_ask` can't receive NPCS. (R2 is tested with a plain Token-2022 asset mint.)

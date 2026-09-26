@@ -19,6 +19,8 @@ pub enum ConfigChange {
     Authority,
     /// Session operator re-pointed (appended R1).
     Operator,
+    /// Fee / reserve bps changed (appended R2).
+    Fees,
 }
 
 /// Emitted on every config write.
@@ -69,6 +71,10 @@ pub enum EscrowAction {
     Refunded,
     /// Operator reported the escrow's bid revealed (no cash moves; amount 0).
     Revealed,
+    /// Seller asset locked at commit (amount in asset base units, R2).
+    AssetDeposited,
+    /// Unsold seller asset returned (amount in asset base units, R2).
+    AssetReturned,
 }
 
 /// Emitted for every escrow/bond movement (R1).
@@ -89,8 +95,9 @@ pub struct EscrowEvent {
     pub caller: Pubkey,
 }
 
-/// Emitted once per settled fill — the DvP cash leg (AE-P8, R2).
-/// `to_seller + fee + to_reserve + buyer_refund == escrow_released` always.
+/// Emitted once per settled fill — the DvP settlement (AE-P7/P8, R2).
+/// `to_seller + fee + to_reserve == gross` always, and `qty` of the asset
+/// moved seller → buyer in the same instruction.
 #[event]
 #[derive(Debug)]
 pub struct FillSettled {
@@ -98,24 +105,22 @@ pub struct FillSettled {
     pub session: Pubkey,
     /// Fill index within the session (receipt PDA seed).
     pub fill_index: u32,
-    /// Buyer wallet.
+    /// Buyer wallet (issuer on the ROFR path).
     pub buyer: Pubkey,
-    /// Seller wallet (issuer multisig on the ROFR path).
+    /// Seller wallet.
     pub seller: Pubkey,
-    /// Security base units delivered.
+    /// Asset base units delivered.
     pub qty: u64,
-    /// Clearing price, micro-USDC per whole unit.
+    /// Price, micro-USDC per whole asset unit.
     pub price: u64,
-    /// Buyer escrow released for this fill.
-    pub escrow_released: u64,
+    /// Buyer cash released for this fill.
+    pub gross: u64,
     /// Cash to seller.
     pub to_seller: u64,
     /// Protocol fee.
     pub fee: u64,
     /// Reserve cut.
     pub to_reserve: u64,
-    /// Excess escrow returned to buyer (limit above clearing price).
-    pub buyer_refund: u64,
     /// `true` when the issuer's ROFR took the fill (AE-P7).
     pub rofr: bool,
     /// Disclosure-policy hash (aggregate-only print discipline).
@@ -158,6 +163,8 @@ pub enum SessionAction {
     Opened,
     /// Operator aborted the session; all escrows refundable.
     Failed,
+    /// Operator closed settlement; remaining escrow refundable (R2).
+    Settled,
 }
 
 /// Emitted when a cash session opens or fails (R1).

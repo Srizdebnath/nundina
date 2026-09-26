@@ -5,7 +5,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::RailsError;
 use crate::events::{Breaker, BreakerChanged, ConfigChange, RailsConfigUpdated};
-use crate::state::RailsConfig;
+use crate::state::{RailsConfig, MAX_FEE_BPS, MAX_RESERVE_BPS};
 
 pub fn process_set_operator(ctx: Context<AdminConfig>, operator: Pubkey) -> Result<()> {
     let authority_key = ctx.accounts.authority.key();
@@ -13,6 +13,26 @@ pub fn process_set_operator(ctx: Context<AdminConfig>, operator: Pubkey) -> Resu
     cfg.operator = operator;
     emit!(RailsConfigUpdated {
         change: ConfigChange::Operator,
+        new_config_hash: cfg.fingerprint(),
+        authority: authority_key,
+    });
+    Ok(())
+}
+
+/// Set the fee and reserve cut (bps of each fill's gross). Bounded by the
+/// hard on-chain ceilings — governance can never exceed them. Sessions
+/// snapshot these at open, so a change never re-prices a live session.
+pub fn process_set_fees(ctx: Context<AdminConfig>, fee_bps: u16, reserve_bps: u16) -> Result<()> {
+    require!(
+        fee_bps <= MAX_FEE_BPS && reserve_bps <= MAX_RESERVE_BPS,
+        RailsError::FeeTooHigh
+    );
+    let authority_key = ctx.accounts.authority.key();
+    let cfg = &mut ctx.accounts.config;
+    cfg.fee_bps = fee_bps;
+    cfg.reserve_bps = reserve_bps;
+    emit!(RailsConfigUpdated {
+        change: ConfigChange::Fees,
         new_config_hash: cfg.fingerprint(),
         authority: authority_key,
     });

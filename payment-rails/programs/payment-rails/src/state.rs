@@ -4,6 +4,14 @@ use anchor_lang::prelude::*;
 
 use crate::error::RailsError;
 
+/// Hard ceiling on the protocol fee (bps of fill gross). Governance can set
+/// anything up to this, never above it (06 §11 HARD set).
+pub const MAX_FEE_BPS: u16 = 200;
+/// Hard ceiling on the reserve cut (bps of fill gross).
+pub const MAX_RESERVE_BPS: u16 = 200;
+/// Basis-point denominator.
+pub const BPS: u128 = 10_000;
+
 /// The one global rails configuration.
 ///
 /// Every cash path reads it: the settlement mint all escrows are
@@ -28,6 +36,10 @@ pub struct RailsConfig {
     /// (reveals, failure). Set to the authority at init; re-pointed to the
     /// auction-engine's session-signer PDA once that program exists (Q1).
     pub operator: Pubkey,
+    /// Protocol fee on each fill's gross, bps (≤ `MAX_FEE_BPS`).
+    pub fee_bps: u16,
+    /// Reserve cut on each fill's gross, bps (≤ `MAX_RESERVE_BPS`).
+    pub reserve_bps: u16,
     /// Operational pause (authority-set). Blocks new money in; refunds stay
     /// open (AE-P10: refunds are never pausable).
     pub paused: bool,
@@ -69,6 +81,8 @@ impl RailsConfig {
         mix(self.fee_receiver.as_ref());
         mix(self.reserve.as_ref());
         mix(self.operator.as_ref());
+        mix(&self.fee_bps.to_le_bytes());
+        mix(&self.reserve_bps.to_le_bytes());
         mix(&[u8::from(self.paused), u8::from(self.depeg_breaker)]);
         let mut out = [0u8; 32];
         out[..8].copy_from_slice(&h.to_le_bytes());
@@ -87,6 +101,18 @@ pub enum SessionStatus {
     /// Aborted by the operator (AE-P4 auto-fail, no cross ≥ floor, …).
     /// Every escrow is refundable immediately.
     Failed,
+    /// All fills settled (operator). Remaining cash, asset and bonds are
+    /// refundable immediately; unrevealed bonds still forfeit (R2).
+    Settled,
+}
+
+/// Which side of the book an escrow is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize, InitSpace)]
+pub enum Side {
+    /// Holds cash (`qty × limit`) + bond.
+    Buy,
+    /// Holds the traded asset + a USDC bond (AE-P3 seller escrow).
+    Sell,
 }
 
 /// The cash side of one auction session (AE-P1/P3/P10).
@@ -103,8 +129,21 @@ pub struct CashSession {
     pub session_id: u64,
     /// Settlement mint snapshot.
     pub usdc_mint: Pubkey,
-    /// Reserve token account snapshot (forfeited bonds go here).
+    /// Reserve token account snapshot (forfeited bonds, reserve cut).
     pub reserve: Pubkey,
+    /// Fee token account snapshot.
+    pub fee_receiver: Pubkey,
+    /// Traded asset (NPCS or a queue-claim token). Sellers escrow it; each
+    /// fill delivers it to the buyer atomically with the cash leg (DvP).
+    pub asset_mint: Pubkey,
+    /// Asset decimals: prices are micro-USDC per whole asset unit.
+    pub asset_decimals: u8,
+    /// Fee bps snapshot.
+    pub fee_bps: u16,
+    /// Reserve bps snapshot.
+    pub reserve_bps: u16,
+    /// Issuer ROFR authority (AE-P7); `Pubkey::default()` = no ROFR.
+    pub rofr_authority: Pubkey,
     /// Deposits accepted while `now < commit_end`.
     pub commit_end: i64,
     /// Reveals reported while `commit_end <= now < reveal_end`; unrevealed
@@ -127,6 +166,14 @@ pub struct CashSession {
     pub total_cash: u64,
     /// Bonds held across live escrows.
     pub total_bonds: u64,
+    /// Asset held across live sell escrows.
+    pub total_asset: u64,
+    /// Fills settled so far.
+    pub fills_settled: u32,
+    /// Asset delivered across settled fills.
+    pub volume_settled: u64,
+    /// Cash (gross) paid across settled fills.
+    pub gross_settled: u64,
     /// PDA bump.
     pub bump: u8,
 }
@@ -154,19 +201,20 @@ impl CashSession {
             return false;
         }
         match self.status {
-            SessionStatus::Open => true,
+            SessionStatus::Open | SessionStatus::Settled => true,
             SessionStatus::Failed => self.failed_at >= self.reveal_end,
         }
     }
 
     /// May this escrow be refunded at `now`, and where does its bond go?
     ///
-    /// Refundable when (any): the session failed; the hard deadline passed;
+    /// Refundable when (any): the session failed or finished settling; the
+    /// hard deadline passed;
     /// or the escrow was never revealed and reveals are closed (its order is
     /// excluded, so its cash is no longer needed). A revealed escrow in a
     /// running session is awaiting settlement and stays locked.
     pub fn refund_route(&self, revealed: bool, now: i64) -> Result<BondRoute> {
-        let refundable = self.status == SessionStatus::Failed
+        let refundable = self.status != SessionStatus::Open
             || now >= self.settle_deadline
             || (!revealed && now >= self.reveal_end);
         require!(refundable, RailsError::DeadlineNotReached);
@@ -190,8 +238,14 @@ pub struct Escrow {
     pub owner: Pubkey,
     /// Vault token account (`has_one`).
     pub vault: Pubkey,
-    /// Cash held (micro-USDC).
+    /// Buy (cash) or sell (asset) escrow.
+    pub side: Side,
+    /// Cash held (micro-USDC); always 0 on the sell side.
     pub cash: u64,
+    /// Asset held (base units); always 0 on the buy side.
+    pub asset: u64,
+    /// Sell side: asset vault (`["asset_vault", escrow]`); default on buys.
+    pub asset_vault: Pubkey,
     /// Bond held (micro-USDC); 0 once forfeited.
     pub bond: u64,
     /// Reveal reported by the operator.
@@ -203,8 +257,97 @@ pub struct Escrow {
 impl Escrow {
     /// PDA seed prefix: `["escrow", session, owner]`.
     pub const SEED: &'static [u8] = b"escrow";
-    /// Vault PDA seed prefix: `["vault", escrow]`.
+    /// Vault PDA seed prefix: `["vault", escrow]` (USDC: cash and/or bond).
     pub const VAULT_SEED: &'static [u8] = b"vault";
+    /// Asset vault PDA seed prefix: `["asset_vault", escrow]` (sell side).
+    pub const ASSET_VAULT_SEED: &'static [u8] = b"asset_vault";
+}
+
+/// Idempotency + audit record for one settled fill (AE-P8). Its PDA is
+/// created by `settle_fill`, so replaying a fill index cannot pay twice.
+#[account]
+#[derive(InitSpace)]
+pub struct FillReceipt {
+    /// Session.
+    pub session: Pubkey,
+    /// Fill index (seed).
+    pub fill_index: u32,
+    /// Buyer wallet (issuer on the ROFR path).
+    pub buyer: Pubkey,
+    /// Seller wallet.
+    pub seller: Pubkey,
+    /// Asset delivered (base units).
+    pub qty: u64,
+    /// Price, micro-USDC per whole asset unit.
+    pub price: u64,
+    /// The split of this fill's cash.
+    pub split: FillSplit,
+    /// Issuer ROFR fill (AE-P7).
+    pub rofr: bool,
+    /// Cluster time of settlement.
+    pub settled_at: i64,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+impl FillReceipt {
+    /// PDA seed prefix: `["fill", session, fill_index_le]`.
+    pub const SEED: &'static [u8] = b"fill";
+}
+
+/// Cash split of one fill. `to_seller + fee + to_reserve == gross` always.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize, InitSpace)]
+pub struct FillSplit {
+    /// Buyer cash released: `ceil(qty × price / 10^asset_decimals)`.
+    pub gross: u64,
+    /// Protocol fee: `floor(gross × fee_bps / 10⁴)`.
+    pub fee: u64,
+    /// Reserve cut: `floor(gross × reserve_bps / 10⁴)`.
+    pub to_reserve: u64,
+    /// Seller proceeds: the remainder.
+    pub to_seller: u64,
+}
+
+impl FillSplit {
+    /// Split one fill's cash with `credit-math`.
+    ///
+    /// Rounding: the buyer (the party taking the fill) pays the ceiling, so
+    /// the seller is never short-changed by truncation; fee and reserve are
+    /// floored, and the seller absorbs the remainder. Nothing is ever lost
+    /// or created: the four legs sum exactly to `gross`.
+    pub fn compute(
+        qty: u64,
+        price: u64,
+        asset_decimals: u8,
+        fee_bps: u16,
+        reserve_bps: u16,
+    ) -> Result<FillSplit> {
+        require!(qty > 0 && price > 0, RailsError::ZeroAmount);
+        require!(
+            fee_bps <= MAX_FEE_BPS && reserve_bps <= MAX_RESERVE_BPS,
+            RailsError::FeeTooHigh
+        );
+        let unit = 10u128
+            .checked_pow(u32::from(asset_decimals))
+            .ok_or(RailsError::MathOverflow)?;
+        // u64 × u64 always fits u128.
+        let notional = u128::from(qty) * u128::from(price);
+        let gross = credit_math::ceil_div(notional, unit);
+        let fee =
+            credit_math::mul_div(gross, u128::from(fee_bps), BPS).map_err(RailsError::from)?;
+        let to_reserve =
+            credit_math::mul_div(gross, u128::from(reserve_bps), BPS).map_err(RailsError::from)?;
+        let to_seller = gross
+            .checked_sub(fee + to_reserve)
+            .ok_or(RailsError::MathUnderflow)?;
+        let narrow = |v: u128| u64::try_from(v).map_err(|_| error!(RailsError::MathOverflow));
+        Ok(FillSplit {
+            gross: narrow(gross)?,
+            fee: narrow(fee)?,
+            to_reserve: narrow(to_reserve)?,
+            to_seller: narrow(to_seller)?,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -218,6 +361,8 @@ mod tests {
             fee_receiver: Pubkey::new_from_array([3; 32]),
             reserve: Pubkey::new_from_array([4; 32]),
             operator: Pubkey::new_from_array([5; 32]),
+            fee_bps: 10,
+            reserve_bps: 5,
             paused: false,
             depeg_breaker: false,
             bump: 255,
@@ -273,6 +418,14 @@ mod tests {
                 ..cfg()
             },
             RailsConfig {
+                fee_bps: 11,
+                ..cfg()
+            },
+            RailsConfig {
+                reserve_bps: 6,
+                ..cfg()
+            },
+            RailsConfig {
                 paused: true,
                 ..cfg()
             },
@@ -296,6 +449,12 @@ mod tests {
             session_id: 1,
             usdc_mint: Pubkey::new_from_array([2; 32]),
             reserve: Pubkey::new_from_array([4; 32]),
+            fee_receiver: Pubkey::new_from_array([3; 32]),
+            asset_mint: Pubkey::new_from_array([6; 32]),
+            asset_decimals: 6,
+            fee_bps: 10,
+            reserve_bps: 5,
+            rofr_authority: Pubkey::default(),
             commit_end: 100,
             reveal_end: 200,
             settle_deadline: 300,
@@ -306,6 +465,10 @@ mod tests {
             open_escrows: 1,
             total_cash: 100,
             total_bonds: 10,
+            total_asset: 0,
+            fills_settled: 0,
+            volume_settled: 0,
+            gross_settled: 0,
             bump: 255,
         }
     }
@@ -361,5 +524,95 @@ mod tests {
                 assert!(!s.bond_forfeit(true, now));
             }
         }
+    }
+
+    #[test]
+    fn settled_session_releases_everything_but_unrevealed_bonds() {
+        let s = session(SessionStatus::Settled, 0);
+        // Settling only happens after reveals close; refunds open at once.
+        assert_eq!(s.refund_route(true, 250).unwrap(), BondRoute::ToOwner);
+        assert_eq!(s.refund_route(false, 250).unwrap(), BondRoute::ToReserve);
+    }
+
+    #[test]
+    fn fill_split_exact_values() {
+        // 1.5 NPCS (6dp) at 98.123456 USDC → 147.185184 USDC.
+        let f = FillSplit::compute(1_500_000, 98_123_456, 6, 10, 5).unwrap();
+        assert_eq!(f.gross, 147_185_184);
+        assert_eq!(f.fee, 147_185); // floor(147185184 × 10 / 10⁴)
+        assert_eq!(f.to_reserve, 73_592); // floor(147185184 × 5 / 10⁴)
+        assert_eq!(f.to_seller, 147_185_184 - 147_185 - 73_592);
+    }
+
+    #[test]
+    fn buyer_pays_the_ceiling() {
+        // 1 base unit at 1 micro-USDC per whole unit = 1e-6 µUSDC → 1.
+        let f = FillSplit::compute(1, 1, 6, 0, 0).unwrap();
+        assert_eq!(f.gross, 1);
+        assert_eq!(f.to_seller, 1);
+        // Exact multiples don't round up.
+        assert_eq!(FillSplit::compute(2_000_000, 7, 6, 0, 0).unwrap().gross, 14);
+    }
+
+    #[test]
+    fn split_conserves_across_a_sweep() {
+        let qtys = [
+            1u64,
+            7,
+            999_999,
+            1_000_000,
+            123_456_789,
+            u64::MAX / 1_000_000,
+        ];
+        let prices = [1u64, 3, 999_999, 1_000_000, 98_765_432];
+        for &qty in &qtys {
+            for &price in &prices {
+                for (fee, res) in [(0, 0), (1, 1), (10, 5), (MAX_FEE_BPS, MAX_RESERVE_BPS)] {
+                    for dec in [0u8, 6, 9] {
+                        let Ok(f) = FillSplit::compute(qty, price, dec, fee, res) else {
+                            continue; // only overflow may fail; checked below
+                        };
+                        assert_eq!(
+                            u128::from(f.to_seller) + u128::from(f.fee) + u128::from(f.to_reserve),
+                            u128::from(f.gross),
+                            "qty={qty} price={price} dec={dec} fee={fee} res={res}"
+                        );
+                        let exact = u128::from(qty) * u128::from(price);
+                        let unit = 10u128.pow(u32::from(dec));
+                        assert!(u128::from(f.gross) * unit >= exact, "never under-pays");
+                        assert!(
+                            u128::from(f.gross) * unit < exact + unit,
+                            "at most 1 µUSDC over"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn split_rejects_bad_inputs() {
+        let e = |r: Result<FillSplit>| r.unwrap_err();
+        assert_eq!(
+            e(FillSplit::compute(0, 1, 6, 0, 0)),
+            RailsError::ZeroAmount.into()
+        );
+        assert_eq!(
+            e(FillSplit::compute(1, 0, 6, 0, 0)),
+            RailsError::ZeroAmount.into()
+        );
+        assert_eq!(
+            e(FillSplit::compute(1, 1, 6, MAX_FEE_BPS + 1, 0)),
+            RailsError::FeeTooHigh.into()
+        );
+        assert_eq!(
+            e(FillSplit::compute(1, 1, 6, 0, MAX_RESERVE_BPS + 1)),
+            RailsError::FeeTooHigh.into()
+        );
+        // Gross that doesn't fit a token amount.
+        assert_eq!(
+            e(FillSplit::compute(u64::MAX, u64::MAX, 0, 0, 0)),
+            RailsError::MathOverflow.into()
+        );
     }
 }
