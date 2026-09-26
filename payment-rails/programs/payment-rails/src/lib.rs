@@ -101,6 +101,12 @@ pub mod payment_rails {
         instructions::escrow::process_deposit(ctx, cash)
     }
 
+    /// Sell side, step 1: create the seller's empty asset vault so a
+    /// frozen-by-default asset (NPCS) can be thawed before `deposit_ask`.
+    pub fn open_asset_vault(ctx: Context<OpenAssetVault>) -> Result<()> {
+        instructions::escrow::process_open_asset_vault(ctx)
+    }
+
     /// AE-P3 sell side: lock asset + bond in per-escrow vaults (seller signs).
     pub fn deposit_ask(ctx: Context<DepositAsk>, qty: u64) -> Result<()> {
         instructions::escrow::process_deposit_ask(ctx, qty)

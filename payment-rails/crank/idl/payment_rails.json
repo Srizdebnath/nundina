@@ -461,7 +461,7 @@
         {
           "name": "asset_vault",
           "docs": [
-            "Asset vault, authority = escrow PDA."
+            "Asset vault from `open_asset_vault`, authority = escrow PDA."
           ],
           "writable": true,
           "pda": {
@@ -1107,6 +1107,157 @@
           "relations": [
             "session"
           ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_asset_vault",
+      "docs": [
+        "Sell side, step 1: create the seller's empty asset vault so a",
+        "frozen-by-default asset (NPCS) can be thawed before `deposit_ask`."
+      ],
+      "discriminator": [
+        234,
+        215,
+        58,
+        80,
+        93,
+        128,
+        127,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Halt switches (`ensure_accepting`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The seller's future escrow PDA — only its address is used here."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "asset_token_program",
+          "docs": [
+            "Token program of the asset mint (Token-2022 for NPCS)."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -3282,6 +3433,11 @@
       "code": 6040,
       "name": "NotCurator",
       "msg": "Signer is not the facility curator"
+    },
+    {
+      "code": 6041,
+      "name": "AssetVaultFrozen",
+      "msg": "Asset vault is frozen; the gate must thaw it before deposit_ask"
     }
   ],
   "types": [

@@ -144,6 +144,12 @@ pub enum RailsError {
     /// Signer is not the facility curator.
     #[msg("Signer is not the facility curator")]
     NotCurator,
+
+    // ── token leg (R5, appended) ─────────────────────────────────────────
+    /// Ask asset vault is still frozen (NPCS: DefaultAccountState=Frozen);
+    /// the gate must thaw it between `open_asset_vault` and `deposit_ask`.
+    #[msg("Asset vault is frozen; the gate must thaw it before deposit_ask")]
+    AssetVaultFrozen,
 }
 
 impl From<MathError> for RailsError {
@@ -189,5 +195,6 @@ mod tests {
         assert_eq!(u32::from(RailsError::FeeTooHigh), 6027);
         assert_eq!(u32::from(RailsError::FeeReceiverMismatch), 6033);
         assert_eq!(u32::from(RailsError::DestinationRevoked), 6034);
+        assert_eq!(u32::from(RailsError::AssetVaultFrozen), 6041);
     }
 }

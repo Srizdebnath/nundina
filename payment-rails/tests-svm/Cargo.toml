@@ -18,7 +18,7 @@ publish = false
 [dev-dependencies]
 payment-rails = { path = "../programs/payment-rails", features = ["no-entrypoint"] }
 anchor-lang = { version = "=1.1.2" }
-anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022"] }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022", "token_2022_extensions"] }
 litesvm = "0.16"
 solana-keypair = "3"
 solana-signer = "3"

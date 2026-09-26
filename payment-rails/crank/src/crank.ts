@@ -138,6 +138,10 @@ export interface FillPlan {
   qty: bigint;
   price: bigint;
   disclosureHash?: Uint8Array;
+  /** Seller's USDC account to pay; looked up (lowest address) if absent. */
+  sellerUsdc?: Address;
+  /** Buyer's asset account to deliver to; looked up if absent. */
+  buyerAsset?: Address;
 }
 
 /**
@@ -174,9 +178,11 @@ export async function settlePlan(
       continue;
     }
     const [buyerEscrow, sellerEscrow] = await Promise.all([escrowPda(session, f.buyer), escrowPda(session, f.seller)]);
+    // The engine may name the exact accounts; the program re-checks that
+    // they belong to the seller / buyer either way.
     const [sellerUsdc, buyerAsset] = await Promise.all([
-      ownerTokenAccount(ctx.rpc, f.seller, s.usdc_mint),
-      ownerTokenAccount(ctx.rpc, f.buyer, s.asset_mint),
+      f.sellerUsdc ?? ownerTokenAccount(ctx.rpc, f.seller, s.usdc_mint),
+      f.buyerAsset ?? ownerTokenAccount(ctx.rpc, f.buyer, s.asset_mint),
     ]);
     if (!sellerUsdc || !buyerAsset) {
       out.push({ target, result: "skipped", detail: "seller USDC or buyer asset account missing" });

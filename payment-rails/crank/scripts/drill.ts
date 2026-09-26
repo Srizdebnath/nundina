@@ -146,9 +146,15 @@ async function main(): Promise<void> {
 
   for (const [p, qty] of [[A, UNIT], [B, 2n * UNIT]] as const) {
     const escrow = await escrowPda(session, p.key.address);
+    const assetVault = await assetVaultPda(escrow);
     await must(ops, "deposit_ask", [
+      // Unfrozen asset: open the vault and deposit in one transaction.
+      ix("open_asset_vault", {
+        config, session, escrow, asset_vault: assetVault, asset_mint: asset, owner: p.key,
+        asset_token_program: TOKEN_PROGRAM_ADDRESS,
+      }),
       ix("deposit_ask", {
-        config, session, escrow, vault: await vaultPda(escrow), asset_vault: await assetVaultPda(escrow),
+        config, session, escrow, vault: await vaultPda(escrow), asset_vault: assetVault,
         usdc_mint: usdc, asset_mint: asset, owner_usdc: p.usdc, owner_asset: p.asset, owner: p.key,
         token_program: TOKEN_PROGRAM_ADDRESS, asset_token_program: TOKEN_PROGRAM_ADDRESS,
       }, { qty }),

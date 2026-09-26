@@ -24,7 +24,7 @@ here.
 | `set_operator`, `set_breaker`, `set_fees` (hard caps: fee ≤ 200 bps, reserve ≤ 200 bps), **`set_registrar`**, authority-only and evented | R1–R3 | ✅ |
 | `CashSession` (`["session", operator, id]`): records at open the deadlines, bond, cap, **asset mint and decimals, fee receiver, fee bps, ROFR authority**, none of which can change later | R1/R2 | ✅ |
 | `open_session`, `mark_revealed`, `fail_session`, **`finish_session`** (operator only; none of them move value) | R1/R2 | ✅ |
-| Bid escrow: `deposit` (cash + bond) · **ask escrow: `deposit_ask`** (asset + USDC bond; separate asset vault) | R1/R2 | ✅ |
+| Bid escrow: `deposit` (cash + bond) · **ask escrow: `open_asset_vault` → `deposit_ask`** (asset + USDC bond; separate asset vault the gate can thaw first) | R1/R2 | ✅ |
 | `forfeit_bond` (either side) · `refund` (bids) · **`refund_ask`** (asks: asset + bond). Anyone can call them, and they're never pausable | R1/R2 | ✅ |
 | **`settle_fill`**: atomic DvP, one fill per instruction. A fill-receipt PDA `["fill", session, index]` makes a replayed fill fail | R2 | ✅ |
 | **`settle_rofr_fill`**: the issuer pays cash from its own account and takes the seller's escrowed asset (AE-P7) | R2 | ✅ |

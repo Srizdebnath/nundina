@@ -46,13 +46,23 @@ function summarize(outcomes: Outcome[]): boolean {
 }
 
 export function parsePlan(json: string): FillPlan[] {
-  const raw = JSON.parse(json) as { index: number; buyer: string; seller: string; qty: string | number; price: string | number }[];
+  const raw = JSON.parse(json) as {
+    index: number;
+    buyer: string;
+    seller: string;
+    qty: string | number;
+    price: string | number;
+    sellerUsdc?: string;
+    buyerAsset?: string;
+  }[];
   return raw.map((f) => ({
     index: f.index,
     buyer: address(f.buyer),
     seller: address(f.seller),
     qty: BigInt(f.qty),
     price: BigInt(f.price),
+    sellerUsdc: f.sellerUsdc ? address(f.sellerUsdc) : undefined,
+    buyerAsset: f.buyerAsset ? address(f.buyerAsset) : undefined,
   }));
 }
 

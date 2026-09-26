@@ -124,13 +124,29 @@ pub fn process_deposit(ctx: Context<Deposit>, cash: u64) -> Result<()> {
     Ok(())
 }
 
+/// Sell side, step 1: create the seller's (empty) asset vault, authority =
+/// the escrow PDA the following `deposit_ask` creates. Split out because a
+/// vault of a `DefaultAccountState=Frozen` mint (NPCS) is frozen from birth:
+/// the gate thaws it between this and `deposit_ask`. For an unfrozen mint
+/// both go in one transaction. Owner-only, commit window only.
+pub fn process_open_asset_vault(ctx: Context<OpenAssetVault>) -> Result<()> {
+    ensure_commit_open(&ctx.accounts.config, &ctx.accounts.session)
+}
+
 /// AE-P3 sell side: lock `qty` of the session asset plus the USDC bond.
 /// Seller escrow is what makes settlement a true DvP — a seller can only be
 /// paid by delivering asset that is already locked here.
 pub fn process_deposit_ask(ctx: Context<DepositAsk>, qty: u64) -> Result<()> {
     ensure_commit_open(&ctx.accounts.config, &ctx.accounts.session)?;
     require!(qty > 0, RailsError::ZeroAmount);
+    require!(
+        !ctx.accounts.asset_vault.is_frozen(),
+        RailsError::AssetVaultFrozen
+    );
     let bond = ctx.accounts.session.bond_amount;
+    // The vault predates this ix, so it may hold donated dust; the escrow
+    // tracks exactly `qty` and refund_ask returns everything held.
+    let asset_before = ctx.accounts.asset_vault.amount;
 
     let owner_info = ctx.accounts.owner.to_account_info();
     token::transfer(
@@ -154,7 +170,8 @@ pub fn process_deposit_ask(ctx: Context<DepositAsk>, qty: u64) -> Result<()> {
     ctx.accounts.vault.reload()?;
     ctx.accounts.asset_vault.reload()?;
     require!(
-        ctx.accounts.vault.amount == bond && ctx.accounts.asset_vault.amount == qty,
+        ctx.accounts.vault.amount == bond
+            && ctx.accounts.asset_vault.amount.checked_sub(asset_before) == Some(qty),
         RailsError::ConservationViolated
     );
 
@@ -501,6 +518,39 @@ pub struct Deposit<'info> {
 }
 
 #[derive(Accounts)]
+pub struct OpenAssetVault<'info> {
+    /// Halt switches (`ensure_accepting`).
+    #[account(seeds = [RailsConfig::SEED], bump = config.bump)]
+    pub config: Box<Account<'info, RailsConfig>>,
+    #[account(
+        seeds = [CashSession::SEED, session.operator.as_ref(), &session.session_id.to_le_bytes()],
+        bump = session.bump
+    )]
+    pub session: Box<Account<'info, CashSession>>,
+    /// The seller's future escrow PDA — only its address is used here.
+    /// CHECK: seeds-derived; `deposit_ask` creates it.
+    #[account(seeds = [Escrow::SEED, session.key().as_ref(), owner.key().as_ref()], bump)]
+    pub escrow: UncheckedAccount<'info>,
+    #[account(
+        init,
+        payer = owner,
+        seeds = [Escrow::ASSET_VAULT_SEED, escrow.key().as_ref()],
+        bump,
+        token::mint = asset_mint,
+        token::authority = escrow,
+        token::token_program = asset_token_program,
+    )]
+    pub asset_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = session.asset_mint @ RailsError::AssetMismatch)]
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    /// Token program of the asset mint (Token-2022 for NPCS).
+    pub asset_token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct DepositAsk<'info> {
     /// Halt switches (`ensure_accepting`).
     #[account(seeds = [RailsConfig::SEED], bump = config.bump)]
@@ -532,10 +582,9 @@ pub struct DepositAsk<'info> {
         token::token_program = token_program,
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    /// Asset vault, authority = escrow PDA.
+    /// Asset vault from `open_asset_vault`, authority = escrow PDA.
     #[account(
-        init,
-        payer = owner,
+        mut,
         seeds = [Escrow::ASSET_VAULT_SEED, escrow.key().as_ref()],
         bump,
         token::mint = asset_mint,
