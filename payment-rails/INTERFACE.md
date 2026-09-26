@@ -99,6 +99,7 @@ is actually rejected by the receipt account already existing.
 - **Errors:** `RailsError` codes are append-only and wire-stable (6000+). `credit_math::MathError` maps 1:1 onto the `Math*` variants. ✅
 - **Events:** all families are emitted as of R3: `RailsConfigUpdated`, `BreakerChanged`, `SessionEvent`, `EscrowEvent`, `FillSettled`, `PayoutMade` (advances, repayments, sweeps and coupon lines), `DestinationEvent` (registry writes, hash only) and `FacilityEvent`. Each carries wallets and amounts plus 32-byte hashes, with no PII. Every cash movement emits exactly one event, and `CashSession.total_cash` / `total_bonds` track live escrows, so the R4 ledger can reconcile `sum(open escrows) == vault balances`. ✅
 - **Liveness guarantee:** a user can always get unfilled cash back through a permissionless refund, even when the rails are paused, the breaker is tripped, or the crank is dead. ✅ R1 (LiteSVM: `refunds_work_while_paused_and_depegged`, `third_party_refund_cannot_redirect_cash`)
+- **Crank, ledger and evidence (R4):** `crank/` settles fills and runs refunds idempotently, keyed on on-chain state: a receipt that exists, or an escrow that's gone. `reconcile` proves escrow balances equal open obligations, and `export` writes every cash event plus a SHA-256 manifest. The **kill-the-crank drill** runs on a real validator: the crank dies mid-plan and never finishes, and a participant's own wallet still refunds everyone. ✅ R4
 
 ## 7 · Authorities (SRS §8)
 
