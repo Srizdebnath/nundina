@@ -8,6 +8,8 @@
 #
 # RPC_URL overrides the endpoint while CLUSTER stays the recorded label: the
 # public devnet RPC rate-limits the ~800 buffer writes of a full deploy.
+# USE_RPC=0 sends those writes straight to leaders over QUIC instead, so a
+# rate-limited RPC only serves the few reads and status polls.
 #
 # Idempotent: if the program already holds exactly this build, it does
 # nothing. Upgrading a different build requires UPGRADE=1.
@@ -21,6 +23,7 @@ AUTHORITY=${AUTHORITY:-$HOME/.config/solana/id.json}
 SO=target/deploy/payment_rails.so
 PROGRAM_KEY=keys/payment_rails-keypair.json
 PRICE=${PRIORITY_FEE:-20000}   # µlamports / CU for deploy transactions
+SEND_VIA=(--use-rpc); [ "${USE_RPC:-1}" = 0 ] && SEND_VIA=()
 
 die() { echo "✗ $*" >&2; exit 1; }
 sol() { solana -u "$RPC" "$@"; }
@@ -76,7 +79,7 @@ OUT=$(sol program deploy "$SO" \
   --max-len "$LEN" \
   --with-compute-unit-price "$PRICE" \
   --max-sign-attempts 50 \
-  --use-rpc 2>&1) || { echo "$OUT" >&2; die "deploy failed (a partial buffer may hold SOL: 'solana program show --buffers' / 'solana program close --buffers')"; }
+  "${SEND_VIA[@]}" 2>&1) || { echo "$OUT" >&2; die "deploy failed (a partial buffer may hold SOL: 'solana program show --buffers' / 'solana program close --buffers')"; }
 echo "$OUT"
 SIG=$(echo "$OUT" | awk '/^Signature:/ {print $2}')
 
