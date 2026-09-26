@@ -121,6 +121,29 @@ pub enum RailsError {
     /// Account is not the session's snapshotted fee receiver.
     #[msg("Account is not the session fee receiver")]
     FeeReceiverMismatch,
+
+    // ── payout router (R3, appended) ─────────────────────────────────────
+    /// Payout destination was revoked (block-list precedence).
+    #[msg("Payout destination has been revoked")]
+    DestinationRevoked,
+    /// Payout destination's attestation has expired.
+    #[msg("Payout destination attestation has expired")]
+    DestinationExpired,
+    /// Signer is not the payout registrar.
+    #[msg("Signer is not the payout registrar")]
+    NotRegistrar,
+    /// Facility vault can't cover the advance.
+    #[msg("Facility has insufficient funds")]
+    FacilityUnderfunded,
+    /// Facility rate above the hard ceiling.
+    #[msg("Facility rate above the hard ceiling")]
+    RateTooHigh,
+    /// Nothing is owed on this advance.
+    #[msg("Nothing is owed on this advance")]
+    NothingOwed,
+    /// Signer is not the facility curator.
+    #[msg("Signer is not the facility curator")]
+    NotCurator,
 }
 
 impl From<MathError> for RailsError {
@@ -164,5 +187,7 @@ mod tests {
         assert_eq!(u32::from(RailsError::NotOperator), 6017);
         assert_eq!(u32::from(RailsError::ReserveMismatch), 6026);
         assert_eq!(u32::from(RailsError::FeeTooHigh), 6027);
+        assert_eq!(u32::from(RailsError::FeeReceiverMismatch), 6033);
+        assert_eq!(u32::from(RailsError::DestinationRevoked), 6034);
     }
 }

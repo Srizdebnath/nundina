@@ -11,6 +11,8 @@ pub const MAX_FEE_BPS: u16 = 200;
 pub const MAX_RESERVE_BPS: u16 = 200;
 /// Basis-point denominator.
 pub const BPS: u128 = 10_000;
+/// Hard ceiling on a facility's APR (bps). Pilot runs 12% (1_200).
+pub const MAX_RATE_BPS: u64 = 5_000;
 
 /// The one global rails configuration.
 ///
@@ -36,6 +38,10 @@ pub struct RailsConfig {
     /// (reveals, failure). Set to the authority at init; re-pointed to the
     /// auction-engine's session-signer PDA once that program exists (Q1).
     pub operator: Pubkey,
+    /// Payout-registry key (R3): the only key that can admit, renew or
+    /// revoke payout destinations. Stands in for the SAS attester until the
+    /// gate's attestation read is on-chain (Q2). Set to the authority at init.
+    pub registrar: Pubkey,
     /// Protocol fee on each fill's gross, bps (≤ `MAX_FEE_BPS`).
     pub fee_bps: u16,
     /// Reserve cut on each fill's gross, bps (≤ `MAX_RESERVE_BPS`).
@@ -81,6 +87,7 @@ impl RailsConfig {
         mix(self.fee_receiver.as_ref());
         mix(self.reserve.as_ref());
         mix(self.operator.as_ref());
+        mix(self.registrar.as_ref());
         mix(&self.fee_bps.to_le_bytes());
         mix(&self.reserve_bps.to_le_bytes());
         mix(&[u8::from(self.paused), u8::from(self.depeg_breaker)]);
@@ -350,6 +357,255 @@ impl FillSplit {
     }
 }
 
+// ── R3 · payout router ──────────────────────────────────────────────────
+
+/// An attested, allowlisted payout wallet (R3, "private" rails).
+///
+/// The only place any payout path is allowed to send cash to a person. No
+/// PII: the off-chain KYC/attestation record appears only as a hash.
+#[account]
+#[derive(InitSpace)]
+pub struct PayoutDestination {
+    /// Wallet this entry belongs to (PDA seed).
+    pub owner: Pubkey,
+    /// The one USDC token account payouts may go to (owned by `owner`).
+    pub token_account: Pubkey,
+    /// Hash of the off-chain attestation / KYC reference. Never raw data.
+    pub attestation_ref_hash: [u8; 32],
+    /// Registrar that admitted / last renewed it.
+    pub registrar: Pubkey,
+    /// Payouts rejected at/after this time (attestation expiry, H4).
+    pub expires_at: i64,
+    /// `false` once revoked (block-list precedence, CG-P5).
+    pub active: bool,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+impl PayoutDestination {
+    /// PDA seed prefix: `["payout", owner]`.
+    pub const SEED: &'static [u8] = b"payout";
+
+    /// Typed payability check for a payout of cash into `token_account` at
+    /// `now`: revoked, expired, or a token account other than the
+    /// registered one are each rejected with their own reason.
+    pub fn ensure_payable(&self, token_account: &Pubkey, now: i64) -> Result<()> {
+        require!(self.active, RailsError::DestinationRevoked);
+        require!(now < self.expires_at, RailsError::DestinationExpired);
+        require_keys_eq!(
+            *token_account,
+            self.token_account,
+            RailsError::DestinationNotAllowlisted
+        );
+        Ok(())
+    }
+}
+
+/// A liquidity-facility fund (LF-P1/P2): USDC in a program-owned vault,
+/// lent out as advances to registered destinations only.
+#[account]
+#[derive(InitSpace)]
+pub struct Facility {
+    /// Curator key (the liquidity-facility engine's signer; underwriting —
+    /// advance rate vs `MARK_PROTECTIVE` — happens there, not here).
+    pub curator: Pubkey,
+    /// Curator-chosen id; part of the PDA seed.
+    pub facility_id: u64,
+    /// Settlement mint snapshot.
+    pub usdc_mint: Pubkey,
+    /// Vault token account (`["facility_vault", facility]`).
+    pub vault: Pubkey,
+    /// Simple APR in bps (pilot: 1_200 = 12%), ≤ `MAX_RATE_BPS`.
+    pub rate_bps: u64,
+    /// Principal currently lent out across live advances.
+    pub principal_outstanding: u64,
+    /// Lifetime cash in from funders.
+    pub total_funded: u64,
+    /// Lifetime interest collected.
+    pub interest_collected: u64,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+impl Facility {
+    /// PDA seed prefix: `["facility", curator, facility_id_le]`.
+    pub const SEED: &'static [u8] = b"facility";
+    /// Vault PDA seed prefix: `["facility_vault", facility]`.
+    pub const VAULT_SEED: &'static [u8] = b"facility_vault";
+}
+
+/// One borrower's advance from one facility (LF-P1/P6).
+#[account]
+#[derive(InitSpace)]
+pub struct Advance {
+    /// Facility (`has_one`).
+    pub facility: Pubkey,
+    /// Borrower (the pledging claim holder).
+    pub borrower: Pubkey,
+    /// Hash of the pledged collateral reference (claim / lot id).
+    pub collateral_ref_hash: [u8; 32],
+    /// Principal still owed.
+    pub principal: u64,
+    /// Interest accrued and not yet paid.
+    pub interest: u64,
+    /// Last accrual time.
+    pub last_accrual: i64,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+/// How a repayment was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Repayment {
+    /// To accrued interest (paid first).
+    pub interest: u64,
+    /// To principal.
+    pub principal: u64,
+}
+
+impl Repayment {
+    /// Total applied.
+    pub fn total(&self) -> u64 {
+        self.interest + self.principal
+    }
+}
+
+impl Advance {
+    /// PDA seed prefix: `["advance", facility, borrower]`.
+    pub const SEED: &'static [u8] = b"advance";
+
+    /// Accrue simple interest on outstanding principal up to `now`
+    /// (`credit_math::accrue_interest`, floored). Time never runs backwards.
+    pub fn accrue(&mut self, rate_bps: u64, now: i64) -> Result<()> {
+        let dt = u64::try_from(now.saturating_sub(self.last_accrual)).unwrap_or(0);
+        let i = credit_math::accrue_interest(u128::from(self.principal), rate_bps, dt)
+            .map_err(RailsError::from)?;
+        let i = u64::try_from(i).map_err(|_| error!(RailsError::MathOverflow))?;
+        self.interest = self
+            .interest
+            .checked_add(i)
+            .ok_or(RailsError::MathOverflow)?;
+        self.last_accrual = self.last_accrual.max(now);
+        Ok(())
+    }
+
+    /// Total owed right now (call `accrue` first).
+    pub fn owed(&self) -> u64 {
+        self.principal.saturating_add(self.interest)
+    }
+
+    /// Apply up to `amount`: interest first, then principal. Never takes
+    /// more than is owed; the caller moves exactly `total()` of cash.
+    pub fn apply(&mut self, amount: u64) -> Repayment {
+        let interest = amount.min(self.interest);
+        let principal = (amount - interest).min(self.principal);
+        self.interest -= interest;
+        self.principal -= principal;
+        Repayment {
+            interest,
+            principal,
+        }
+    }
+}
+
+/// Borsh mirror of `credit_math::WaterfallParams` for one coupon period
+/// (TE-P4). All amounts micro-USDC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize, InitSpace)]
+pub struct CouponParams {
+    /// 1 · fees & expenses.
+    pub fees_due: u64,
+    /// 2 · senior coupon.
+    pub senior_coupon_due: u64,
+    /// 3 · reserve refilled toward this target …
+    pub reserve_target: u64,
+    /// … from this current tranche-reserve level (tranche-engine ledger).
+    pub reserve_current: u64,
+    /// 4 · senior amortization.
+    pub senior_amort_due: u64,
+    /// 5 · junior coupon.
+    pub junior_coupon_due: u64,
+}
+
+/// Where one period's cash went. `fees + reserve + senior + junior == cash`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize, InitSpace)]
+pub struct CouponSplit {
+    /// Cash distributed.
+    pub cash: u64,
+    /// → fee receiver.
+    pub fees: u64,
+    /// → reserve (top-up line).
+    pub reserve: u64,
+    /// → senior holder (coupon + amortization).
+    pub senior: u64,
+    /// → junior holder (coupon + residual).
+    pub junior: u64,
+    /// Senior coupon shortfall (defers, never a default event).
+    pub unpaid_senior_coupon: u64,
+}
+
+impl CouponSplit {
+    /// Run the waterfall (`credit_math::distribute_cash`) and group its six
+    /// lines by destination. Fails unless the lines sum exactly to `cash`.
+    pub fn compute(cash: u64, p: &CouponParams) -> Result<CouponSplit> {
+        let w = credit_math::distribute_cash(
+            u128::from(cash),
+            &credit_math::WaterfallParams {
+                fees_due: u128::from(p.fees_due),
+                senior_coupon_due: u128::from(p.senior_coupon_due),
+                reserve_target: u128::from(p.reserve_target),
+                reserve_current: u128::from(p.reserve_current),
+                senior_amort_due: u128::from(p.senior_amort_due),
+                junior_coupon_due: u128::from(p.junior_coupon_due),
+            },
+        )
+        .map_err(RailsError::from)?;
+        require!(
+            w.total_distributed().map_err(RailsError::from)? == u128::from(cash),
+            RailsError::ConservationViolated
+        );
+        // Every line ≤ cash ≤ u64::MAX, so these narrowings cannot fail.
+        let n = |v: u128| u64::try_from(v).map_err(|_| error!(RailsError::MathOverflow));
+        let split = CouponSplit {
+            cash,
+            fees: n(w.paid_fees)?,
+            reserve: n(w.paid_reserve)?,
+            senior: n(w.paid_senior_coupon + w.paid_senior_amort)?,
+            junior: n(w.paid_junior_coupon + w.junior_residual)?,
+            unpaid_senior_coupon: n(w.unpaid_senior_coupon)?,
+        };
+        require!(
+            u128::from(split.fees)
+                + u128::from(split.reserve)
+                + u128::from(split.senior)
+                + u128::from(split.junior)
+                == u128::from(cash),
+            RailsError::ConservationViolated
+        );
+        Ok(split)
+    }
+}
+
+/// Idempotency + audit record for one coupon period.
+#[account]
+#[derive(InitSpace)]
+pub struct CouponReceipt {
+    /// Distributor that paid it.
+    pub distributor: Pubkey,
+    /// Period id (seed).
+    pub period_id: u64,
+    /// The split actually paid.
+    pub split: CouponSplit,
+    /// Cluster time.
+    pub paid_at: i64,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+impl CouponReceipt {
+    /// PDA seed prefix: `["coupon", distributor, period_id_le]`.
+    pub const SEED: &'static [u8] = b"coupon";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,6 +617,7 @@ mod tests {
             fee_receiver: Pubkey::new_from_array([3; 32]),
             reserve: Pubkey::new_from_array([4; 32]),
             operator: Pubkey::new_from_array([5; 32]),
+            registrar: Pubkey::new_from_array([8; 32]),
             fee_bps: 10,
             reserve_bps: 5,
             paused: false,
@@ -415,6 +672,10 @@ mod tests {
             },
             RailsConfig {
                 operator: Pubkey::new_from_array([9; 32]),
+                ..cfg()
+            },
+            RailsConfig {
+                registrar: Pubkey::new_from_array([9; 32]),
                 ..cfg()
             },
             RailsConfig {
@@ -614,5 +875,129 @@ mod tests {
             e(FillSplit::compute(u64::MAX, u64::MAX, 0, 0, 0)),
             RailsError::MathOverflow.into()
         );
+    }
+
+    // ── R3 ──────────────────────────────────────────────────────────────
+
+    fn dest() -> PayoutDestination {
+        PayoutDestination {
+            owner: Pubkey::new_from_array([1; 32]),
+            token_account: Pubkey::new_from_array([2; 32]),
+            attestation_ref_hash: [3; 32],
+            registrar: Pubkey::new_from_array([4; 32]),
+            expires_at: 1_000,
+            active: true,
+            bump: 255,
+        }
+    }
+
+    #[test]
+    fn payout_destination_typed_reasons() {
+        let good = Pubkey::new_from_array([2; 32]);
+        assert!(dest().ensure_payable(&good, 999).is_ok());
+        let e = |d: PayoutDestination, t: &Pubkey, now| d.ensure_payable(t, now).unwrap_err();
+        assert_eq!(
+            e(dest(), &Pubkey::new_from_array([9; 32]), 0),
+            RailsError::DestinationNotAllowlisted.into()
+        );
+        assert_eq!(
+            e(dest(), &good, 1_000),
+            RailsError::DestinationExpired.into()
+        );
+        let revoked = PayoutDestination {
+            active: false,
+            ..dest()
+        };
+        // Revocation wins over everything else (block-list precedence).
+        assert_eq!(e(revoked, &good, 0), RailsError::DestinationRevoked.into());
+    }
+
+    fn adv(principal: u64) -> Advance {
+        Advance {
+            facility: Pubkey::new_from_array([1; 32]),
+            borrower: Pubkey::new_from_array([2; 32]),
+            collateral_ref_hash: [0; 32],
+            principal,
+            interest: 0,
+            last_accrual: 0,
+            bump: 255,
+        }
+    }
+
+    #[test]
+    fn advance_accrues_pilot_rate_exactly() {
+        // credit-math reference: 12% on 1,000 USDC for a year = 120 USDC.
+        let mut a = adv(1_000_000_000);
+        a.accrue(1_200, 31_536_000).unwrap();
+        assert_eq!(a.interest, 120_000_000);
+        assert_eq!(a.owed(), 1_120_000_000);
+        // Clock going backwards accrues nothing and never rewinds.
+        a.accrue(1_200, 10).unwrap();
+        assert_eq!((a.interest, a.last_accrual), (120_000_000, 31_536_000));
+    }
+
+    #[test]
+    fn repayment_is_interest_first_and_never_overcollects() {
+        let mut a = adv(1_000);
+        a.interest = 30;
+        let r = a.apply(20);
+        assert_eq!((r.interest, r.principal), (20, 0));
+        let r = a.apply(500);
+        assert_eq!((r.interest, r.principal), (10, 490));
+        let r = a.apply(10_000); // more than owed
+        assert_eq!((r.interest, r.principal, r.total()), (0, 510, 510));
+        assert_eq!(a.owed(), 0);
+    }
+
+    fn coupon() -> CouponParams {
+        CouponParams {
+            fees_due: 10,
+            senior_coupon_due: 100,
+            reserve_target: 50,
+            reserve_current: 20,
+            senior_amort_due: 40,
+            junior_coupon_due: 60,
+        }
+    }
+
+    #[test]
+    fn coupon_split_exact_lines() {
+        // 1000: fees 10, senior 100+40, reserve 30, junior 60 + 760 residual.
+        let c = CouponSplit::compute(1_000, &coupon()).unwrap();
+        assert_eq!((c.fees, c.reserve, c.senior, c.junior), (10, 30, 140, 820));
+        // 50: fees 10, senior coupon 40 (60 short, deferred), nothing else.
+        let c = CouponSplit::compute(50, &coupon()).unwrap();
+        assert_eq!((c.fees, c.senior, c.reserve, c.junior), (10, 40, 0, 0));
+        assert_eq!(c.unpaid_senior_coupon, 60);
+    }
+
+    #[test]
+    fn coupon_split_sums_exactly_to_cash_in() {
+        for cash in [
+            0u64,
+            1,
+            9,
+            10,
+            109,
+            110,
+            139,
+            140,
+            179,
+            180,
+            239,
+            240,
+            1_000_003,
+            u64::MAX,
+        ] {
+            let c = CouponSplit::compute(cash, &coupon()).unwrap();
+            assert_eq!(
+                u128::from(c.fees)
+                    + u128::from(c.reserve)
+                    + u128::from(c.senior)
+                    + u128::from(c.junior),
+                u128::from(cash),
+                "cash={cash}"
+            );
+        }
     }
 }

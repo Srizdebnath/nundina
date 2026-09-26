@@ -16,9 +16,12 @@
 //! with permissionless, never-pausable refunds; R2 — seller asset escrow and
 //! atomic DvP settlement (`settle_fill`, one fill per instruction,
 //! idempotent via a fill-receipt PDA), the fee/reserve split through
-//! `credit-math`, the issuer ROFR cash path and depeg-breaker halting. The
-//! payout router (R3) lands on this frame. No `unsafe`; the only CPIs are
-//! SPL Token / Token-2022 `transfer_checked` and `close_account`.
+//! `credit-math`, the issuer ROFR cash path and depeg-breaker halting; R3 —
+//! the payout router: a registrar-maintained registry of attested payout
+//! wallets (hash-only), facility advances/repayments with `credit-math`
+//! interest, the QC-P4 sweep (facility first, then holder) and TE-P4 coupon
+//! distribution through the `credit-math` waterfall. No `unsafe`; the only
+//! CPIs are SPL Token / Token-2022 `transfer_checked` and `close_account`.
 
 #![deny(unsafe_code)]
 // missing_docs activates once the hand-written account surface dominates;
@@ -77,6 +80,11 @@ pub mod payment_rails {
     /// Set fee / reserve bps within the hard ceilings (authority; evented).
     pub fn set_fees(ctx: Context<AdminConfig>, fee_bps: u16, reserve_bps: u16) -> Result<()> {
         instructions::admin::process_set_fees(ctx, fee_bps, reserve_bps)
+    }
+
+    /// R3: re-point the payout registrar (authority only; evented).
+    pub fn set_registrar(ctx: Context<AdminConfig>, registrar: Pubkey) -> Result<()> {
+        instructions::admin::process_set_registrar(ctx, registrar)
     }
 
     /// AE-P1/P3: open a cash session with snapshotted parameters (operator).
@@ -148,5 +156,80 @@ pub mod payment_rails {
     /// AE-P10: permissionless sell-side refund (asset + bond); never pausable.
     pub fn refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         instructions::escrow::process_refund_ask(ctx)
+    }
+
+    // ── R3 · payout router ──────────────────────────────────────────────
+
+    /// Admit an attested payout wallet (registrar; hash only, no PII).
+    pub fn register_destination(
+        ctx: Context<RegisterDestination>,
+        attestation_ref_hash: [u8; 32],
+        expires_at: i64,
+    ) -> Result<()> {
+        instructions::payout::process_register_destination(ctx, attestation_ref_hash, expires_at)
+    }
+
+    /// Refresh / re-point / re-activate a payout wallet (registrar).
+    pub fn renew_destination(
+        ctx: Context<RenewDestination>,
+        attestation_ref_hash: [u8; 32],
+        expires_at: i64,
+    ) -> Result<()> {
+        instructions::payout::process_renew_destination(ctx, attestation_ref_hash, expires_at)
+    }
+
+    /// Revoke a payout wallet immediately (registrar).
+    pub fn revoke_destination(ctx: Context<RevokeDestination>) -> Result<()> {
+        instructions::payout::process_revoke_destination(ctx)
+    }
+
+    /// LF-P2: open a facility fund + vault (operator becomes curator).
+    pub fn open_facility(
+        ctx: Context<OpenFacility>,
+        facility_id: u64,
+        rate_bps: u64,
+    ) -> Result<()> {
+        instructions::facility::process_open_facility(ctx, facility_id, rate_bps)
+    }
+
+    /// LF-P2: add cash to a facility (anyone).
+    pub fn fund_facility(ctx: Context<FundFacility>, amount: u64) -> Result<()> {
+        instructions::facility::process_fund_facility(ctx, amount)
+    }
+
+    /// LF-P1: advance to a registered destination (curator).
+    pub fn advance_funds(
+        ctx: Context<AdvanceFunds>,
+        amount: u64,
+        collateral_ref_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::facility::process_advance(ctx, amount, collateral_ref_hash)
+    }
+
+    /// LF-P6: repay an advance, interest first (anyone).
+    pub fn repay(ctx: Context<Repay>, amount: u64) -> Result<()> {
+        instructions::facility::process_repay(ctx, amount)
+    }
+
+    /// QC-P4: claim-sale proceeds → facility first, remainder → holder.
+    pub fn sweep_proceeds(ctx: Context<SweepProceeds>, amount: u64) -> Result<()> {
+        instructions::facility::process_sweep_proceeds(ctx, amount)
+    }
+
+    /// TE-P4: one coupon period down the `credit-math` waterfall.
+    pub fn distribute_coupon(
+        ctx: Context<DistributeCoupon>,
+        period_id: u64,
+        cash: u64,
+        params: CouponParams,
+        period_ref_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::coupon::process_distribute_coupon(
+            ctx,
+            period_id,
+            cash,
+            params,
+            period_ref_hash,
+        )
     }
 }

@@ -1,12 +1,18 @@
 pub mod admin;
+pub mod coupon;
 pub mod escrow;
+pub mod facility;
 pub mod initialize_config;
+pub mod payout;
 pub mod session;
 pub mod settle;
 pub(crate) mod token;
 
 pub use admin::*;
+pub use coupon::*;
 pub use escrow::*;
+pub use facility::*;
 pub use initialize_config::*;
+pub use payout::*;
 pub use session::*;
 pub use settle::*;
