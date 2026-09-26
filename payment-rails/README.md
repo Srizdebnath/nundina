@@ -15,7 +15,7 @@ here.
 - **No PII on-chain.** Every off-chain reference (claim id, advance id, disclosure policy, evidence) is a 32-byte hash.
 - **No Confidential Transfers.** They're incompatible with the permissioned book (05 D2, 09 §2). Privacy comes from commit–reveal plus aggregate-only prints.
 
-## Status: R3 payout router
+## Status: R4 crank + ledger
 
 | Piece | Phase | State |
 |---|---|---|
@@ -32,6 +32,10 @@ here.
 | **Facility** `Facility` + vault, `Advance` (`["advance", facility, borrower]`): `open_facility`, `fund_facility`, `advance_funds`, `repay` | R3 | ✅ |
 | **`sweep_proceeds`** (QC-P4): claim-sale proceeds repay the facility first; the remainder goes to the holder | R3 | ✅ |
 | **`distribute_coupon`** (TE-P4): one period down the `credit-math` waterfall; one receipt per period | R3 | ✅ |
+| **Crank** ([`crank/`](crank/README.md), TypeScript, `@solana/kit`): idempotent settle / refund / finish, priority fees, retries on transient errors only | R4 | ✅ |
+| **Reconciliation ledger**: escrow balances == open obligations; facility vault identity | R4 | ✅ |
+| **Evidence export**: decoded cash events as JSONL + a SHA-256 manifest | R4 | ✅ |
+| **Kill-the-crank drill** (`npm run drill`, real validator): refunds complete via any participant | R4 | ✅ |
 
 ### How a fill settles
 
@@ -133,7 +137,8 @@ payment-rails/
 │   ├── error.rs             RailsError (append-only codes)
 │   ├── events.rs            event families
 │   └── instructions/        initialize_config · admin · session · escrow · settle · payout · facility · coupon · token
-└── tests-svm/               LiteSVM integration tests (own workspace + lockfile)
+├── tests-svm/               LiteSVM integration tests (own workspace + lockfile)
+└── crank/                   R4: crank, ledger, evidence export, kill-the-crank drill (TypeScript)
 ```
 
 This folder is **not** a member of the root workspace. `credit-math` is used
@@ -158,6 +163,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                              # unit tests
 anchor build        # → target/deploy/payment_rails.so + target/idl/payment_rails.json
 cargo test --manifest-path tests-svm/Cargo.toml     # LiteSVM, needs the .so above
+(cd crank && npm install && npm run typecheck && npm test && npm run drill)   # R4, needs the .so
 ```
 
 `tests-svm/` is a **separate workspace** with its own `Cargo.lock`. litesvm pulls

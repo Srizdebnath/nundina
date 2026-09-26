@@ -1,0 +1,183 @@
+/**
+ * Transaction sending with priority fees and bounded retries.
+ *
+ * - Priority fee: p75 of `getRecentPrioritizationFees` for the rails
+ *   program, clamped to [min, max] micro-lamports per CU.
+ * - Retries: only *transient* failures (expired blockhash, network errors,
+ *   rate limits) are retried, with exponential backoff and a fresh
+ *   blockhash each attempt. A program error is final and returned typed —
+ *   callers decide whether it means "already done" (idempotency).
+ */
+import {
+  appendTransactionMessageInstructions,
+  createTransactionMessage,
+  getSignatureFromTransaction,
+  pipe,
+  sendAndConfirmTransactionFactory,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signTransactionMessageWithSigners,
+  type Instruction,
+  type Rpc,
+  type RpcSubscriptions,
+  type SolanaRpcApi,
+  type SolanaRpcSubscriptionsApi,
+  type TransactionSigner,
+} from "@solana/kit";
+import {
+  getSetComputeUnitLimitInstruction,
+  getSetComputeUnitPriceInstruction,
+} from "@solana-program/compute-budget";
+import { errorName, PROGRAM_ID } from "./idl.ts";
+
+export interface FeeConfig {
+  minMicroLamports: bigint;
+  maxMicroLamports: bigint;
+  percentile: number; // 0..100
+}
+
+export interface Ctx {
+  rpc: Rpc<SolanaRpcApi>;
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>;
+  /** Fee payer (and default signer). */
+  payer: TransactionSigner;
+  fee: FeeConfig;
+  maxAttempts: number;
+  baseDelayMs: number;
+  log: (msg: string) => void;
+}
+
+export type SendResult =
+  | { status: "sent"; signature: string; attempts: number; priceMicroLamports: bigint }
+  | {
+      status: "failed";
+      /** Custom program error code, when the program rejected it. */
+      code?: number;
+      name?: string;
+      /** An `init` hit an existing account (idempotency signal). */
+      alreadyInUse: boolean;
+      transient: boolean;
+      message: string;
+      attempts: number;
+    };
+
+export const DEFAULT_FEE: FeeConfig = {
+  minMicroLamports: 0n,
+  maxMicroLamports: 50_000n,
+  percentile: 75,
+};
+
+/** p-th percentile of recent fees, clamped. Pure — unit tested. */
+export function pickPriorityFee(fees: bigint[], cfg: FeeConfig): bigint {
+  if (fees.length === 0) return cfg.minMicroLamports;
+  const sorted = [...fees].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const idx = Math.min(sorted.length - 1, Math.floor((cfg.percentile / 100) * sorted.length));
+  const p = sorted[idx]!;
+  return p < cfg.minMicroLamports ? cfg.minMicroLamports : p > cfg.maxMicroLamports ? cfg.maxMicroLamports : p;
+}
+
+export async function priorityFee(ctx: Ctx): Promise<bigint> {
+  try {
+    const recent = await ctx.rpc.getRecentPrioritizationFees([PROGRAM_ID]).send();
+    return pickPriorityFee(recent.map((r) => BigInt(r.prioritizationFee)), ctx.fee);
+  } catch {
+    return ctx.fee.minMicroLamports; // fee oracle down ≠ crank down
+  }
+}
+
+// ── error classification (pure — unit tested) ───────────────────────────
+
+const TRANSIENT =
+  /blockhash not found|block height exceeded|expired|timed? ?out|fetch failed|ECONNRESET|ECONNREFUSED|socket|network|429|too many requests|node is behind|service unavailable/i;
+
+/** Collect every string reachable from an error (message, logs, causes). */
+function strings(e: unknown, depth = 0, seen = new Set<unknown>()): string[] {
+  if (e === null || e === undefined || depth > 6 || seen.has(e)) return [];
+  if (typeof e === "string") return [e];
+  if (typeof e !== "object") return [];
+  seen.add(e);
+  const out: string[] = [];
+  const o = e as Record<string, unknown>;
+  if (typeof o.message === "string") out.push(o.message);
+  for (const v of Object.values(o)) {
+    if (Array.isArray(v)) for (const x of v) out.push(...strings(x, depth + 1, seen));
+    else if (typeof v === "object") out.push(...strings(v, depth + 1, seen));
+  }
+  if ("cause" in o) out.push(...strings(o.cause, depth + 1, seen));
+  return out;
+}
+
+export function classify(e: unknown): Omit<Extract<SendResult, { status: "failed" }>, "attempts"> {
+  const all = strings(e);
+  const text = all.join("\n");
+  let code: number | undefined;
+  const anchor = text.match(/Error Number: (\d+)/);
+  const custom = text.match(/custom program error: 0x([0-9a-f]+)/i);
+  if (anchor) code = Number(anchor[1]);
+  else if (custom) code = parseInt(custom[1]!, 16);
+  const alreadyInUse = /already in use/i.test(text);
+  const programFailure = code !== undefined || alreadyInUse || /Program \w+ failed/.test(text);
+  return {
+    status: "failed",
+    code,
+    name: code !== undefined ? errorName(code) : undefined,
+    alreadyInUse,
+    transient: !programFailure && TRANSIENT.test(text),
+    message: all[0] ?? String(e),
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Send `instructions` with a compute-unit limit and a priority fee;
+ * retry transient failures with backoff. Never throws for chain errors.
+ */
+export async function send(
+  ctx: Ctx,
+  label: string,
+  instructions: Instruction[],
+  opts: { cuLimit?: number } = {},
+): Promise<SendResult> {
+  const sendAndConfirm = sendAndConfirmTransactionFactory({
+    rpc: ctx.rpc,
+    rpcSubscriptions: ctx.rpcSubscriptions,
+  });
+  let last: ReturnType<typeof classify> | undefined;
+  let attempts = 0;
+  for (let attempt = 1; attempt <= ctx.maxAttempts; attempt++) {
+    attempts = attempt;
+    const price = await priorityFee(ctx);
+    try {
+      const { value: blockhash } = await ctx.rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
+      const msg = pipe(
+        createTransactionMessage({ version: 0 }),
+        (m) => setTransactionMessageFeePayerSigner(ctx.payer, m),
+        (m) => setTransactionMessageLifetimeUsingBlockhash(blockhash, m),
+        (m) =>
+          appendTransactionMessageInstructions(
+            [
+              getSetComputeUnitLimitInstruction({ units: opts.cuLimit ?? 400_000 }),
+              getSetComputeUnitPriceInstruction({ microLamports: price }),
+              ...instructions,
+            ],
+            m,
+          ),
+      );
+      const signed = await signTransactionMessageWithSigners(msg);
+      await sendAndConfirm(signed as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });
+      const signature = getSignatureFromTransaction(signed);
+      ctx.log(`✓ ${label} ${signature.slice(0, 16)}… (attempt ${attempt}, fee ${price} µL/CU)`);
+      return { status: "sent", signature, attempts: attempt, priceMicroLamports: price };
+    } catch (e) {
+      last = classify(e);
+      if (!last.transient) break;
+      const delay = ctx.baseDelayMs * 2 ** (attempt - 1);
+      ctx.log(`↻ ${label}: transient (${last.message.slice(0, 80)}); retry in ${delay} ms`);
+      await sleep(delay);
+    }
+  }
+  const f = last!;
+  ctx.log(`✗ ${label}: ${f.name ?? (f.alreadyInUse ? "already in use" : f.message.slice(0, 120))}`);
+  return { ...f, attempts };
+}
