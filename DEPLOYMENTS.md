@@ -31,8 +31,11 @@ cd token && CLUSTER=devnet npm run verify
   config). It carries **no gate entrypoint yet** — nothing consumes it; it
   proves the build–deploy–verify loop and pins the program ID early.
 - The program keypair (`target/deploy/credit_gate-keypair.json`, gitignored)
-  is the only way to redeploy at this fixed ID. Back it up before any
-  `cargo clean`.
+  is the only way to deploy at this fixed ID on a new cluster. Back it up
+  before any `cargo clean`. Upgrades of the live program need only the
+  upgrade authority, which makes that key the one whose loss is permanent.
+  Backup policy, recovery and the Squads 2-of-2 hand-over for every key in
+  this table: [`payment-rails/README.md` § Keys](payment-rails/README.md#keys).
 - Verifiable-build reproduction (deterministic SBF flags) lands with the P1
   CI pipeline; until then hashes are recorded from this machine's build.
 - **Security (#26):** the credit-gate v0.1.0 build above lets *any* signer
