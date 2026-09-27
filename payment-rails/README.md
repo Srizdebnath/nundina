@@ -130,7 +130,7 @@ senior and junior coupons.
 payment-rails/
 ├── Anchor.toml              own Anchor workspace (anchor 1.1.2 · solana 2.3.0)
 ├── Cargo.toml               own Cargo workspace (overflow-checks = true)
-├── keys/                    program keypair: gitignored, back it up
+├── keys/                    program keypair: gitignored, back it up (§ Keys)
 ├── programs/payment-rails/src/
 │   ├── lib.rs               entrypoints
 │   ├── state.rs             config, sessions, escrows, fills, payout registry, facility, coupons
@@ -187,7 +187,75 @@ same solana/anchor crate versions.
 
 ## Keys
 
-`keys/payment_rails-keypair.json` is the **only** way to deploy at this program
-id. It's gitignored (`.gitignore` covers `keys/`, `target/`, `.anchor/` and
-`test-ledger/`). Back it up outside the repo before any `cargo clean` or
-`rm -rf target`.
+Two secrets control this program. Neither is committed, and neither can be
+recreated from the repo.
+
+| Secret | Public key | Lives in | If lost |
+|---|---|---|---|
+| Program keypair | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | `keys/payment_rails-keypair.json` (gitignored) | The program can't be deployed at this id on any **new** cluster (mainnet included). The live devnet program is unaffected: upgrades are signed by the upgrade authority, not by this key. |
+| Upgrade authority | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` | operator wallet (`AUTHORITY=` for `deploy.sh`) | The devnet program is **frozen at its current build forever**: no bug fix, no upgrade. |
+
+The same applies outside this folder: credit-gate's program keypair
+(`target/deploy/credit_gate-keypair.json`, `7yREa5V3…Qa9c`) and upgrade
+authority (`Bprmmqrz…jKgp`), and the NPCS mint's single admin key
+(`2xhjfAdr…6sRXMh`, holding mint, freeze, permanent-delegate and metadata
+authority). See the root [`DEPLOYMENTS.md`](../DEPLOYMENTS.md).
+
+### Backup policy
+
+- Keep **at least two offline copies** of each secret above, in different
+  places (for example an encrypted USB drive and a password manager's secure
+  file store). A copy under `target/` does not count: `cargo clean` deletes it.
+- After every backup or restore, check the copy:
+  `solana-keygen pubkey <copy>` must print the public key in the table.
+- Record **who** holds each copy (not where) in the team's private ops notes,
+  never in this repo.
+
+### Recovery
+
+- **Fresh clone, key needed.** Restore from a backup, then check it:
+  ```bash
+  mkdir -p keys && cp <backup>/payment_rails-keypair.json keys/
+  solana-keygen pubkey keys/payment_rails-keypair.json   # → GdWmRivx…Pocn
+  mkdir -p target/deploy && cp keys/payment_rails-keypair.json target/deploy/
+  ```
+  `deploy.sh` stops with these same instructions when the key is missing.
+- **Program keypair lost for good.** The devnet program keeps working and
+  stays upgradeable. A new cluster needs a new program id: generate a new
+  keypair, update `declare_id!`, `Anchor.toml`, `EXPECTED_ID` in `deploy.sh`
+  and the crank's IDL, and record the new id in `DEPLOYMENTS.md`.
+- **Upgrade authority lost.** There's no recovery. That's the reason to move
+  it to a multisig before it matters (next section).
+- **A deploy failed partway.** `deploy.sh` lists the buffer(s) still holding
+  SOL and prints the `solana program close --buffers` command that reclaims
+  them.
+
+### Before mainnet: Squads 2-of-2 upgrade authority
+
+SRS 08 §8 requires every administrative authority to be a Squads 2-of-2. For
+this program that's one transaction, signed by the current authority, that
+points the upgrade authority at the Squads **vault** PDA (not the multisig
+account):
+
+```bash
+solana program set-upgrade-authority GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn \
+  --upgrade-authority <current-authority.json> \
+  --new-upgrade-authority <SQUADS_VAULT_PDA> \
+  --skip-new-upgrade-authority-signer-check -u devnet
+```
+
+After that, upgrades go through a Squads proposal. Record the change as a new
+row in `DEPLOYMENTS.md`.
+
+### Verifying without any key
+
+Anyone can check that the live program is the recorded build, with no secret:
+
+```bash
+bash crank/scripts/devnet/verify.sh          # CLUSTER=devnet by default
+```
+
+It reads the newest row for the cluster in `DEPLOYMENTS.md`, dumps the
+on-chain program, and compares its SHA-256 and upgrade authority with the
+recorded values. The recorded Build SHA-256 is the verification artifact: the
+key isn't needed to show that the deployed bytes are the reviewed bytes.
