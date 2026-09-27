@@ -141,6 +141,10 @@ pub enum GateError {
     /// Config blocklist was expected to be set but is not.
     #[msg("Config field required by this operation is not set")]
     ConfigFieldMissing,
+    /// `initialize_config` signer is not this program's upgrade authority.
+    /// Appended (never renumber): codes above are wire-stable.
+    #[msg("Signer is not the program upgrade authority")]
+    NotUpgradeAuthority,
 }
 
 #[program]
@@ -148,7 +152,9 @@ pub mod credit_gate {
     use super::*;
 
     /// CG-P2: initialize the per-mint market config. Called once per gated
-    /// mint by the gate-config authority (Squads 2-of-2).
+    /// mint by the gate-config authority (Squads 2-of-2). The signer must be
+    /// this program's upgrade authority, so the first-caller-wins `init`
+    /// cannot be front-run by anyone watching for a new mint (#26).
     #[allow(clippy::too_many_arguments)]
     pub fn initialize_config(
         ctx: Context<InitializeConfig>,
@@ -166,14 +172,14 @@ pub mod credit_gate {
         );
         // Extract keys before the mutable account borrow (borrow discipline).
         let mint_key = ctx.accounts.mint.key();
-        let payer_key = ctx.accounts.payer.key();
+        let authority_key = ctx.accounts.authority.key();
         let bump = ctx.bumps.config;
         let cfg = &mut ctx.accounts.config;
         let mut atts = [Pubkey::default(); MAX_ATTESTERS];
         atts[..attesters.len()].copy_from_slice(&attesters);
         cfg.set_inner(MarketConfig {
             mint: mint_key,
-            gate_config_authority: payer_key,
+            gate_config_authority: authority_key,
             policy_class,
             identity_schema,
             accreditation_schema,
@@ -188,7 +194,7 @@ pub mod credit_gate {
         emit!(ConfigUpdated {
             field_group: 0,
             new_config_hash: config_hash(cfg),
-            authority: payer_key,
+            authority: authority_key,
         });
         Ok(())
     }
@@ -281,7 +287,7 @@ pub struct InitializeConfig<'info> {
     /// Per-mint policy PDA (CG-P2).
     #[account(
         init,
-        payer = payer,
+        payer = authority,
         space = 8 + MarketConfig::INIT_SPACE,
         seeds = [MarketConfig::SEED, mint.key().as_ref()],
         bump
@@ -290,9 +296,19 @@ pub struct InitializeConfig<'info> {
     /// CHECK: mint key is used for PDA seeding; token-type validation of
     /// this mint happens at ACL wiring in P1 (CG-P1).
     pub mint: UncheckedAccount<'info>,
-    /// Gate-config authority (Squads vault); pays rent.
+    /// Upgrade authority (Squads 2-of-2); becomes the gate-config authority
+    /// and pays rent.
     #[account(mut)]
-    pub payer: Signer<'info>,
+    pub authority: Signer<'info>,
+    /// This program — used only to locate its ProgramData account.
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()))]
+    pub program: Program<'info, program::CreditGate>,
+    /// Holds the upgrade authority the signer must match.
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(authority.key())
+            @ GateError::NotUpgradeAuthority
+    )]
+    pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
 }
 

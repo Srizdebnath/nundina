@@ -12,6 +12,10 @@ name = "credit_gate"
 
 [features]
 default = []
+# Host-side consumers (tests-svm, future CPI callers) link the crate without
+# its program entrypoint.
+no-entrypoint = []
+cpi = ["no-entrypoint"]
 idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]

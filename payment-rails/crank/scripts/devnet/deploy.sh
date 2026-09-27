@@ -5,9 +5,13 @@
 #   CLUSTER=devnet   AUTHORITY=~/.config/solana/id.json  bash deploy.sh
 #   CLUSTER=http://127.0.0.1:8899                         bash deploy.sh   # rehearsal
 #   CLUSTER=devnet RPC_URL=https://devnet.helius-rpc.com/?api-key=… bash deploy.sh
+#   RPC_URL=… bash deploy.sh --dry-run    # print (RPC, genesis, cluster) and exit
 #
-# RPC_URL overrides the endpoint while CLUSTER stays the recorded label: the
-# public devnet RPC rate-limits the ~800 buffer writes of a full deploy.
+# RPC_URL overrides the endpoint (the public devnet RPC rate-limits the ~800
+# buffer writes of a full deploy). The recorded cluster label is NEVER taken
+# from the caller: it is derived from the endpoint's genesis hash, and a
+# CLUSTER moniker that disagrees with it aborts the run (#28). Mainnet also
+# requires I_MEAN_MAINNET=1.
 # USE_RPC=0 sends those writes straight to leaders over QUIC instead, so a
 # rate-limited RPC only serves the few reads and status polls.
 #
@@ -17,8 +21,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."   # → payment-rails/
 
 EXPECTED_ID=GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn
-CLUSTER=${CLUSTER:-devnet}
-RPC=${RPC_URL:-$CLUSTER}
+REQUESTED=${CLUSTER:-}   # endpoint shorthand/URL, or a moniker to assert
+RPC=${RPC_URL:-${REQUESTED:-devnet}}
+RPC_SHOWN=${RPC%%\?*}   # for output: a query string may carry an API key
+DRY_RUN=${DRY_RUN:-0}; [ "${1:-}" = --dry-run ] && DRY_RUN=1
 AUTHORITY=${AUTHORITY:-$HOME/.config/solana/id.json}
 SO=target/deploy/payment_rails.so
 PROGRAM_KEY=keys/payment_rails-keypair.json
@@ -28,6 +34,37 @@ SEND_VIA=(--use-rpc); [ "${USE_RPC:-1}" = 0 ] && SEND_VIA=()
 die() { echo "✗ $*" >&2; exit 1; }
 sol() { solana -u "$RPC" "$@"; }
 
+# ── Resolve the cluster from the endpoint itself (#28) ──────────────────
+# Genesis hashes are the clusters' identities; a local validator gets a
+# fresh random one per ledger, so "local" is recognised by a loopback
+# endpoint instead. Anything else is refused rather than guessed.
+GENESIS=
+for _ in 1 2 3; do GENESIS=$(sol genesis-hash 2>/dev/null) && break; GENESIS=; sleep 2; done
+[ -n "$GENESIS" ] || die "cannot reach $RPC_SHOWN (solana genesis-hash failed)"
+case "$GENESIS" in
+  5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d) CLUSTER=mainnet-beta ;;
+  EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG) CLUSTER=devnet ;;
+  4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY) CLUSTER=testnet ;;
+  *)
+    case "$RPC" in
+      l|localhost|http://127.0.0.1:*|http://localhost:*|http://\[::1\]:*) CLUSTER=local ;;
+      *) die "unrecognised cluster at $RPC_SHOWN (genesis $GENESIS) — refusing to deploy or record it" ;;
+    esac ;;
+esac
+case "$REQUESTED" in
+  devnet|d) WANT=devnet ;; mainnet-beta|m) WANT=mainnet-beta ;;
+  testnet|t) WANT=testnet ;; localhost|l) WANT=local ;; *) WANT= ;;
+esac
+[ -z "$WANT" ] || [ "$WANT" = "$CLUSTER" ] \
+  || die "CLUSTER=$REQUESTED but $RPC_SHOWN is $CLUSTER (genesis $GENESIS) — unset RPC_URL or fix CLUSTER"
+echo "rpc       $RPC_SHOWN"
+echo "genesis   $GENESIS"
+echo "cluster   $CLUSTER"
+if [ "$DRY_RUN" = 1 ]; then echo "(dry run — nothing sent, nothing recorded)"; exit 0; fi
+if [ "$CLUSTER" = mainnet-beta ] && [ "${I_MEAN_MAINNET:-0}" != 1 ]; then
+  die "refusing mainnet-beta without I_MEAN_MAINNET=1 (upgrade authority must be Squads 2-of-2 first, SRS §8)"
+fi
+
 [ -f "$SO" ] || die "missing $SO — run 'anchor build' first"
 [ -f "$PROGRAM_KEY" ] || die "missing $PROGRAM_KEY (the program keypair; back it up, it is gitignored)"
 PROGRAM_ID=$(solana-keygen pubkey "$PROGRAM_KEY")
@@ -36,7 +73,6 @@ AUTH_PK=$(solana-keygen pubkey "$AUTHORITY")
 LEN=$(stat -c %s "$SO")
 BUILD_SHA=$(sha256sum "$SO" | cut -d' ' -f1)
 echo "program   $PROGRAM_ID"
-echo "cluster   $CLUSTER"
 echo "authority $AUTH_PK"
 echo "build     $BUILD_SHA ($LEN bytes)"
 
@@ -92,22 +128,24 @@ ONCHAIN_AUTH=$(echo "$SHOW" | awk '/^Authority:/ {print $2}')
 echo "✓ verified: dump SHA-256 == build, authority $ONCHAIN_AUTH, slot $SLOT"
 
 case "$CLUSTER" in
-  devnet|mainnet-beta|d|m)
+  devnet|mainnet-beta)
     F=DEPLOYMENTS.md
     if [ ! -f "$F" ]; then
       cat >"$F" <<'EOF'
 # payment-rails deployments
 
-Every row is verifiable: `solana program dump <id> x.so -u <cluster>` →
-`sha256sum x.so` must equal the Build SHA-256; `solana program show <id>`
-must show the Upgrade authority. Recorded by `crank/scripts/devnet/deploy.sh`.
+Every row is verifiable: `solana genesis-hash -u <cluster>` must equal the
+Genesis hash; `solana program dump <id> x.so -u <cluster>` → `sha256sum x.so`
+must equal the Build SHA-256; `solana program show <id>` must show the
+Upgrade authority. Recorded by `crank/scripts/devnet/deploy.sh`, which
+derives the Cluster from the genesis hash (never from the caller).
 
-| Program | Cluster | Program ID | Slot | Signature | Build SHA-256 | Upgrade authority |
-|---|---|---|---|---|---|---|
+| Program | Cluster | Genesis hash | Program ID | Slot | Signature | Build SHA-256 | Upgrade authority |
+|---|---|---|---|---|---|---|---|
 EOF
     fi
     VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' programs/payment-rails/Cargo.toml | head -1)
-    echo "| payment-rails v$VERSION ($MODE) | $CLUSTER | \`$PROGRAM_ID\` | $SLOT | \`${SIG:-n/a}\` | \`$BUILD_SHA\` | \`$AUTH_PK\` (single key, pilot; Squads 2-of-2 per SRS §8 before mainnet) |" >>"$F"
+    echo "| payment-rails v$VERSION ($MODE) | $CLUSTER | \`$GENESIS\` | \`$PROGRAM_ID\` | $SLOT | \`${SIG:-n/a}\` | \`$BUILD_SHA\` | \`$AUTH_PK\` (single key, pilot; Squads 2-of-2 per SRS §8 before mainnet) |" >>"$F"
     echo "✓ recorded in payment-rails/$F"
     ;;
   *) echo "(local cluster — not recorded)";;
