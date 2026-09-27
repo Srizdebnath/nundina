@@ -23,6 +23,8 @@
 | `tranche-engine` | Senior/junior credit-loss waterfall with three-book accounting |
 | `credit-math` | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
 
+> **Plus a seventh program built during the hackathon** — `payment-rails`, the USDC money layer (escrow, bonds, refunds, atomic DvP settlement, allowlisted payouts). It is not in SRS `08`; see **§4.1** for what it covers, what it deliberately does not, and the three places `08` needs amending because of it.
+
 - **v1 go-to-market:** an issuer-sponsored liquidity window, meaning the issuer runs the auction on its own securities as a buyback tool.
 - **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 token backed 1:1 by USDC in a Kamino vault, with NAV genuinely computed and published through our own SAS attester.
 
@@ -98,17 +100,49 @@ Solana track ($10K) + Superteam India (up to $2.5K) + CertiK ($10K credits) + Ad
 
 The SRS (`08`) is a ~24-week plan that includes a 10-week audit. For the hackathon we ship a **devnet MVP that proves the novel parts**, and present the rest as the roadmap (which also feeds the CertiK and Adevar applications).
 
-| Priority | Build | Proves (SRS AC) |
-|---|---|---|
-| **P0 — must** | NPCS Token-2022 mint (DefaultAccountState=frozen) + Token ACL + `credit-gate` + SAS attestation. An eligible wallet thaws; an ineligible one gets a typed rejection | AC-1: compliance at activation |
-| **P0 — must** | `auction-engine` + `credit-math`: commit → reveal → uniform-price clear → pro-rata → settle → print, with 3+ bidders | AC-3 / AC-4: price discovery at a discount to NAV |
-| **P0 — must** | `queue-claim`: mint a claim from a redemption request and **sell it in an auction session** | AC-8 (sell path): **the headline demo** |
-| **P1 — should** | `mark-engine` (minimal): publish NAV, Fresh→Stale states, and the auction print feeding the discount curve | AC-2 (simplified) |
-| **P1 — should** | `liquidity-facility`: pledge a claim → USDC advance, plus a demo of "no liquidation on a stale mark" | AC-8 pledge path, part of AC-9 |
-| **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides |
-| **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, and a gate-rejection view | 3-minute demo video |
+| Priority | Build | Proves (SRS AC) | Status @ `9cb25b0` |
+|---|---|---|---|
+| **P0 — must** | NPCS Token-2022 mint (DefaultAccountState=frozen) | — | ✅ **done** — live devnet `Dy1VW…dx2i`, all four `08` §3.1 extensions |
+| **P0 — must** | Token ACL (`MintConfig` delegates thaw to the gate) | AC-1 | ❌ **not started** — freeze authority is still a plain wallet |
+| **P0 — must** | `credit-gate` + SAS attestation. An eligible wallet thaws; an ineligible one gets a typed rejection | AC-1 | ⚠️ **~15%** — only CG-P2's config PDA (`initialize_config`/`update_config`). No `validate()`, no SAS read, no lot ledger, no governor, no block-list. See #5 |
+| **P0 — must** | `auction-engine` + `credit-math`: commit → reveal → uniform-price clear → pro-rata → settle → print, with 3+ bidders | AC-3 / AC-4 | ❌ **not started** — no state machine, no clearing, no allocation, no print. The cash leg exists as `payment-rails` (see below). See #7 |
+| **P0 — must** | `queue-claim`: mint a claim from a redemption request and **sell it in an auction session** | AC-8 (sell path): **the headline demo** | ❌ **not started** — blocked on the two rows above. See #8 |
+| **P1 — should** | `mark-engine` (minimal): publish NAV, Fresh→Stale states, print → discount curve | AC-2 (simplified) | ❌ not started. See #6 |
+| **P1 — should** | `liquidity-facility`: pledge a claim → USDC advance + "no liquidation on a stale mark" | AC-8 pledge, part of AC-9 | ⚠️ **cash leg only** — facility vault/advance/repay and the QC-P4 sweep order are done inside `payment-rails`; underwriting, `MARK_PROTECTIVE` pricing and the ladder are not. See #8 |
+| **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides | ⚠️ TE-P4's cash waterfall only. Correctly deprioritised — leave as slides |
+| **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, a gate-rejection view | 3-minute demo video | ❌ **not started** — `app/` is a 2-file scaffold. Do not start until the gate and the auction land. See #10 |
 
 **Guardrails from our own docs:** stay on devnet, keep NPCS inside team wallets (the offering gate in `08` §10.3), label everything `PILOT-DEMO-ASSET`, and never fake a mainnet markdown.
+
+### 4.1 · The `payment-rails` pivot — a 7th program not in the SRS
+
+While building, the team scoped a program that appears in **neither** this table nor `08` §4:
+
+| `payment-rails` | What it does |
+|---|---|
+| What it is | The **USDC money layer** only. Escrow vaults, forfeitable bonds, permissionless refunds, atomic DvP settlement, fee/reserve split, issuer ROFR, and a payout router that pays **only attested, allowlisted wallets** (hash-only, no PII on-chain). |
+| Why | The security never leaves Solana; **only cash moves**. Splitting the cash layer out means the auction, facility and tranching engines can all call into one audited money path instead of each re-implementing escrow. |
+| State | ✅ **~95% and live on devnet** (`GdWm…Pocn`). R0–R5 merged in #20–#25. 5.6k LoC Rust + 3.4k LoC LiteSVM tests + 2.1k LoC TS crank/ledger/evidence-export. `cargo fmt`/`clippy -D warnings` clean, 18/18 unit tests green. |
+| What it does **not** do | No auction state machine, no clearing, no allocation, no print, no gate, no SAS. The operator **hand-picks each fill** and is trusted to have applied the clearing correctly — that trust assumption is stated in `payment-rails/INTERFACE.md` and is the seam the real `auction-engine` must fill. |
+| Real AC progress | **AC-11's liveness property is genuinely proven** — `payment-rails/crank/scripts/drill.ts` kills the crank mid-session on a real validator, restarts, proves no double-settlement (`fills_settled === 2`), and completes every refund from a **third-party participant's wallet**. Plus the DvP cash leg of AC-3. |
+
+**Consequences for `08`, which has not been amended:**
+
+1. **`08` §4.2 no longer owns AE-P3/P4/P7/P8/P10.** They now live in a different program with its own operator trust model. `08` §15's traceability matrix is stale.
+2. **`08` §11's frozen audit scope is wrong.** It names `auction-engine` (which does not exist) and omits `payment-rails` (which moves every micro-USDC, by its own admission at `payment-rails/programs/payment-rails/src/lib.rs:4-6`). A CertiK or Adevar submission built off §11 would omit the actual money path. **Fix before requesting quotes** — see #11 for a proposed re-frozen scope.
+3. **Auditing scope grew, it did not shrink.** The LOC in scope is up by 5.6k lines of value-moving code, so the 6–10 week estimate in `08` §11 must be re-quoted, not assumed.
+
+### 4.2 · Open blockers, in the order they should be fixed
+
+| # | Blocker | Why it is first |
+|---|---|---|
+| [#26](https://github.com/Srizdebnath/nundina/issues/26) | 🔴 **`credit-gate::initialize_config` is front-runnable** — the first caller for any mint becomes its permanent gate authority, and can then rewrite the SAS attester set, holder cap and block-list | Silently disables CG-1/2/4/5/6. Must be fixed **before** the gate is built on top of it, and before an auditor sees it |
+| [#27](https://github.com/Srizdebnath/nundina/issues/27) | 🔴 **`payment-rails` has no CI at all** — 5.6k LoC Rust + 2.1k LoC TS, live on devnet, zero automated build/test | Nothing catches an `error.rs` renumber, a `state.rs` field reorder or a breaking `@solana/kit` bump. Everything else below is built on this |
+| [#29](https://github.com/Srizdebnath/nundina/issues/29) | 🔴 **Program keypair is gitignored with no backup**, and the upgrade authority is a single non-Squads key | Losing the file permanently bricks the program ID. Squads 2-of-2 is required by `08` §8 before any mainnet deploy |
+| [#28](https://github.com/Srizdebnath/nundina/issues/28) | 🟠 **`deploy.sh` cluster-label footgun** — `RPC_URL` without `CLUSTER` can deploy to mainnet and record it as `devnet` in the public registry | A false statement in a published artifact |
+| — | 🟠 **`PermanentDelegate` vs refund liveness is unresolved** (`payment-rails/PHASES.md` Q4) | NPCS's permanent delegate can pull asset from an ask vault; `refund_ask` then fails `ConservationViolated` forever, stranding the seller's bond — contradicting AE-P10. Bounded on a team-only pilot; solvency-relevant the moment real holders exist |
+
+**Honest status: 0 of 12 acceptance criteria are met.** The P0 list above is largely unstarted, and 10 of the 12 ACs depend on programs that do not yet exist. The rails are real, tested work on the money path — but they are not a substitute for the gate and the auction, which are what the demo actually needs to show.
 
 ---
 
