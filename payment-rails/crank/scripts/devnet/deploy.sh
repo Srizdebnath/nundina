@@ -65,8 +65,25 @@ if [ "$CLUSTER" = mainnet-beta ] && [ "${I_MEAN_MAINNET:-0}" != 1 ]; then
   die "refusing mainnet-beta without I_MEAN_MAINNET=1 (upgrade authority must be Squads 2-of-2 first, SRS §8)"
 fi
 
+# Checked before the build: unlike the .so, the key cannot be regenerated.
+if [ ! -f "$PROGRAM_KEY" ]; then
+  cat >&2 <<EOF
+✗ missing payment-rails/$PROGRAM_KEY — the program keypair for $EXPECTED_ID.
+
+  It is gitignored and never committed, so a fresh clone does not have it.
+  It CANNOT be regenerated: a new keypair is a different program id.
+
+  Recover it from an offline backup (README.md § Keys lists custodians),
+  then check it before deploying:
+    mkdir -p keys && cp <backup>/payment_rails-keypair.json keys/
+    solana-keygen pubkey keys/payment_rails-keypair.json   # must print $EXPECTED_ID
+
+  Only verifying the live program? That needs no key:
+    bash crank/scripts/devnet/verify.sh
+EOF
+  exit 1
+fi
 [ -f "$SO" ] || die "missing $SO — run 'anchor build' first"
-[ -f "$PROGRAM_KEY" ] || die "missing $PROGRAM_KEY (the program keypair; back it up, it is gitignored)"
 PROGRAM_ID=$(solana-keygen pubkey "$PROGRAM_KEY")
 [ "$PROGRAM_ID" = "$EXPECTED_ID" ] || die "program keypair is $PROGRAM_ID, expected $EXPECTED_ID"
 AUTH_PK=$(solana-keygen pubkey "$AUTHORITY")
@@ -107,6 +124,20 @@ if [ "$BAL" -lt "$NEED" ]; then
   die "authority needs ≈ $(( (NEED - BAL) / 1000000 + 1 )) more mSOL — fund $AUTH_PK (devnet: https://faucet.solana.com) and re-run"
 fi
 
+# A failed write leaves a funded buffer owned by the authority. Name it and
+# the exact reclaim command, rather than leaving the operator to find it.
+# (Resuming needs the buffer's ephemeral keypair — the seed phrase solana
+# prints above; re-running this script simply writes a fresh buffer.)
+stranded_buffers() {
+  local bufs
+  bufs=$(sol program show --buffers --buffer-authority "$AUTH_PK" 2>/dev/null \
+    | awk '$1 ~ /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ {print $1 " (" $(NF-1) " SOL)"}') || true
+  [ -n "$bufs" ] || return 0
+  echo "✗ SOL is held in buffer(s) owned by $AUTH_PK:" >&2
+  echo "$bufs" | sed 's/^/    /' >&2
+  echo "  reclaim all: solana -u <rpc> program close --buffers --authority $AUTHORITY --recipient $AUTH_PK" >&2
+}
+
 echo "→ $MODE"
 OUT=$(sol program deploy "$SO" \
   --program-id "$PROGRAM_KEY" \
@@ -115,7 +146,7 @@ OUT=$(sol program deploy "$SO" \
   --max-len "$LEN" \
   --with-compute-unit-price "$PRICE" \
   --max-sign-attempts 50 \
-  "${SEND_VIA[@]}" 2>&1) || { echo "$OUT" >&2; die "deploy failed (a partial buffer may hold SOL: 'solana program show --buffers' / 'solana program close --buffers')"; }
+  "${SEND_VIA[@]}" 2>&1) || { echo "$OUT" >&2; stranded_buffers; die "deploy failed"; }
 echo "$OUT"
 SIG=$(echo "$OUT" | awk '/^Signature:/ {print $2}')
 
