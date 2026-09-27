@@ -26,6 +26,43 @@ jobs:
       - name: Tests (unit + property)
         run: cargo test --workspace
 
+  # LiteSVM tests run the real SBF build, so they need anchor + solana-cli.
+  # Own workspace + lockfile (programs/credit-gate/tests-svm/Cargo.toml).
+  credit-gate-svm:
+    name: credit-gate — LiteSVM (against anchor build)
+    runs-on: ubuntu-latest
+    env:
+      SOLANA_VERSION: 2.3.0
+      ANCHOR_VERSION: 1.1.2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            programs/credit-gate/tests-svm -> target
+      - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }}
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL -o "$HOME/.local/bin/anchor" \
+            "https://github.com/solana-foundation/anchor/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu"
+          chmod +x "$HOME/.local/bin/anchor"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: anchor build
+        run: anchor build
+      - name: Format + clippy (test crate)
+        working-directory: programs/credit-gate/tests-svm
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+      - name: Tests (LiteSVM)
+        run: cargo test --manifest-path programs/credit-gate/tests-svm/Cargo.toml
+
   app:
     name: app — typecheck + build
     runs-on: ubuntu-latest

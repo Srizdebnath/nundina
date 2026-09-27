@@ -38,3 +38,9 @@ cd token && CLUSTER=devnet npm run verify
   this table: [`payment-rails/README.md` § Keys](payment-rails/README.md#keys).
 - Verifiable-build reproduction (deterministic SBF flags) lands with the P1
   CI pipeline; until then hashes are recorded from this machine's build.
+- **Security (#26):** the credit-gate v0.1.0 build above lets *any* signer
+  run `initialize_config` for a mint and become its permanent gate-config
+  authority. The fix, which gates it on the program's upgrade authority, is
+  on `main` but is **not deployed** until the upgrade authority redeploys.
+  Nothing consumes this skeleton yet, but configs created on devnet before
+  that upgrade aren't trustworthy.
