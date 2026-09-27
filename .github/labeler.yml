@@ -25,6 +25,12 @@ onchain:
       - any-glob-to-any-file:
           - "programs/**"
           - "Anchor.toml"
+          - "payment-rails/programs/**"
+          - "payment-rails/tests-svm/**"
+          - "payment-rails/Anchor.toml"
+          - "payment-rails/Cargo.*"
+          - "payment-rails/crank/idl/**"
+          - "token/**"
 
 web:
   - changed-files:

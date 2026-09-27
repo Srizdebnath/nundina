@@ -85,7 +85,11 @@ jobs:
             preresearch/architecture/06-Solution-Architecture-v2.md \
             preresearch/architecture/07-Legal-Topology-and-Compliance.md \
             preresearch/architecture/08-SRS-Pilot-Rails.md \
-            preresearch/research/12-Validation-2026-Reality-Check.md; do
+            preresearch/research/12-Validation-2026-Reality-Check.md \
+            payment-rails/programs/payment-rails/Cargo.toml \
+            payment-rails/tests-svm/Cargo.toml \
+            payment-rails/crank/package.json \
+            payment-rails/DEPLOYMENTS.md; do
             test -f "$f" || { echo "README maps a missing file: $f"; exit 1; }
           done
           echo "README repo map OK."
