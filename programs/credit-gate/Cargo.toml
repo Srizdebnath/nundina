@@ -21,7 +21,7 @@ idl-build = ["anchor-lang/idl-build"]
 [dependencies]
 # Exact pin: caret "1.1.2" resolves to 1.2.x, which uses the split
 # solana-program 3.x crates — a different anchor generation. SRS locks 1.1.x.
-anchor-lang = { version = "=1.1.2" }
+anchor-lang = { version = "=1.2.0" }
 credit-math = { path = "../credit-math" }
 
 [dev-dependencies]
