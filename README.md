@@ -45,6 +45,11 @@ nundina/
 ├── programs/                 ← Anchor workspace (solana programs + shared math)
 │   ├── credit-gate/          ← Gate Program for Token ACL (sRFC37) — audit-scope-critical
 │   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
+├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
+│   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical
+│   ├── tests-svm/            ← LiteSVM integration tests (own workspace + lockfile)
+│   ├── crank/                ← settlement/refund crank, reconciliation ledger, evidence export (TS)
+│   └── DEPLOYMENTS.md        ← payment-rails deployment registry
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
 ├── preresearch/              ← the research corpus that justifies every design decision
 │   ├── architecture/         ← 00 index · 05 problem register · 06 solution · 07 legal · 08 SRS · 09 asset spec

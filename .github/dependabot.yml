@@ -32,3 +32,53 @@ updates:
       - "onchain"
       - "dependencies"
     open-pull-requests-limit: 5
+
+  # payment-rails: its own Cargo workspace and a separate LiteSVM test
+  # workspace, each with its own lockfile (payment-rails/README.md).
+  # anchor-lang/anchor-spl are exact-pinned to 1.1.2 on purpose (1.2.x is a
+  # different solana-program generation), so only patch bumps are proposed.
+  - package-ecosystem: "cargo"
+    directory: "/payment-rails"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "anchor-*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  - package-ecosystem: "cargo"
+    directory: "/payment-rails/tests-svm"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "anchor-*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  - package-ecosystem: "npm"
+    directory: "/payment-rails/crank"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct"
+
+  - package-ecosystem: "npm"
+    directory: "/token"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct"

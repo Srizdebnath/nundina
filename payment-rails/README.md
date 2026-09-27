@@ -141,10 +141,13 @@ payment-rails/
 └── crank/                   R4: crank, ledger, evidence export, kill-the-crank drill (TypeScript)
 ```
 
-This folder is **not** a member of the root workspace. `credit-math` is used
-read-only via `path = "../../../programs/credit-math"`. At merge time (and only
-then), the root `Cargo.toml`, `Anchor.toml` and `.github/workflows/ci.yml` gain
-this program (PHASES.md §2).
+This folder is **not** a member of the root workspace, and stays that way:
+its own lockfiles keep litesvm and the rails' `anchor-spl` from re-resolving
+crates the root SBF build depends on. `credit-math` is used read-only via
+`path = "../../../programs/credit-math"`. CI covers it with dedicated jobs in
+`.github/workflows/ci.yml` (`payment-rails`, `payment-rails/crank`) that run
+everything in "Build and test" below from inside this folder, plus an IDL
+drift check on `crank/idl/payment_rails.json` (PHASES.md §2).
 
 ## Build and test
 

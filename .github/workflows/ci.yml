@@ -41,3 +41,81 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  # payment-rails is its own Cargo/Anchor workspace (payment-rails/README.md
+  # § Layout), so the root `rust` job never sees it. Everything runs from
+  # inside the folder against its own lockfiles.
+  payment-rails:
+    name: payment-rails — fmt · clippy · test · LiteSVM · IDL drift · drill
+    runs-on: ubuntu-latest
+    env:
+      SOLANA_VERSION: 2.3.0
+      ANCHOR_VERSION: 1.1.2
+    defaults:
+      run:
+        working-directory: payment-rails
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            payment-rails -> target
+            payment-rails/tests-svm -> target
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests (unit)
+        run: cargo test --workspace
+      - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }}
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL -o "$HOME/.local/bin/anchor" \
+            "https://github.com/solana-foundation/anchor/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu"
+          chmod +x "$HOME/.local/bin/anchor"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: anchor build
+        run: anchor build
+      - name: Tests (LiteSVM, against the built .so)
+        run: cargo test --manifest-path tests-svm/Cargo.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: payment-rails/crank/package-lock.json
+      - name: crank — npm ci
+        working-directory: payment-rails/crank
+        run: npm ci
+      # The committed IDL is what the crank decodes accounts and errors with.
+      # A state.rs / error.rs change that isn't re-synced must fail here.
+      - name: IDL drift (crank/idl vs anchor build)
+        working-directory: payment-rails/crank
+        run: |
+          npm run sync-idl
+          git diff --exit-code -- idl/payment_rails.json \
+            || { echo "::error::crank/idl/payment_rails.json is stale — run 'npm run sync-idl' after 'anchor build' and commit it"; exit 1; }
+      - name: Kill-the-crank drill (local validator)
+        working-directory: payment-rails/crank
+        run: npm run drill
+
+  payment-rails-crank:
+    name: payment-rails/crank — typecheck + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: payment-rails/crank
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: payment-rails/crank/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
