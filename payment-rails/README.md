@@ -50,6 +50,16 @@ to_seller  = gross − fee − to_reserve                → seller's own USDC a
 qty                                                  → buyer's own asset account (same instruction)
 ```
 
+> **Fee posture: open legal item (#59).** doc 07 AE-3 requires *no
+> protocol-collected per-trade fee*. The rails take `fee_bps` (≤ 200) and
+> `reserve_bps` (≤ 200) on every fill, into accounts held by the rails
+> authority wallet, and nothing binds the fee to an operator or licensee
+> identity. doc 07 L2 names this fact pattern as broker-indicia risk. The
+> caps bound the *size*, not the *recipient*. Until counsel answers Q2, keep
+> `fee_bps` at pilot level and treat any change to it as a legal decision,
+> not a parameter tweak. Every fill's `FillSettled` event already discloses
+> `fee` and `to_reserve`.
+
 `to_seller + fee + to_reserve == gross` always holds. That's checked by a
 360-combination sweep in the unit tests (not exhaustive over `u64`) and
 against real balances in LiteSVM. The
@@ -152,7 +162,7 @@ for its two crates:
 - The program crate is kept out **by choice**, for isolation. It is not
   forced by the resolver: adding it to the root `members` only adds crates
   and changes none of the root's existing versions (checked 2026-09 against
-  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only via
+  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only (the rails are its only program consumer today: `ceil_div`, `mul_div`, `accrue_interest`, `distribute_cash`) via
 `path = "../../../programs/credit-math"`. CI covers it with dedicated jobs in
 `.github/workflows/ci.yml` (`payment-rails`, `payment-rails/crank`) that run
 everything in "Build and test" below from inside this folder, plus an IDL
@@ -196,19 +206,27 @@ same solana/anchor crate versions.
 
 ## Keys
 
-Two secrets control this program. Neither is committed, and neither can be
-recreated from the repo.
+Every privileged key in the repo is listed below, by **public key only**.
+No secret is committed, none can be recreated from the repo, and **none of
+them is backed up yet in a way this repo can show**. The backup policy below
+is the plan, not a record that it was executed (#57). Status: ⚠️ single key,
+no recorded backup, for every row.
 
 | Secret | Public key | Lives in | If lost |
 |---|---|---|---|
 | Program keypair | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | `keys/payment_rails-keypair.json` (gitignored) | The program can't be deployed at this id on any **new** cluster (mainnet included). The live devnet program is unaffected: upgrades are signed by the upgrade authority, not by this key. |
-| Upgrade authority | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` | operator wallet (`AUTHORITY=` for `deploy.sh`) | The devnet program is **frozen at its current build forever**: no bug fix, no upgrade. |
+| Upgrade authority | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` | operator wallet (`AUTHORITY=` for `deploy.sh`) | The devnet program is **frozen at its current build forever**: no bug fix, no upgrade. **This is the real single point of failure**, not the program keypair. |
+| Same key `9WH1…2uDZ`, in its other roles | `RailsConfig.authority`, `.operator` and `.registrar` (the registrar is initialised to the authority, `initialize_config.rs`) | same wallet | Losing it also loses fee/breaker/registrar governance and session operation. |
+| Fee receiver and reserve **token accounts** | `BCppgtLV86NShmezwdUsEAMxCy6BDfpbqpQfpDbqfcsc` (fee) · `2sZdQ5F3UHbehXYxkv67t5JGRxVb3hGvU6gDryiuWNz6` (reserve), both **owned by `9WH1…2uDZ`** (checked on devnet) | created by `setup.ts` from the authority wallet | The reserve receives every **forfeited client bid bond**, so that money sits in a single-key wallet. There is no setter: both are fixed at `initialize_config` (doc 07 L12's non-custodial posture is not met; see #59). |
+| credit-gate upgrade authority | `BprmmqrzBADdQ2iKARtqcDndWV5k22aUGrkMKeySjKgp` | not on the rails operator's machine | The gate can't be fixed or redeployed (#45). After #26/#50 it also becomes the initial `gate_config_authority` of every new market config. |
+| credit-gate program keypair | `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` | `target/deploy/credit_gate-keypair.json` on the deploying machine | No new-cluster deploys at this id; the live program is unaffected. |
+| **NPCS admin key** (highest privilege) | `2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh` | `token/keys/` on the minting machine (gitignored) | It holds **mint + freeze + permanent delegate + metadata update**. Loss: no minting, no thaw of new holders, no seizure path, no metadata fix. Theft: unlimited mint, arbitrary freeze and seizure. Recovery: none on this mint; a fresh mint with a new key ceremony (doc 09 §10). |
 
-The same applies outside this folder: credit-gate's program keypair
-(`target/deploy/credit_gate-keypair.json`, `7yREa5V3…Qa9c`) and upgrade
-authority (`Bprmmqrz…jKgp`), and the NPCS mint's single admin key
-(`2xhjfAdr…6sRXMh`, holding mint, freeze, permanent-delegate and metadata
-authority). See the root [`DEPLOYMENTS.md`](../DEPLOYMENTS.md).
+Verification artifact: the recorded **Build SHA-256** is committed for
+every deploy, and `verify.sh` checks it keylessly. The dumped `.so` bytes are
+**not** committed (`*.so` is gitignored). Publishing each deployed `.so` as a
+GitHub release asset next to its registry row is the open half of #29's
+fix #4.
 
 ### Backup policy
 
@@ -218,7 +236,8 @@ authority). See the root [`DEPLOYMENTS.md`](../DEPLOYMENTS.md).
 - After every backup or restore, check the copy:
   `solana-keygen pubkey <copy>` must print the public key in the table.
 - Record **who** holds each copy (not where) in the team's private ops notes,
-  never in this repo.
+  never in this repo. That is also where `deploy.sh` sends an operator who
+  needs a key restored; this README says *what* to back up, never *where*.
 
 ### Recovery
 
@@ -228,9 +247,15 @@ authority). See the root [`DEPLOYMENTS.md`](../DEPLOYMENTS.md).
   solana-keygen pubkey keys/payment_rails-keypair.json   # → GdWmRivx…Pocn
   mkdir -p target/deploy && cp keys/payment_rails-keypair.json target/deploy/
   ```
-  `deploy.sh` stops with these same instructions when the key is missing.
+  `deploy.sh` needs it only for a **first** deploy at this id, and stops with
+  these instructions if it is missing then.
 - **Program keypair lost for good.** The devnet program keeps working and
-  stays upgradeable. A new cluster needs a new program id: generate a new
+  stays upgradeable: `deploy.sh` upgrades an existing program by its **bare
+  program id**, so only the upgrade authority signs (checked on a local
+  validator: deploy, delete the keypair, `UPGRADE=1 bash deploy.sh` → `→
+  upgrade ✓ verified`). By hand:
+  `solana program deploy <so> --program-id GdWmRivx…Pocn --upgrade-authority <auth.json>`.
+  A new cluster needs a new program id: generate a new
   keypair, update `declare_id!`, `Anchor.toml`, `EXPECTED_ID` in `deploy.sh`
   and the crank's IDL, and record the new id in `DEPLOYMENTS.md`.
 - **Upgrade authority lost.** There's no recovery. That's the reason to move
