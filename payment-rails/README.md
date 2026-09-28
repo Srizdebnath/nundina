@@ -50,8 +50,9 @@ to_seller  = gross − fee − to_reserve                → seller's own USDC a
 qty                                                  → buyer's own asset account (same instruction)
 ```
 
-`to_seller + fee + to_reserve == gross` always holds. That's checked
-exhaustively in the unit tests and against real balances in LiteSVM. The
+`to_seller + fee + to_reserve == gross` always holds. That's checked by a
+360-combination sweep in the unit tests (not exhaustive over `u64`) and
+against real balances in LiteSVM. The
 buyer's unfilled cash and bond come back through `refund` after
 `finish_session` (or at the hard deadline). Unsold asset comes back through
 `refund_ask`.
@@ -141,9 +142,16 @@ payment-rails/
 └── crank/                   R4: crank, ledger, evidence export, kill-the-crank drill (TypeScript)
 ```
 
-This folder is **not** a member of the root workspace, and stays that way:
-its own lockfiles keep litesvm and the rails' `anchor-spl` from re-resolving
-crates the root SBF build depends on. `credit-math` is used read-only via
+This folder is **not** a member of the root workspace. The reasons differ
+for its two crates:
+
+- `tests-svm` **must** stay separate. Adding litesvm to the root lockfile
+  pulls in the agave tree and downgrades solana crates the root SBF build
+  depends on.
+- The program crate is kept out **by choice**, for isolation. It is not
+  forced by the resolver: adding it to the root `members` only adds crates
+  and changes none of the root's existing versions (checked 2026-09 against
+  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only via
 `path = "../../../programs/credit-math"`. CI covers it with dedicated jobs in
 `.github/workflows/ci.yml` (`payment-rails`, `payment-rails/crank`) that run
 everything in "Build and test" below from inside this folder, plus an IDL
