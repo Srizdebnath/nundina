@@ -28,6 +28,7 @@ pub mod accrual;
 pub mod allocation;
 pub mod error;
 pub mod nav;
+pub mod prudential;
 pub mod pv;
 pub mod waterfall;
 
@@ -37,6 +38,7 @@ pub use error::{MathError, RoundDirection};
 pub use nav::{
     fee_accrual_per_period, haircut_bps, nav_gross_pico, nav_published_pico, PICO, SECONDS_PER_YEAR,
 };
+pub use prudential::{check_advance_rate, BPS_DENOMINATOR, MAX_ADVANCE_RATE_BPS};
 pub use pv::pv_of_claim;
 pub use waterfall::{apply_loss, distribute_cash, WaterfallParams, WaterfallResult};
 

@@ -53,7 +53,7 @@ nundina/
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
 ├── preresearch/              ← the research corpus that justifies every design decision
 │   ├── architecture/         ← 00 index · 05 problem register · 06 solution · 07 legal · 08 SRS · 09 asset spec
-│   └── research/12           ← dated market evidence (2026 reality check)
+│   └── research/             ← 12 · dated market evidence (2026 reality check)
 ├── DEPLOYMENTS.md            ← official registry: every program + mint, independently verifiable
 └── Anchor.toml               ← workspace config (anchor 1.1.2 · solana 2.3.0)
 ```
