@@ -4701,7 +4701,9 @@
           {
             "name": "attestation_ref_hash",
             "docs": [
-              "Hash of the off-chain attestation / KYC reference. Never raw data."
+              "Hash of the off-chain attestation / KYC reference. Never raw data.",
+              "Supplied by the registrar and **not checked** against any SAS",
+              "attestation: the registrar key vouches for it (#52)."
             ],
             "type": {
               "array": [

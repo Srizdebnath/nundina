@@ -56,11 +56,15 @@ pub struct MarketConfig {
     pub gate_config_authority: Pubkey,
     /// Policy class (pilot: `PILOT_506C_TEST`) — stable u32 for consumers.
     pub policy_class: u32,
-    /// Accepted SAS identity schema (CG-P4/P6).
+    /// Accepted SAS identity schema (CG-P4/P6). **Storage only (#52):** no
+    /// instruction reads a SAS account yet. There is no SAS program id, no
+    /// schema definition and no `validate`, so this field enforces nothing.
     pub identity_schema: Pubkey,
-    /// Accepted SAS accreditation schema (CG-P6).
+    /// Accepted SAS accreditation schema (CG-P6). Storage only (#52).
     pub accreditation_schema: Pubkey,
-    /// Attester authorities accepted for these schemas.
+    /// Attester authorities accepted for these schemas. **Storage only
+    /// (#52):** nothing compares any attestation's signer against this set
+    /// until `validate` (CG-P1/P6) lands.
     pub attesters: [Pubkey; MAX_ATTESTERS],
     /// Active count into `attesters`.
     pub attester_count: u8,
@@ -197,6 +201,7 @@ pub enum GateReject {
     /// Owner wallet is on the enforced block-list.
     Blocklisted,
     /// Missing/expired/mismatched-attester attestation for the owner.
+    /// Never constructed yet: there is no attestation read (#52).
     AttestationInvalid,
     /// Attestation expires before the configured settlement horizon (H4).
     AttestationExpiry,

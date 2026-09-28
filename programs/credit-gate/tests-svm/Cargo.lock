@@ -900,7 +900,6 @@ name = "credit-gate"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "credit-math",
  "solana-sha256-hasher",
 ]
 
@@ -918,10 +917,6 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-error",
 ]
-
-[[package]]
-name = "credit-math"
-version = "0.1.0"
 
 [[package]]
 name = "crunchy"

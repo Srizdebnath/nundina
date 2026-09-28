@@ -39,7 +39,7 @@ The pilot succeeds when all twelve scenarios below have been executed **on mainn
 
 ```mermaid
 flowchart TB
-    subgraph CHAIN["SOLANA PROGRAMS (Anchor, six)"]
+    subgraph CHAIN["SOLANA PROGRAMS (Anchor, six + payment-rails cash layer)"]
         GATE["credit-gate
         Gate Program for Token ACL
         eligibility · block-list · holder governor · lot ledger"]
@@ -53,6 +53,9 @@ flowchart TB
         NAV-collateralized advances"]
         TE["tranche-engine
         SPV-configured waterfall"]
+        RAILS["payment-rails (§4.7, as built)
+        the only program that holds client USDC:
+        escrow · bonds · refunds · DvP cash leg · payouts"]
     end
 
     subgraph EXT["EXTERNAL (integrate, not build)"]
@@ -109,7 +112,7 @@ flowchart TB
     OFF --> UI
 ```
 
-**Shared crate `credit-math`:** u128 intermediates, uniform-price clearing, pro-rata allocation, waterfall arithmetic, haircut curves. Every function rounds **against the initiator**. Consumed by auction-engine, tranche-engine, liquidity-facility, queue-claim. Unit-test target: 100% branch coverage on this crate (D8).
+**Shared crate `credit-math`:** u128 intermediates, uniform-price clearing, pro-rata allocation, waterfall arithmetic, haircut curves. Every function rounds **against the initiator**. *Planned* consumers: auction-engine, tranche-engine, liquidity-facility, queue-claim. **As built (2026-09), the only consumer is `payment-rails`**, which calls `ceil_div`, `mul_div`, `accrue_interest` and `distribute_cash`. Clearing, pro-rata, NAV, haircut, PV and the loss waterfall are pure, tested functions with **no program consumer yet** (#48). Unit-test target: 100% branch coverage on this crate (D8); CI job `credit-math — coverage` publishes the measured figure.
 
 ---
 
@@ -218,7 +221,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 | LF-P3 | Health check: `MARK_PROTECTIVE`-based maintenance; breach → grace window (top-up allowed) → ladder | LF-1/2 |
 | LF-P4 | **No liquidation when mark state ∈ {Warned?, Stale, Suspended}** — enforced by reading mark-engine state inside the liquidate instruction (Warned blocks new advances only) | LF-1; B5 |
 | LF-P5 | Ladder exactly per 06 §5: (1) issuer ROFR at MARK_PROTECTIVE (multisig), (2) backstop bidder (pre-registered team wallet, contracted haircut), (3) forced-sale auction session via auction-engine with `forced_sale=true`, (4) workout assignment to lender PDA; shortfall → reserve → lender, non-recourse, evented | F8; M2 |
-| LF-P6 | Repayment/sweep hooks from queue-claim fills; interest accrues per block by `credit-math` (pilot rate: fixed 12% APR, config) | QC-P4 |
+| LF-P6 | Repayment/sweep hooks from queue-claim fills; interest accrues per second over `Δt_seconds`, computed at each touch by `credit_math::accrue_interest` (pilot rate: fixed 12% APR, config) | QC-P4 |
 
 **Acceptance:** AC-9.
 
@@ -236,6 +239,28 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 **Acceptance:** AC-10.
 
+### 4.7 `payment-rails` (Anchor; audit-scope-critical: holds client cash) — plan amendment, 2026-09 (#47)
+
+**Why this section exists.** The build added a seventh program that this SRS did not plan. `payment-rails` (`GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn`, live on devnet) is a **single audited cash layer**. Every micro-USDC that moves in the protocol moves through it; the security never does. It replaces four separate money-moving code paths inside auction-engine, liquidity-facility, queue-claim and tranche-engine. This amendment adopts it (option A of #47) instead of leaving code and plan to disagree.
+
+**Position in the dependency graph.** It sits *below* the four engines: they own the semantics (commit/reveal/clear, marks, ladders, attachment points) and call into the rails for every cash movement. It depends only on `credit-math` and Token-2022/SPL Token, and holds no state that the engines can't reconstruct from its events.
+
+| Engine requirement | What `payment-rails` implements for it | Status |
+|---|---|---|
+| AE-P3 / AE-P4 | pre-funded bid escrow + forfeitable bond; ask escrow (asset + bond) | ✅ R1/R2 |
+| AE-P7 | issuer ROFR cash-for-asset fill | ✅ R2 |
+| AE-P8 | one-fill-per-instruction atomic DvP; `TransferInstruction` record. **Gate re-check not yet performed** (`gate_check = NotPerformed`) | ⚠️ R2, pending gate P1 |
+| AE-P10 | permissionless, never-pausable refunds; PDA-only escrow; completes even on a delegate-drained vault | ✅ R1 (+#62) |
+| LF-P2 / LF-P6 | facility fund, advances to registered destinations, simple-interest accrual, repayment | ✅ R3 |
+| QC-P4 | proceeds sweep: facility repayment first, then holder | ✅ R3 |
+| TE-P4 | cash waterfall with exact conservation | ✅ R3 |
+
+Interface: `payment-rails/INTERFACE.md`. Phases: `payment-rails/PHASES.md`. Registry: `payment-rails/DEPLOYMENTS.md`.
+
+**Consequence for doc 06 §1 ("one responsibility each").** The rails are one responsibility (*move cash exactly*), cut horizontally across the engines rather than vertically. Each engine stays independently auditable for its semantics; the rails are audited once for all cash paths (§11).
+
+**Acceptance:** AC-11 (refunds), the cash legs of AC-3/5/8/9/10, and the kill-the-crank drill in CI.
+
 ---
 
 ## 5 · SAS attestation design (real from day 1)
@@ -247,6 +272,23 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 | Issuance flow | Internal "registrar" step in the admin UI: verify the person (team-only in pilot: video call + entity check), then issue attestation on-chain. The *interface* is production-shaped; the *policy* is team-only until Q3 clears |
 | Rotation/revocation | Attester rotation: add-new → re-attest → remove-old, both in market config attester sets (multisig). Revocation = expiry + block-list, per CG-P5 |
 | Mainnet note | Real SAS program on mainnet-beta; attestations cost real fees — negligible at pilot scale |
+
+**As-built status (2026-09, #52): nothing in this section exists yet.** There
+is no SAS program id, no schema, no attester keypair or custody runbook, no
+issuance path, and no on-chain read. `credit-gate`'s schema and attester
+fields are storage only, and `payment-rails` admits payout destinations on a
+registrar-supplied hash. The header's "real SAS attestations from day 1"
+decision and §12's P1 placement stand, but they are unmet. The minimum P1
+slice, in dependency order:
+1. author and version the three schemas in the repo;
+2. create the attester keypair with the custody above (and add it to the
+   key table in `payment-rails/README.md § Keys`);
+3. `credit-gate::validate` performs the SAS read: owner program,
+   attester ∈ `attesters`, schema match, expiry vs settlement horizon, and
+   `investor_id` extraction (CG-P6);
+4. wire the Token ACL so NPCS thaws route through the gate.
+If this slips past P1, amend §12 rather than leave the decision and the plan
+in contradiction.
 
 ---
 
@@ -260,6 +302,17 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 | **treasury-agent** | Ops-runbook-driven (not autonomous) | Deposit/withdraw sleeve USDC; reconciles vault shares vs NAV inputs weekly | Manual with checklist; no key automation |
 | **crank-runner** | Node bot, bonded wallet | Phase-deadline cranks, seasoning merges, settlement pagination, distribution cranks; escalating priority fees + jitter (D11); **kill-switch drill is part of AC-11** | Bonded per 06 §8 |
 | **evidence-exporter** | Node CLI | Session evidence bundles (all events + marks + model versions + inputs) → signed JSON files in repo/storage | AC-12; L23 |
+
+**As-built status (2026-09, #58).** This table is the target; this is what exists:
+
+| Service | Built | Gap |
+|---|---|---|
+| indexer | ❌ no DB, schema, webhook or backfill; the crank reads chain state directly (`payment-rails/crank/src/chain.ts`) | Decide before P6 whether the RPC-read design is enough for the pilot, or build the indexer. The UI and AC-12 need *one* source |
+| api | ❌ no route handlers | P6 (#10) |
+| nav-publisher | ❌ no cron, key, publisher set or `publish_nav` (no mark-engine) | P2 (#6); the arithmetic exists in `credit-math` |
+| treasury-agent | 🟡 manual checklist in `token/runbook.md` § Treasury (sleeve reconciliation) | No Kamino integration; backup mode is a plain USDC account |
+| crank-runner | 🟡 settlement pagination + refunds, idempotent on on-chain state; **escalating priority fee (×1.5 per retry from a floor) + ±10% jitter on fee and backoff (D11)**; kill-switch drill in CI | No phase-deadline, seasoning-merge or distribution cranks (the programs don't exist yet); no bonded crank wallet (it uses the operator's `id.json`) |
+| evidence-exporter | 🟡 program-scoped JSONL of the rails' own events + SHA-256 manifest | Not **signed** (a hash is not a signature), not session-scoped, no marks or model versions yet |
 
 ---
 
@@ -318,7 +371,7 @@ Postgres: Supabase (dev/prod projects). RPC: Helius (free dev tier → paid at P
 
 | Item | Plan |
 |---|---|
-| Scope (fixed) | `credit-gate`, `auction-engine` (escrow/clearing/settlement), `liquidity-facility`, `credit-math`. `mark-engine`, `queue-claim`, `tranche-engine` included at best-effort pricing — scope growth is the #1 timeline risk; **freeze scope at contract** |
+| Scope (fixed) | **`payment-rails`** (added 2026-09, #47: it holds all client cash, so it is not optional at any pricing), `credit-gate`, `auction-engine` (escrow/clearing/settlement), `liquidity-facility`, `credit-math`. `mark-engine`, `queue-claim`, `tranche-engine` included at best-effort pricing — scope growth is the #1 timeline risk; **freeze scope at contract** |
 | Firms | 2–3 boutique Solana shops (OtterSec/Neodyme/Zellic-tier or independent auditors) — request quotes at P3 so the slot is booked before P5, not after |
 | Prep | Internal review checklist per program (invariants, PDA derivation table, has_one audit, overflow proofs), fuzz targets for credit-math + clearing, LiteSVM adversarial suite (bid spam, refund griefing, gate griefing) — **delivered with the codebase** to cut audit days |
 | Findings | All criticals/highs fixed + re-reviewed before mainnet; mediums triaged with written rationale; report published (marketing asset for issuers/grants) |
@@ -381,6 +434,7 @@ Postgres: Supabase (dev/prod projects). RPC: Helius (free dev tier → paid at P
 | queue-claim | §5 | QC-1..4 | 8 |
 | liquidity-facility | §5 | LF-1..4 | 9 |
 | tranche-engine | §6 | TE-1..4 | 10 |
+| payment-rails (§4.7, as built) | §2, §5, §6 cash legs | AE-4, AE-6 (DvP; eligibility re-check pending), AE-7, QC-3, TE-2 (cash-only coupons). **AE-3 is contradicted by the per-trade fee (#59)** | 3, 5, 8, 9, 10, 11 |
 | services/UI/governance | §8, §10, §11 | L-items via Part III | 12 |
 
 *Next docs: demo script (6-minute session) · issuer one-pager · Foundation grant application (credit-gate as sRFC37 reference implementation).*
