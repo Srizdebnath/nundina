@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Deploy payment-rails at its fixed program id, verify the on-chain bytes,
-# and record the deployment (devnet/mainnet only) in payment-rails/DEPLOYMENTS.md.
+# and record the deployment (devnet/testnet/mainnet; not local) in
+# payment-rails/DEPLOYMENTS.md.
 #
 #   CLUSTER=devnet   AUTHORITY=~/.config/solana/id.json  bash deploy.sh
 #   CLUSTER=http://127.0.0.1:8899                         bash deploy.sh   # rehearsal
 #   CLUSTER=devnet RPC_URL=https://devnet.helius-rpc.com/?api-key=… bash deploy.sh
 #   RPC_URL=… bash deploy.sh --dry-run    # print (RPC, genesis, cluster) and exit
+#   bash deploy.sh --help                 # this text; touches nothing
+#
+# Arguments are parsed strictly: anything other than --dry-run / --help
+# aborts before any network access (#55). DRY_RUN, UPGRADE, USE_RPC and
+# I_MEAN_MAINNET accept only 0 or 1.
 #
 # RPC_URL overrides the endpoint (the public devnet RPC rate-limits the ~800
 # buffer writes of a full deploy). The recorded cluster label is NEVER taken
@@ -18,21 +24,72 @@
 # Idempotent: if the program already holds exactly this build, it does
 # nothing. Upgrading a different build requires UPGRADE=1.
 set -euo pipefail
+SELF=$(realpath "$0")
 cd "$(dirname "$0")/../../.."   # → payment-rails/
+
+die() { echo "✗ $*" >&2; exit 1; }
+usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
+
+DRY_RUN=${DRY_RUN:-0}
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown argument '$arg' (accepted: --dry-run, --help) — nothing was done" ;;
+  esac
+done
+for v in DRY_RUN UPGRADE USE_RPC I_MEAN_MAINNET; do
+  case "${!v:-0}" in 0|1) ;; *) die "$v must be 0 or 1, got '${!v}' — nothing was done" ;; esac
+done
 
 EXPECTED_ID=GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn
 REQUESTED=${CLUSTER:-}   # endpoint shorthand/URL, or a moniker to assert
 RPC=${RPC_URL:-${REQUESTED:-devnet}}
 RPC_SHOWN=${RPC%%\?*}   # for output: a query string may carry an API key
-DRY_RUN=${DRY_RUN:-0}; [ "${1:-}" = --dry-run ] && DRY_RUN=1
 AUTHORITY=${AUTHORITY:-$HOME/.config/solana/id.json}
 SO=target/deploy/payment_rails.so
 PROGRAM_KEY=keys/payment_rails-keypair.json
 PRICE=${PRIORITY_FEE:-20000}   # µlamports / CU for deploy transactions
 SEND_VIA=(--use-rpc); [ "${USE_RPC:-1}" = 0 ] && SEND_VIA=()
 
-die() { echo "✗ $*" >&2; exit 1; }
-sol() { solana -u "$RPC" "$@"; }
+# The solana CLI embeds the full request URL in its errors, so anything it
+# prints can carry an `?api-key=`. Everything shown passes through redact.
+redact() {
+  local s
+  while IFS= read -r s || [ -n "$s" ]; do
+    s=${s//"$RPC"/"$RPC_SHOWN"}
+    printf '%s\n' "$s" | sed -E 's/([?&][A-Za-z_-]*(key|token|secret)[A-Za-z_-]*=)[^&[:space:]")]*/\1<redacted>/Ig'
+  done
+}
+sol() { solana -u "$RPC" "$@" 2> >(redact >&2); }
+
+# Endpoint URL for raw JSON-RPC (the CLI accepts monikers too).
+case "$RPC" in
+  d|devnet) RPC_HTTP=https://api.devnet.solana.com ;;
+  m|mainnet-beta) RPC_HTTP=https://api.mainnet-beta.solana.com ;;
+  t|testnet) RPC_HTTP=https://api.testnet.solana.com ;;
+  l|localhost) RPC_HTTP=http://127.0.0.1:8899 ;;
+  *) RPC_HTTP=$RPC ;;
+esac
+
+# Does an account exist? Prints `present` or `absent`. An RPC error, a
+# timeout or a garbled reply is neither: retried, then fatal. Treating an
+# error as "absent" would skip the UPGRADE=1 guard and mislabel the
+# registry row (#55).
+account_state() {
+  local body reply
+  body='{"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":["'"$1"'",{"encoding":"base64","dataSlice":{"offset":0,"length":0},"commitment":"confirmed"}]}'
+  for delay in 2 4 8 0; do
+    reply=$(curl -sS --max-time 20 -H 'Content-Type: application/json' -d "$body" "$RPC_HTTP" 2>/dev/null | tr -d ' \n\t' || true)
+    case "$reply" in
+      *'"error"'*) ;;
+      *'"value":null'*) echo absent; return 0 ;;
+      *'"value":{'*) echo present; return 0 ;;
+    esac
+    [ "$delay" = 0 ] || sleep "$delay"
+  done
+  die "cannot tell whether $1 exists at $RPC_SHOWN (RPC error, 4 attempts) — refusing to guess"
+}
 
 # ── Resolve the cluster from the endpoint itself (#28) ──────────────────
 # Genesis hashes are the clusters' identities; a local validator gets a
@@ -93,14 +150,23 @@ echo "program   $PROGRAM_ID"
 echo "authority $AUTH_PK"
 echo "build     $BUILD_SHA ($LEN bytes)"
 
+# The ~850 KB dump fails often on the public devnet RPC: retry with backoff.
 verify_dump() {
-  local tmp; tmp=$(mktemp)
-  sol program dump "$PROGRAM_ID" "$tmp" >/dev/null
-  local got; got=$(sha256sum "$tmp" | cut -d' ' -f1); rm -f "$tmp"
-  echo "$got"
+  local tmp got delay; tmp=$(mktemp)
+  for delay in 2 4 8 16 0; do
+    if sol program dump "$PROGRAM_ID" "$tmp" >/dev/null; then
+      got=$(sha256sum "$tmp" | cut -d' ' -f1); rm -f "$tmp"
+      echo "$got"; return 0
+    fi
+    [ "$delay" = 0 ] || { echo "  program dump failed; retrying in ${delay}s" >&2; sleep "$delay"; }
+  done
+  rm -f "$tmp"; die "program dump failed 5 times at $RPC_SHOWN"
 }
 
-if sol program show "$PROGRAM_ID" >/dev/null 2>&1; then
+# Assigned first: a `die` inside $(…) only exits the subshell, and a bare
+# `[ "$(…)" = present ]` would then fall through to MODE=deploy.
+PROGRAM_STATE=$(account_state "$PROGRAM_ID")
+if [ "$PROGRAM_STATE" = present ]; then
   ONCHAIN=$(verify_dump)
   if [ "$ONCHAIN" = "$BUILD_SHA" ]; then
     echo "✓ already deployed with this exact build — nothing to do"
@@ -108,6 +174,7 @@ if sol program show "$PROGRAM_ID" >/dev/null 2>&1; then
   fi
   [ "${UPGRADE:-0}" = 1 ] || die "program exists with a different build ($ONCHAIN); re-run with UPGRADE=1 to upgrade"
   CURRENT_AUTH=$(sol program show "$PROGRAM_ID" | awk '/^Authority:/ {print $2}')
+  [ -n "$CURRENT_AUTH" ] || die "could not read the upgrade authority of $PROGRAM_ID" 
   [ "$CURRENT_AUTH" = "$AUTH_PK" ] || die "upgrade authority is $CURRENT_AUTH, not $AUTH_PK"
   MODE=upgrade
 else
@@ -131,7 +198,7 @@ fi
 stranded_buffers() {
   local bufs
   bufs=$(sol program show --buffers --buffer-authority "$AUTH_PK" 2>/dev/null \
-    | awk '$1 ~ /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ {print $1 " (" $(NF-1) " SOL)"}') || true
+    | awk 'length($1) >= 32 && length($1) <= 44 && $1 ~ /^[1-9A-HJ-NP-Za-km-z]+$/ {print $1 " (" $(NF-1) " SOL)"}') || true
   [ -n "$bufs" ] || return 0
   echo "✗ SOL is held in buffer(s) owned by $AUTH_PK:" >&2
   echo "$bufs" | sed 's/^/    /' >&2
@@ -146,8 +213,8 @@ OUT=$(sol program deploy "$SO" \
   --max-len "$LEN" \
   --with-compute-unit-price "$PRICE" \
   --max-sign-attempts 50 \
-  "${SEND_VIA[@]}" 2>&1) || { echo "$OUT" >&2; stranded_buffers; die "deploy failed"; }
-echo "$OUT"
+  "${SEND_VIA[@]}" 2>&1) || { echo "$OUT" | redact >&2; stranded_buffers; die "deploy failed"; }
+echo "$OUT" | redact
 SIG=$(echo "$OUT" | awk '/^Signature:/ {print $2}')
 
 ONCHAIN=$(verify_dump)
@@ -159,7 +226,7 @@ ONCHAIN_AUTH=$(echo "$SHOW" | awk '/^Authority:/ {print $2}')
 echo "✓ verified: dump SHA-256 == build, authority $ONCHAIN_AUTH, slot $SLOT"
 
 case "$CLUSTER" in
-  devnet|mainnet-beta)
+  devnet|testnet|mainnet-beta)
     F=DEPLOYMENTS.md
     if [ ! -f "$F" ]; then
       cat >"$F" <<'EOF'
