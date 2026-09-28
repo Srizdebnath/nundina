@@ -27,6 +27,26 @@ jobs:
       - name: Tests (unit + property)
         run: cargo test --locked --workspace
 
+  # SRS 08 §2/§13 target 100% branch coverage on credit-math. This job
+  # measures and publishes the real figure (branch coverage needs nightly).
+  # It does not gate on 100% yet: an honest number beats an unmeasured claim
+  # (#60). Raise `--fail-under-lines` as coverage climbs.
+  credit-math-coverage:
+    name: credit-math — coverage (lines + branches)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Coverage
+        run: |
+          cargo +nightly llvm-cov --locked -p credit-math --branch --summary-only \
+            --fail-under-lines 95 | tee coverage.txt
+          { echo '### credit-math coverage'; echo '```'; cat coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
   # LiteSVM tests run the real SBF build, so they need anchor + solana-cli.
   # Own workspace + lockfile (programs/credit-gate/tests-svm/Cargo.toml).
   credit-gate-svm:
