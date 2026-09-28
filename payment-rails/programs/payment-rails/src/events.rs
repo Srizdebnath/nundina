@@ -77,6 +77,14 @@ pub enum EscrowAction {
     AssetDeposited,
     /// Unsold seller asset returned (amount in asset base units, R2).
     AssetReturned,
+    /// `refund_ask` found less asset in the vault than escrowed, e.g. after
+    /// a permanent-delegate transfer. Amount = missing base units. The
+    /// refund still completed (#62). Appended: indices above are stable.
+    AssetShortfall,
+    /// A refund found less USDC in the vault than recorded (settlement-mint
+    /// delegate or clawback). Amount = missing micro-USDC. The refund still
+    /// completed; the forfeit was paid first, up to what was held (#62).
+    CashShortfall,
 }
 
 /// Emitted for every escrow/bond movement (R1).

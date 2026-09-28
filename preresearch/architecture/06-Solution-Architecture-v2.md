@@ -695,7 +695,7 @@ Rules that make this safe:
 
 - **Every multi-step flow is a resumable state machine with idempotent steps.** No flow can be left partially applied by a halt, a congestion event, or a keeper dying mid-loop (D12, M6).
 - **Bonded keepers with a permissionless fallback.** Bonds are forfeitable for missed SLAs; anyone can crank after the SLA and collect the fee (D6).
-- **Timeout refund is callable by any participant, always.** There is no configuration in which escrow is unreachable (D6, G13).
+- **Timeout refund is callable by any participant, always.** There is no configuration in which escrow is unreachable (D6, G13). *Build note (#62):* this holds when an asset's permanent delegate drains an escrow vault. The refund returns what is held and records the shortfall (`payment-rails` tests `delegate_seizure_cannot_strand_the_ask_bond`, `short_cash_vault_still_refunds_and_closes`). It does not hold while the asset's freeze authority has frozen the vault. That authority is the issuer's (§11 THEIRS).
 - **Retry with escalating priority fees, jittered submission, idempotent settlement** — auction closes land in congested slots by definition (D11).
 - **Never liquidate on stale marks** (B5) — enforced in `mark-engine` state, not in facility logic, so no code path can bypass it.
 
