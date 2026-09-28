@@ -21,7 +21,7 @@ here.
 |---|---|---|
 | `RailsConfig` (`["rails_config"]`): authority, usdc_mint, fee_receiver, reserve, operator, **registrar**, fee_bps, reserve_bps, paused, depeg_breaker | R0–R3 | ✅ |
 | `initialize_config`, gated to the program's **upgrade authority** | R0 | ✅ |
-| `set_operator`, `set_breaker`, `set_fees` (hard caps: fee ≤ 200 bps, reserve ≤ 200 bps), **`set_registrar`**, authority-only and evented | R1–R3 | ✅ |
+| `set_operator`, `set_breaker`, `set_fees` (rails hard caps: fee ≤ 200 bps, reserve ≤ 200 bps; these are not the doc 06 §11 prudential floor, see `credit_math::prudential`), **`set_registrar`**, authority-only and evented | R1–R3 | ✅ |
 | `CashSession` (`["session", operator, id]`): records at open the deadlines, bond, cap, **asset mint and decimals, fee receiver, fee bps, ROFR authority**, none of which can change later | R1/R2 | ✅ |
 | `open_session`, `mark_revealed`, `fail_session`, **`finish_session`** (operator only; none of them move value) | R1/R2 | ✅ |
 | Bid escrow: `deposit` (cash + bond) · **ask escrow: `open_asset_vault` → `deposit_ask`** (asset + USDC bond; separate asset vault the gate can thaw first) | R1/R2 | ✅ |
