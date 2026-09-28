@@ -270,7 +270,11 @@ Anyone can check that the live program is the recorded build, with no secret:
 bash crank/scripts/devnet/verify.sh          # CLUSTER=devnet by default
 ```
 
-It reads the newest row for the cluster in `DEPLOYMENTS.md`, dumps the
-on-chain program, and compares its SHA-256 and upgrade authority with the
-recorded values. The recorded Build SHA-256 is the verification artifact: the
+It reads the newest row for the cluster in `DEPLOYMENTS.md` and fails closed
+on each check. The row's program id must equal `declare_id!` in the source.
+The row must record a genesis hash, and the endpoint's must match it (a row
+without one is rejected, not skipped). The dump's SHA-256, the upgrade
+authority and the last-deployed slot must equal the recorded values. RPC
+reads are retried with backoff, and an RPC that keeps failing is reported as
+an RPC problem, not as a mismatch. The recorded Build SHA-256 is the verification artifact: the
 key isn't needed to show that the deployed bytes are the reviewed bytes.

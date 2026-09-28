@@ -7,17 +7,39 @@
 #   CLUSTER=mainnet-beta bash verify.sh
 #   CLUSTER=devnet RPC_URL=https://… bash verify.sh
 #
-# Checks: dump SHA-256 == recorded Build SHA-256, on-chain upgrade authority
-# == recorded authority, and (when the row records one) genesis hash.
+# Fails closed on every check (#56):
+#   - the row's program id must equal `declare_id!` in the program source,
+#     so the registry can't vouch for a program id of its own choosing;
+#   - the row must record a genesis hash, and the endpoint's must match it
+#     (a row without one is not self-verifying and is rejected, never
+#     skipped: skipping would let any endpoint, mainnet included, pass);
+#   - dump SHA-256 == recorded Build SHA-256;
+#   - on-chain upgrade authority == recorded authority;
+#   - on-chain "Last Deployed In Slot" == recorded Slot.
+# Network reads are retried with backoff; "RPC kept failing" and "mismatch"
+# are reported differently.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."   # → payment-rails/
 
 CLUSTER=${CLUSTER:-devnet}
 RPC=${RPC_URL:-$CLUSTER}
-F=DEPLOYMENTS.md
+RPC_SHOWN=${RPC%%\?*}   # a query string may carry an API key
+F=${REGISTRY:-DEPLOYMENTS.md}
+SRC=programs/payment-rails/src/lib.rs
 
 die() { echo "✗ $*" >&2; exit 1; }
-sol() { solana -u "$RPC" "$@"; }
+sol() { solana -u "$RPC" --commitment confirmed "$@" 2> >(sed "s|${RPC//|/\\|}|$RPC_SHOWN|g" >&2); }
+
+# retry <what> <cmd…>: run with 2/4/8/16 s backoff; exhaustion is fatal and
+# says so (distinct from a value mismatch).
+retry() {
+  local what=$1 delay; shift
+  for delay in 2 4 8 16 0; do
+    "$@" && return 0
+    [ "$delay" = 0 ] || { echo "  $what failed; retrying in ${delay}s" >&2; sleep "$delay"; }
+  done
+  die "$what failed 5 times at $RPC_SHOWN — RPC problem, NOT a verification result; retry or use RPC_URL"
+}
 
 # Latest registry row for $CLUSTER, fields looked up by column header so the
 # table can gain columns without breaking this script.
@@ -27,9 +49,12 @@ field() {
     /^\|---/ { next }
     /^\|/ && ("Cluster" in col) {
       c = $col["Cluster"]; gsub(/^ +| +$/, "", c)
-      if (c == cluster && (want in col)) { v = $col[want] }
+      if (c == cluster) { v = (want in col) ? $col[want] : "" }
     }
-    END { if (v != "") { match(v, /`[^`]+`/); print substr(v, RSTART + 1, RLENGTH - 2) } }
+    END {
+      gsub(/^ +| +$/, "", v)
+      if (match(v, /`[^`]+`/)) print substr(v, RSTART + 1, RLENGTH - 2); else print v
+    }
   ' "$F"
 }
 
@@ -38,21 +63,40 @@ PROGRAM_ID=$(field "Program ID")
 WANT_SHA=$(field "Build SHA-256")
 WANT_AUTH=$(field "Upgrade authority")
 WANT_GENESIS=$(field "Genesis hash")
+WANT_SLOT=$(field "Slot")
 echo "program   $PROGRAM_ID ($CLUSTER, from $F)"
 
-if [ -n "$WANT_GENESIS" ]; then
-  GENESIS=$(sol genesis-hash)
-  [ "$GENESIS" = "$WANT_GENESIS" ] || die "genesis $GENESIS != recorded $WANT_GENESIS — wrong endpoint for $CLUSTER"
-  echo "✓ genesis   $GENESIS"
-fi
+# 1. The registry may not choose the program id: it must be the source's.
+SRC_ID=$(sed -n 's/^declare_id!("\([^"]*\)");/\1/p' "$SRC")
+[ -n "$SRC_ID" ] || die "no declare_id! in $SRC"
+[ "$PROGRAM_ID" = "$SRC_ID" ] || die "registry program id $PROGRAM_ID != declare_id! $SRC_ID in $SRC"
+echo "✓ source    declare_id! matches"
 
+# 2. Genesis is mandatory.
+for v in WANT_GENESIS WANT_SHA WANT_AUTH WANT_SLOT; do
+  [ -n "${!v}" ] || die "the latest $CLUSTER row has no ${v#WANT_} value — it is not self-verifying; re-record it with deploy.sh"
+done
+GENESIS=
+get_genesis() { GENESIS=$(sol genesis-hash) && [ -n "$GENESIS" ]; }
+retry "genesis-hash" get_genesis
+[ "$GENESIS" = "$WANT_GENESIS" ] || die "genesis $GENESIS != recorded $WANT_GENESIS — $RPC_SHOWN is not $CLUSTER"
+echo "✓ genesis   $GENESIS"
+
+# 3. Bytes.
 TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
-sol program dump "$PROGRAM_ID" "$TMP" >/dev/null
+retry "program dump" sol program dump "$PROGRAM_ID" "$TMP" >/dev/null
 GOT_SHA=$(sha256sum "$TMP" | cut -d' ' -f1)
 [ "$GOT_SHA" = "$WANT_SHA" ] || die "on-chain SHA-256 $GOT_SHA != recorded $WANT_SHA"
 echo "✓ build     $GOT_SHA"
 
-GOT_AUTH=$(sol program show "$PROGRAM_ID" | awk '/^Authority:/ {print $2}')
+# 4. Authority and slot.
+SHOW=
+get_show() { SHOW=$(sol program show "$PROGRAM_ID") && [ -n "$SHOW" ]; }
+retry "program show" get_show
+GOT_AUTH=$(awk '/^Authority:/ {print $2}' <<<"$SHOW")
 [ "$GOT_AUTH" = "$WANT_AUTH" ] || die "upgrade authority $GOT_AUTH != recorded $WANT_AUTH"
 echo "✓ authority $GOT_AUTH"
+GOT_SLOT=$(awk '/Last Deployed In Slot:/ {print $NF}' <<<"$SHOW")
+[ "$GOT_SLOT" = "$WANT_SLOT" ] || die "last deployed in slot $GOT_SLOT != recorded $WANT_SLOT — a newer (unrecorded) deploy, or a stale row"
+echo "✓ slot      $GOT_SLOT"
 echo "✓ live program matches payment-rails/$F"
