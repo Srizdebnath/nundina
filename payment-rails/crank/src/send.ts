@@ -5,7 +5,11 @@
  *   program, clamped to [min, max] micro-lamports per CU.
  * - Retries: only *transient* failures (expired blockhash, network errors,
  *   rate limits) are retried, with exponential backoff and a fresh
- *   blockhash each attempt. A program error is final and returned typed —
+ *   blockhash each attempt. Each retry **escalates** the fee ×1.5 over the
+ *   oracle's pick (at least `retryFloorMicroLamports`, clamped to max), and
+ *   both the fee and the delay get random **jitter**, so a crank losing to
+ *   a fee spike outbids it and retrying cranks don't move in lockstep
+ *   (SRS 08 §6, doc 05 D11). A program error is final and returned typed —
  *   callers decide whether it means "already done" (idempotency).
  */
 import {
@@ -34,6 +38,10 @@ export interface FeeConfig {
   minMicroLamports: bigint;
   maxMicroLamports: bigint;
   percentile: number; // 0..100
+  /** Fee used on a retry when the oracle says 0, so escalation has a base. */
+  retryFloorMicroLamports: bigint;
+  /** ± jitter on fee and delay, in percent (0 disables). */
+  jitterPct: number;
 }
 
 export interface Ctx {
@@ -65,7 +73,29 @@ export const DEFAULT_FEE: FeeConfig = {
   minMicroLamports: 0n,
   maxMicroLamports: 50_000n,
   percentile: 75,
+  retryFloorMicroLamports: 1_000n,
+  jitterPct: 10,
 };
+
+/**
+ * D11: the fee for `attempt` (1-based). Attempt 1 is the oracle pick; each
+ * retry multiplies by 1.5 (from at least `retryFloorMicroLamports`), adds
+ * ±`jitterPct`, and clamps to [min, max]. `rand` ∈ [0, 1). Pure, unit tested.
+ */
+export function escalatedFee(base: bigint, attempt: number, cfg: FeeConfig, rand: number): bigint {
+  const clamp = (v: bigint) => (v < cfg.minMicroLamports ? cfg.minMicroLamports : v > cfg.maxMicroLamports ? cfg.maxMicroLamports : v);
+  if (attempt <= 1) return clamp(base);
+  let fee = base > cfg.retryFloorMicroLamports ? base : cfg.retryFloorMicroLamports;
+  for (let i = 1; i < attempt && fee < cfg.maxMicroLamports; i++) fee = (fee * 3n) / 2n;
+  const j = BigInt(Math.round((rand * 2 - 1) * cfg.jitterPct * 100)); // basis points of fee
+  return clamp(fee + (fee * j) / 10_000n);
+}
+
+/** Exponential backoff with ±`jitterPct` jitter. Pure, unit tested. */
+export function backoffDelayMs(baseMs: number, attempt: number, jitterPct: number, rand: number): number {
+  const d = baseMs * 2 ** (attempt - 1);
+  return Math.max(0, Math.round(d * (1 + ((rand * 2 - 1) * jitterPct) / 100)));
+}
 
 /** p-th percentile of recent fees, clamped. Pure — unit tested. */
 export function pickPriorityFee(fees: bigint[], cfg: FeeConfig): bigint {
@@ -147,7 +177,7 @@ export async function send(
   let attempts = 0;
   for (let attempt = 1; attempt <= ctx.maxAttempts; attempt++) {
     attempts = attempt;
-    const price = await priorityFee(ctx);
+    const price = escalatedFee(await priorityFee(ctx), attempt, ctx.fee, Math.random());
     try {
       const { value: blockhash } = await ctx.rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
       const msg = pipe(
@@ -172,7 +202,7 @@ export async function send(
     } catch (e) {
       last = classify(e);
       if (!last.transient) break;
-      const delay = ctx.baseDelayMs * 2 ** (attempt - 1);
+      const delay = backoffDelayMs(ctx.baseDelayMs, attempt, ctx.fee.jitterPct, Math.random());
       ctx.log(`↻ ${label}: transient (${last.message.slice(0, 80)}); retry in ${delay} ms`);
       await sleep(delay);
     }

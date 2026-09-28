@@ -25,6 +25,33 @@ CLUSTER=devnet npm run verify
 CLUSTER=devnet MINT=<address> npm run verify
 ```
 
+## Treasury (sleeve) — weekly checklist (treasury-agent, SRS 08 §6)
+
+Manual by design: there is no key automation. Run it before every NAV
+publish, and keep the filled checklist with the week's evidence bundle.
+
+1. **Read the sleeve.** Record the USDC value of every sleeve holding, in
+   micro-USDC: the Kamino vault shares × the share price read at a recorded
+   slot, or, in backup mode, the plain USDC account balance. Record each
+   account address, the slot and the raw values.
+2. **Read supply.** `spl-token supply <NPCS mint> -u <cluster>` → `supply_base`.
+3. **Check I1.** Deposits confirmed to date (from the deposit log) × 10⁶
+   must equal `supply_base` exactly. If not, **stop**: no publish until the
+   gap is explained and fixed.
+4. **Reconcile movements.** Every deposit and withdrawal since the last
+   checklist has a transaction signature, and every mint and burn on the
+   NPCS mint matches one of them.
+5. **Compute NAV** with `credit-math` (`weekly_publish(treasury_micros,
+   supply_base, fee_bps, Δt)`). Record `nav_gross`, `fee` and `nav_published`
+   in pico, plus the inputs hash.
+6. **Sanity bounds.** NAV moves less than the configured deviation versus
+   last week. A larger move needs a second person's sign-off and a note.
+7. **Sign off.** Two people initial the checklist: the preparer, and a
+   reviewer who re-ran steps 2, 3 and 5.
+
+Until `mark-engine` exists, step 5's output is published only as a
+documented off-chain mark. Nothing on-chain consumes it yet.
+
 ## Token-2022 mechanics (verified empirically + from spl-token-2022 source)
 
 These cost us several failed transactions to establish. They apply to **any**
