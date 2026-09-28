@@ -4,8 +4,16 @@ Registry of official NUNDINA program deployments (G14: published from day one).
 Every row is verifiable independently: program ID on-cluster, dump-hash against
 the recorded build hash, upgrade authority against the authority map (08 §8).
 
+**Two registries, one rule.** This file lists the *current* official
+deployment of every program. `payment-rails` keeps its full per-deploy
+history, with genesis hashes, in
+[`payment-rails/DEPLOYMENTS.md`](payment-rails/DEPLOYMENTS.md), written by its
+`deploy.sh`. When they disagree, that file wins, and this row must be updated
+to match.
+
 | Program | Cluster | Program ID | Slot | Deploy signature | Build SHA-256 | Upgrade authority |
 |---|---|---|---|---|---|---|
+| payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (single key, pilot; Squads 2-of-2 per 08 §8 before mainnet) |
 | credit-gate v0.1.0 (P0 skeleton) | devnet | `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` | 503888002 | `2rDLR9z1NDskQsBXMf1jejEKVrCZ5ch7TJRxNTbfL79mZsms5rzigAi6JX4m7PKFLPVYryREVw7Gvz311xKv32dR` | `6e8c50879a0151c313f33c31b79d0ef4f9a945200a08cbbd4985efd75eef0e21` | `BprmmqrzBADdQ2iKARtqcDndWV5k22aUGrkMKeySjKgp` (single key — P0 bootstrap; Squads 2-of-2 takes over at P1 per 08 §8) |
 
 ## NPCS asset (Token-2022 mint)
@@ -20,6 +28,9 @@ the recorded build hash, upgrade authority against the authority map (08 §8).
 solana program show 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c -u devnet
 solana program dump 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c /tmp/dump.so -u devnet
 sha256sum /tmp/dump.so   # must equal the Build SHA-256 above
+
+# payment-rails (keyless; fails closed on any mismatch):
+bash payment-rails/crank/scripts/devnet/verify.sh
 
 # NPCS asset manifest + provenance:
 cd token && CLUSTER=devnet npm run verify

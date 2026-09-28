@@ -50,6 +50,16 @@ to_seller  = gross − fee − to_reserve                → seller's own USDC a
 qty                                                  → buyer's own asset account (same instruction)
 ```
 
+> **Fee posture: open legal item (#59).** doc 07 AE-3 requires *no
+> protocol-collected per-trade fee*. The rails take `fee_bps` (≤ 200) and
+> `reserve_bps` (≤ 200) on every fill, into accounts held by the rails
+> authority wallet, and nothing binds the fee to an operator or licensee
+> identity. doc 07 L2 names this fact pattern as broker-indicia risk. The
+> caps bound the *size*, not the *recipient*. Until counsel answers Q2, keep
+> `fee_bps` at pilot level and treat any change to it as a legal decision,
+> not a parameter tweak. Every fill's `FillSettled` event already discloses
+> `fee` and `to_reserve`.
+
 `to_seller + fee + to_reserve == gross` always holds. That's checked by a
 360-combination sweep in the unit tests (not exhaustive over `u64`) and
 against real balances in LiteSVM. The
@@ -152,7 +162,7 @@ for its two crates:
 - The program crate is kept out **by choice**, for isolation. It is not
   forced by the resolver: adding it to the root `members` only adds crates
   and changes none of the root's existing versions (checked 2026-09 against
-  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only via
+  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only (the rails are its only program consumer today: `ceil_div`, `mul_div`, `accrue_interest`, `distribute_cash`) via
 `path = "../../../programs/credit-math"`. CI covers it with dedicated jobs in
 `.github/workflows/ci.yml` (`payment-rails`, `payment-rails/crank`) that run
 everything in "Build and test" below from inside this folder, plus an IDL
