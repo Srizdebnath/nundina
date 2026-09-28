@@ -839,6 +839,8 @@ flowchart TB
     OURS -.->|"cannot override"| HARD
 ```
 
+**Enforcement status of the HARD items (build, 2026-09):** H1 is a crate constant, `credit_math::MAX_ADVANCE_RATE_BPS` = 5 000 (50%, SRS 08 LF-P1), but no program has an advance-rate field yet. H2 and H3 have **no value in the plan of record** and are enforced nowhere; `haircut_bps` only rejects a ceiling above 100%. H4 is enforced vacuously, because there is no mark engine and no liquidation instruction. H5 is enforced by the `payment-rails` refunds, with the ask-vault caveat in `payment-rails/PHASES.md`. The live table is in `programs/credit-math/src/prudential.rs`. The rails' own caps (`MAX_FEE_BPS`, `MAX_RESERVE_BPS`, `MAX_RATE_BPS`) bound different quantities and are not these items.
+
 **Curators (L1, L2):** haircuts, reserve prices and attachment points are economically decisive, so they belong to a named curator with a published mandate and skin in the game — the Steakhouse-style pattern — operating strictly inside the hard bounds above. Parameters are snapshotted at session open and immutable for the session (L5).
 
 **Key hygiene:** hardware/HSM, role separation, no single key with two capabilities (G7). Strict PDA derivation and `has_one` constraints everywhere; no unchecked `AccountInfo` (G8). Verifiable builds, published program IDs and an on-chain registry of official markets so clones are detectable (G14, D16). Pinned dependency versions with a staging cluster mirroring mainnet's extension set (D16). Runbooks for everything and no manual-only path, because this will be a small team operating securities infrastructure (H11).
