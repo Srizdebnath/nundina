@@ -422,7 +422,6 @@ name = "credit-gate"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "credit-math",
  "solana-sha256-hasher",
 ]
 
