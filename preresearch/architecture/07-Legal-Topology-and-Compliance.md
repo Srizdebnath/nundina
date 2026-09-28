@@ -163,7 +163,7 @@ flowchart TB
 |---|---|---|
 | AE-1 | `open_session` authorized **only** for a registered `venue_operator` account; operator identity + legal wrapper recorded in market config | L1 |
 | AE-2 | Session parameters snapshotted and immutable for the session; offer-document/disclosure-pack hash bound at open | L8, C8 |
-| AE-3 | No protocol-collected per-trade fee; fee splits payable only to configured operator/licensee identities | L2 |
+| AE-3 | No protocol-collected per-trade fee; fee splits payable only to configured operator/licensee identities. ⚠️ **Build conflict, open (#59):** `payment-rails` takes a per-fill `fee_bps` (cap 200) plus `reserve_bps` (cap 200) into accounts held by the rails authority wallet (devnet: 10 + 5 bps), and has no operator/licensee identity to bind the fee to. This is **not resolved here**. Either the protocol fee is dropped, or AE-3 is amended with written reasoning; that is a founder + counsel decision under **Q2**, and this row stands until then | L2 |
 | AE-4 | Issuer ROFR is a discrete evented state (exercise fully/partially/decline, timestamped) | L8, L20 |
 | AE-5 | Print publication honors market print policy: public / banded / aggregate-only / data-room | L14 |
 | AE-6 | Per-fill atomic DvP with eligibility re-check inside settlement; `forced_sale_flag` on liquidation sessions; depeg breaker on settlement asset | L3, L17, L19 |

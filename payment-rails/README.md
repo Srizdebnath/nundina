@@ -50,6 +50,16 @@ to_seller  = gross − fee − to_reserve                → seller's own USDC a
 qty                                                  → buyer's own asset account (same instruction)
 ```
 
+> **Fee posture: open legal item (#59).** doc 07 AE-3 requires *no
+> protocol-collected per-trade fee*. The rails take `fee_bps` (≤ 200) and
+> `reserve_bps` (≤ 200) on every fill, into accounts held by the rails
+> authority wallet, and nothing binds the fee to an operator or licensee
+> identity. doc 07 L2 names this fact pattern as broker-indicia risk. The
+> caps bound the *size*, not the *recipient*. Until counsel answers Q2, keep
+> `fee_bps` at pilot level and treat any change to it as a legal decision,
+> not a parameter tweak. Every fill's `FillSettled` event already discloses
+> `fee` and `to_reserve`.
+
 `to_seller + fee + to_reserve == gross` always holds. That's checked by a
 360-combination sweep in the unit tests (not exhaustive over `u64`) and
 against real balances in LiteSVM. The
