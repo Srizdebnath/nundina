@@ -1,7 +1,8 @@
 //! Allocation arithmetic — uniform-price clearing and pro-rata fills
 //! (doc 09 §6; AE-P5/P6). Deterministic: same inputs → same outputs, always.
 
-use crate::error::MathError;
+use crate::error::{MathError, RoundDirection};
+use crate::RoundAwayFromInitiator;
 use alloc::vec::Vec;
 
 /// A sealed order after reveal. `is_buy` distinguishes demand from supply.
@@ -140,7 +141,11 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
     let mut out: Vec<(u64, u128)> = bids
         .iter()
         .map(|&(id, q)| {
-            let a = total.checked_mul(q).ok_or(MathError::Overflow)? / sum_qty;
+            // Bidders claim units: floor against them; residue re-attached below.
+            let a = total
+                .checked_mul(q)
+                .ok_or(MathError::Overflow)?
+                .div_round(sum_qty, RoundDirection::AgainstInitiator)?;
             Ok((id, a))
         })
         .collect::<Result<Vec<_>, MathError>>()?;

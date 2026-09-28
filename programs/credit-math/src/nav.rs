@@ -7,13 +7,13 @@
 //! per NPCS** — a 6dp NAV floors it to zero for the first weeks. At pico
 //! precision the fee is exact from week one.
 //!
-//! All functions floor (`RoundDirection::AgainstInitiator`): the publisher
+//! All functions floor (`div_round(…, RoundDirection::AgainstInitiator)`): the publisher
 //! (NUNDINA, in the pilot) is the initiator of a mark, so rounding goes
 //! against the mark — never inflating NAV.
 
 use crate::error::{MathError, RoundDirection};
-use crate::mul_div;
 use crate::prudential::BPS_DENOMINATOR;
+use crate::{mul_div, RoundAwayFromInitiator};
 
 /// Whole NAV per NPCS in pico (1e12). NAV of 1.000411 USDC/NPCS = 1_000_411_522_333 pico.
 pub const PICO: u128 = 1_000_000_000_000;
@@ -37,7 +37,8 @@ pub fn nav_gross_pico(treasury_usdc_micros: u128, supply_base: u128) -> Result<u
     let numer = treasury_usdc_micros
         .checked_mul(PICO)
         .ok_or(MathError::Overflow)?;
-    Ok(numer / supply_base)
+    // The publisher initiates the mark: floor against it, never inflate NAV.
+    numer.div_round(supply_base, RoundDirection::AgainstInitiator)
 }
 
 /// I2b — fee accrual for one publication period, in pico.
@@ -58,7 +59,7 @@ pub fn fee_accrual_per_period(
         .checked_mul(u128::from(fee_bps))
         .and_then(|x| x.checked_mul(u128::from(delta_seconds)))
         .ok_or(MathError::Overflow)?;
-    Ok(numer / denom)
+    numer.div_round(denom, RoundDirection::AgainstInitiator)
 }
 
 /// I2c — published NAV: gross minus accrued fee (publisher floors against itself).
@@ -99,10 +100,6 @@ pub fn weekly_publish(
     let p = nav_published_pico(g, f)?;
     Ok((g, f, p))
 }
-
-/// Direction used by every NAV site (documented for audit greppability).
-#[allow(dead_code)]
-const NAV_ROUNDING: RoundDirection = RoundDirection::AgainstInitiator;
 
 #[cfg(test)]
 mod tests {
