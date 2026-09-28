@@ -100,9 +100,13 @@ impl Npcs {
         let key = Pubkey::new_unique();
         let len = ExtensionType::try_calculate_account_len::<TokenAccount>(&[]).unwrap();
         blank(&mut self.env, key, len, len);
-        let ix =
-            spl_token_2022::instruction::initialize_account3(&T22, &key, &self.env.asset_mint, owner)
-                .unwrap();
+        let ix = spl_token_2022::instruction::initialize_account3(
+            &T22,
+            &key,
+            &self.env.asset_mint,
+            owner,
+        )
+        .unwrap();
         let g = self.gate.insecure_clone();
         self.env.send(&[ix], &[&g]).expect("init NPCS account");
         key
@@ -225,11 +229,18 @@ fn npcs_dvp_end_to_end_after_gate_thaw() {
         let se = escrow_pda(&s, &seller.key.pubkey());
         n.thaw(&asset_vault_pda(&se));
         n.env.deposit_ask_only(&s, &seller, 2 * UNIT).unwrap();
-        n.env.deposit(&s, &buyer.key, &buyer.usdc, 300_000_000).unwrap();
+        n.env
+            .deposit(&s, &buyer.key, &buyer.usdc, 300_000_000)
+            .unwrap();
 
         let be = escrow_pda(&s, &buyer.key.pubkey());
         let usdc = [
-            seller.usdc, buyer.usdc, n.env.fee, n.env.reserve, vault_pda(&se), vault_pda(&be),
+            seller.usdc,
+            buyer.usdc,
+            n.env.fee,
+            n.env.reserve,
+            vault_pda(&se),
+            vault_pda(&be),
         ];
         let asset = [seller.asset, buyer.asset, asset_vault_pda(&se)];
         let (usdc0, asset0) = (n.env.total(&usdc), n.env.total(&asset));
@@ -246,7 +257,9 @@ fn npcs_dvp_end_to_end_after_gate_thaw() {
         n.env.finish_session(&s).unwrap();
         let crank = n.env.funded();
         n.env.refund_ask(&crank, &s, &seller).unwrap();
-        n.env.refund(&crank, &s, &buyer.key.pubkey(), &buyer.usdc).unwrap();
+        n.env
+            .refund(&crank, &s, &buyer.key.pubkey(), &buyer.usdc)
+            .unwrap();
         assert_eq!((n.env.total(&usdc), n.env.total(&asset)), (usdc0, asset0));
         assert_eq!(n.env.bal(&seller.asset), UNIT, "unsold unit back to seller");
         assert!(!n.env.exists(&asset_vault_pda(&se)), "asset vault closed");
@@ -263,18 +276,30 @@ fn fill_into_unadmitted_buyer_does_not_land() {
     let seller = n.party(BOND, UNIT);
     let (key, usdc) = n.env.bidder(200_000_000 + BOND);
     let frozen = n.new_account(&key.pubkey());
-    let buyer = Party { key, usdc, asset: frozen };
+    let buyer = Party {
+        key,
+        usdc,
+        asset: frozen,
+    };
     n.env.open_asset_vault(&s, &seller).unwrap();
     n.thaw(&asset_vault_pda(&escrow_pda(&s, &seller.key.pubkey())));
     n.env.deposit_ask_only(&s, &seller, UNIT).unwrap();
-    n.env.deposit(&s, &buyer.key, &buyer.usdc, 200_000_000).unwrap();
+    n.env
+        .deposit(&s, &buyer.key, &buyer.usdc, 200_000_000)
+        .unwrap();
     n.env.set_time(COMMIT_END);
     n.env.mark_revealed(&s, &seller.key.pubkey()).unwrap();
     n.env.mark_revealed(&s, &buyer.key.pubkey()).unwrap();
     n.env.set_time(REVEAL_END);
     let f = n.env.fill(&s, &buyer, &seller);
-    assert_eq!(n.env.settle(&f, 0, UNIT, PRICE), Err(Fail::Code(ACCOUNT_FROZEN)));
-    assert!(!n.env.exists(&receipt_pda(&s, 0)), "no receipt: fill can be retried");
+    assert_eq!(
+        n.env.settle(&f, 0, UNIT, PRICE),
+        Err(Fail::Code(ACCOUNT_FROZEN))
+    );
+    assert!(
+        !n.env.exists(&receipt_pda(&s, 0)),
+        "no receipt: fill can be retried"
+    );
     assert_eq!(n.env.session(&s).fills_settled, 0);
 }
 
@@ -291,11 +316,15 @@ fn donated_dust_neither_blocks_nor_inflates_the_ask() {
     let se = escrow_pda(&s, &seller.key.pubkey());
     let vault = asset_vault_pda(&se);
     n.thaw(&vault);
-    n.env.raw_asset_transfer(&griefer.asset, &vault, &griefer.key, 7).unwrap();
+    n.env
+        .raw_asset_transfer(&griefer.asset, &vault, &griefer.key, 7)
+        .unwrap();
     n.env.deposit_ask_only(&s, &seller, UNIT).unwrap();
     assert_eq!(n.env.escrow(&s, &seller.key.pubkey()).asset, UNIT);
     assert_eq!(n.env.session(&s).total_asset, UNIT);
-    n.env.fail_session_as(&n.env.authority.insecure_clone(), &s).unwrap();
+    n.env
+        .fail_session_as(&n.env.authority.insecure_clone(), &s)
+        .unwrap();
     let crank = n.env.funded();
     n.env.refund_ask(&crank, &s, &seller).unwrap();
     assert_eq!(n.env.bal(&seller.asset), UNIT + 7);
