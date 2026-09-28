@@ -22,7 +22,6 @@ idl-build = ["anchor-lang/idl-build"]
 # Exact pin: caret "1.1.2" resolves to 1.2.x, which uses the split
 # solana-program 3.x crates — a different anchor generation. SRS locks 1.1.x.
 anchor-lang = { version = "=1.1.2" }
-credit-math = { path = "../credit-math" }
 # SHA-256 for config provenance hashes (sol_sha256 syscall on SBF). Already in
 # the build through solana-address (PDA derivation), so this adds no crate.
 solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }

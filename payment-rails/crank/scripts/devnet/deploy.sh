@@ -122,27 +122,17 @@ if [ "$CLUSTER" = mainnet-beta ] && [ "${I_MEAN_MAINNET:-0}" != 1 ]; then
   die "refusing mainnet-beta without I_MEAN_MAINNET=1 (upgrade authority must be Squads 2-of-2 first, SRS §8)"
 fi
 
-# Checked before the build: unlike the .so, the key cannot be regenerated.
-if [ ! -f "$PROGRAM_KEY" ]; then
-  cat >&2 <<EOF
-✗ missing payment-rails/$PROGRAM_KEY — the program keypair for $EXPECTED_ID.
-
-  It is gitignored and never committed, so a fresh clone does not have it.
-  It CANNOT be regenerated: a new keypair is a different program id.
-
-  Recover it from an offline backup (README.md § Keys lists custodians),
-  then check it before deploying:
-    mkdir -p keys && cp <backup>/payment_rails-keypair.json keys/
-    solana-keygen pubkey keys/payment_rails-keypair.json   # must print $EXPECTED_ID
-
-  Only verifying the live program? That needs no key:
-    bash crank/scripts/devnet/verify.sh
-EOF
-  exit 1
+# The program id is fixed; the keypair is only needed for a FIRST deploy at
+# that id. Upgrading an existing program needs only the upgrade authority,
+# so a lost program keypair never blocks an upgrade (#57).
+PROGRAM_ID=$EXPECTED_ID
+HAVE_KEY=0
+if [ -f "$PROGRAM_KEY" ]; then
+  KEY_ID=$(solana-keygen pubkey "$PROGRAM_KEY")
+  [ "$KEY_ID" = "$EXPECTED_ID" ] || die "program keypair is $KEY_ID, expected $EXPECTED_ID"
+  HAVE_KEY=1
 fi
 [ -f "$SO" ] || die "missing $SO — run 'anchor build' first"
-PROGRAM_ID=$(solana-keygen pubkey "$PROGRAM_KEY")
-[ "$PROGRAM_ID" = "$EXPECTED_ID" ] || die "program keypair is $PROGRAM_ID, expected $EXPECTED_ID"
 AUTH_PK=$(solana-keygen pubkey "$AUTHORITY")
 LEN=$(stat -c %s "$SO")
 BUILD_SHA=$(sha256sum "$SO" | cut -d' ' -f1)
@@ -155,8 +145,14 @@ verify_dump() {
   local tmp got delay; tmp=$(mktemp)
   for delay in 2 4 8 16 0; do
     if sol program dump "$PROGRAM_ID" "$tmp" >/dev/null; then
-      got=$(sha256sum "$tmp" | cut -d' ' -f1); rm -f "$tmp"
-      echo "$got"; return 0
+      # ProgramData keeps its allocation after an upgrade to a smaller build,
+      # so the dump is the build followed by zero padding. Hash the build's
+      # length and require the rest to be zeros; otherwise a shrinking
+      # upgrade reads as a mismatch.
+      local pad; pad=$(tail -c +$((LEN + 1)) "$tmp" | tr -d '\0' | wc -c)
+      if [ "$pad" = 0 ]; then got=$(head -c "$LEN" "$tmp" | sha256sum | cut -d' ' -f1)
+      else got="non-zero-bytes-past-build($(sha256sum "$tmp" | cut -d' ' -f1))"; fi
+      rm -f "$tmp"; echo "$got"; return 0
     fi
     [ "$delay" = 0 ] || { echo "  program dump failed; retrying in ${delay}s" >&2; sleep "$delay"; }
   done
@@ -179,7 +175,28 @@ if [ "$PROGRAM_STATE" = present ]; then
   MODE=upgrade
 else
   MODE=deploy
+  if [ "$HAVE_KEY" != 1 ]; then
+    cat >&2 <<EOF
+✗ $PROGRAM_ID is not deployed on $CLUSTER, and a FIRST deploy at this id
+  needs payment-rails/$PROGRAM_KEY (the program keypair). It is gitignored,
+  never committed, and CANNOT be regenerated: a new keypair is a new id.
+
+  Restore it from the offline backup. Who holds the backups is recorded in
+  the team's private ops notes (README.md § Keys says what to back up, not
+  where), then check it:
+    mkdir -p keys && cp <backup>/payment_rails-keypair.json keys/
+    solana-keygen pubkey keys/payment_rails-keypair.json   # must print $EXPECTED_ID
+
+  Upgrading the live program does NOT need this key, only the upgrade
+  authority. Only verifying it needs no key at all:
+    bash crank/scripts/devnet/verify.sh
+EOF
+    exit 1
+  fi
 fi
+# First deploy signs with the program keypair. An upgrade addresses the
+# program by its bare id: the loader checks the upgrade authority only.
+PROGRAM_ARG=$PROGRAM_ID; [ "$MODE" = deploy ] && PROGRAM_ARG=$PROGRAM_KEY
 
 # Cost check: ProgramData rent (+ an equal-size buffer during the write,
 # refunded at the end) + fees margin.
@@ -207,7 +224,7 @@ stranded_buffers() {
 
 echo "→ $MODE"
 OUT=$(sol program deploy "$SO" \
-  --program-id "$PROGRAM_KEY" \
+  --program-id "$PROGRAM_ARG" \
   --upgrade-authority "$AUTHORITY" \
   --keypair "$AUTHORITY" \
   --max-len "$LEN" \

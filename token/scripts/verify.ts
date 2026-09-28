@@ -118,6 +118,9 @@ async function main(): Promise<void> {
     "ConfidentialTransferMint",
     "NonTransferable",
     "GroupPointer",
+    // Not in the §2 manifest: a close authority could delete the mint once
+    // supply hits zero and let a new mint reuse the address.
+    "MintCloseAuthority",
   ];
   for (const k of forbidden) {
     check(!byKind(k), `forbidden absent: ${k}`);

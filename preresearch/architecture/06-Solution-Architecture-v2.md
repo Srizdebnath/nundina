@@ -112,6 +112,8 @@ flowchart LR
 
 **Audit boundary:** each program is independently auditable, one responsibility each, and `credit-gate` is the only program that must be audited to securities-infrastructure standard because it is the one enforcing law.
 
+*Amendment (2026-09, #47):* the build added **`payment-rails`**, a shared cash layer below the engines that holds every escrowed client dollar (SRS 08 §4.7). It is audited to the same standard as `credit-gate`: the gate enforces law, and the rails hold the money. Its "one responsibility" is exact cash movement, shared by the engines instead of duplicated in each.
+
 ---
 
 ## §2 · `auction-engine` — sealed-bid periodic uniform-price auction
