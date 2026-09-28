@@ -27,6 +27,17 @@ declare_id!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
 /// single provider outage cannot halt onboarding).
 pub const MAX_ATTESTERS: usize = 4;
 
+/// Hard ceiling on `holder_cap` (#53). 2 000 is the Exchange Act §12(g)
+/// holders-of-record registration threshold. A gated private-credit market
+/// must never be configurable past it. Governance sets the cap below this
+/// (pilot: 8). **Counsel to confirm (Q-gates).**
+pub const MAX_HOLDER_CAP: u32 = 2_000;
+
+/// Hard ceiling on `seasoning_seconds` and `settlement_horizon_seconds`:
+/// 5 years. This is a sanity bound against typos and against
+/// `timestamp + duration` overflow in later checks, not a policy number.
+pub const MAX_DURATION_SECONDS: i64 = 5 * 365 * 86_400;
+
 /// One immutable-per-market policy configuration (CG-P2).
 ///
 /// Seeded per-mint. Every consumer (auction-engine sessions, facility
@@ -68,6 +79,33 @@ pub struct MarketConfig {
 impl MarketConfig {
     /// PDA seed prefix.
     pub const SEED: &'static [u8] = b"config";
+
+    /// Bounds every config must satisfy after any write (#53). Checked on
+    /// init and on every update, so governance cannot move a config out of
+    /// them:
+    /// - `1 ≤ holder_cap ≤ MAX_HOLDER_CAP`. A zero cap would reject every
+    ///   investor.
+    /// - `0 ≤ seasoning_seconds ≤ MAX_DURATION_SECONDS`. Negative seasoning
+    ///   would make `acquired + seasoning ≤ now` pass vacuously.
+    /// - `1 ≤ settlement_horizon_seconds ≤ MAX_DURATION_SECONDS`. A zero or
+    ///   negative horizon would make `expiry ≥ now + horizon` vacuous.
+    /// - `blocklist`, when set, is not the default key, the mint or the
+    ///   config itself.
+    pub fn check_bounds(&self, config_key: &Pubkey) -> Result<()> {
+        require!(
+            (1..=MAX_HOLDER_CAP).contains(&self.holder_cap)
+                && (0..=MAX_DURATION_SECONDS).contains(&self.seasoning_seconds)
+                && (1..=MAX_DURATION_SECONDS).contains(&self.settlement_horizon_seconds),
+            GateError::ConfigOutOfBounds
+        );
+        if let Some(bl) = self.blocklist {
+            require!(
+                bl != Pubkey::default() && bl != self.mint && bl != *config_key,
+                GateError::InvalidBlocklist
+            );
+        }
+        Ok(())
+    }
 }
 
 /// A pending hand-over of one market's `gate_config_authority` (#50).
@@ -194,6 +232,18 @@ pub enum GateError {
     /// Signer is not the key named by the pending hand-over.
     #[msg("Signer is not the proposed gate authority")]
     NotProposedAuthority,
+    /// holder_cap / seasoning / settlement horizon outside the hard bounds.
+    #[msg("Config value outside hard bounds")]
+    ConfigOutOfBounds,
+    /// Block-list target is the default key, the mint or the config itself.
+    #[msg("Invalid block-list account")]
+    InvalidBlocklist,
+    /// Attester already present.
+    #[msg("Attester already present")]
+    DuplicateAttester,
+    /// `attester_remove` names a key that is not an attester.
+    #[msg("Attester not found")]
+    AttesterNotFound,
 }
 
 #[program]
@@ -219,6 +269,9 @@ pub mod credit_gate {
             attesters.len() <= MAX_ATTESTERS,
             GateError::TooManyAttesters
         );
+        for (i, a) in attesters.iter().enumerate() {
+            require!(!attesters[..i].contains(a), GateError::DuplicateAttester);
+        }
         // Extract keys before the mutable account borrow (borrow discipline).
         let mint_key = ctx.accounts.mint.key();
         let authority_key = ctx.accounts.authority.key();
@@ -240,6 +293,7 @@ pub mod credit_gate {
             blocklist: None,
             bump,
         });
+        cfg.check_bounds(&cfg.key())?;
         emit!(ConfigUpdated {
             field_group: 0,
             new_config_hash: cfg.fingerprint(),
@@ -276,24 +330,34 @@ pub mod credit_gate {
         if let Some(v) = settlement_horizon_seconds {
             cfg.settlement_horizon_seconds = v;
         }
-        if let Some(add) = attester_add {
-            let n = cfg.attester_count as usize;
-            if n < MAX_ATTESTERS && !cfg.attesters[..n].contains(&add) {
-                cfg.attesters[n] = add;
-                cfg.attester_count += 1;
-            }
-        }
+        // Remove before add, so one call can swap an attester in a full set.
+        // Both fail loudly rather than silently emitting an unchanged config.
         if let Some(remove) = attester_remove {
             let n = cfg.attester_count as usize;
-            if let Some(idx) = cfg.attesters[..n].iter().position(|a| *a == remove) {
-                cfg.attesters[idx] = cfg.attesters[n - 1];
-                cfg.attesters[n - 1] = Pubkey::default();
-                cfg.attester_count -= 1;
-            }
+            let idx = cfg.attesters[..n]
+                .iter()
+                .position(|a| *a == remove)
+                .ok_or(GateError::AttesterNotFound)?;
+            cfg.attesters[idx] = cfg.attesters[n - 1];
+            cfg.attesters[n - 1] = Pubkey::default();
+            cfg.attester_count -= 1;
         }
+        if let Some(add) = attester_add {
+            let n = cfg.attester_count as usize;
+            require!(
+                !cfg.attesters[..n].contains(&add),
+                GateError::DuplicateAttester
+            );
+            require!(n < MAX_ATTESTERS, GateError::TooManyAttesters);
+            cfg.attesters[n] = add;
+            cfg.attester_count += 1;
+        }
+        // The block-list can be re-pointed but never cleared: removing the
+        // sanctions screen is not a governance action (CG-P5, C11).
         if let Some(bl) = blocklist_set {
             cfg.blocklist = Some(bl);
         }
+        cfg.check_bounds(&cfg.key())?;
         emit!(ConfigUpdated {
             field_group: 1,
             new_config_hash: cfg.fingerprint(),
