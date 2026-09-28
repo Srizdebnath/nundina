@@ -7,9 +7,10 @@
  * drift from the on-chain layout without the unit tests failing.
  *
  * Supported types are exactly what the program uses: u8/u16/u32/u64/i64,
- * bool, pubkey, fixed arrays, structs and unit enums. Values: u64/i64 are
- * `bigint`, pubkeys are `Address` strings, `[u8; N]` is `Uint8Array`, enums
- * are their variant name.
+ * bool, pubkey, fixed arrays, vecs (u32 length prefix), structs and unit
+ * enums. Values: u64/i64 are `bigint`, pubkeys are `Address` strings,
+ * `[u8; N]` is `Uint8Array`, `Vec<T>` is an array, enums are their variant
+ * name.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -25,6 +26,7 @@ import {
 type IdlType =
   | "u8" | "u16" | "u32" | "u64" | "i64" | "bool" | "pubkey"
   | { array: [IdlType, number] }
+  | { vec: IdlType }
   | { defined: { name: string } };
 
 interface IdlField { name: string; type: IdlType }
@@ -53,7 +55,7 @@ export interface Idl {
   types: IdlTypeDef[];
 }
 
-export type Value = bigint | number | boolean | string | Uint8Array | { [k: string]: Value };
+export type Value = bigint | number | boolean | string | Uint8Array | Value[] | { [k: string]: Value };
 export type Struct = { [k: string]: Value };
 
 const IDL_PATH = new URL("../idl/payment_rails.json", import.meta.url);
@@ -81,6 +83,12 @@ function encodeInto(t: IdlType, v: Value, out: number[]): void {
     const items = v as Uint8Array | Value[];
     if (items.length !== len) throw new Error(`array: expected ${len} items, got ${items.length}`);
     for (const item of items as Iterable<Value>) encodeInto(inner, item, out);
+    return;
+  }
+  if ("vec" in t) {
+    const items = v as Value[];
+    pushLe(BigInt(items.length), 4, out);
+    for (const item of items) encodeInto(t.vec, item, out);
     return;
   }
   const def = typeDefs.get(t.defined.name);
@@ -137,7 +145,18 @@ export function decodeAt(t: IdlType, b: Uint8Array, o: number): [Value, number] 
       items.push(v);
       o = next;
     }
-    return [items as unknown as Value, o];
+    return [items, o];
+  }
+  if ("vec" in t) {
+    const len = Number(readLe(b, o, 4));
+    o += 4;
+    const items: Value[] = [];
+    for (let i = 0; i < len; i++) {
+      const [v, next] = decodeAt(t.vec, b, o);
+      items.push(v);
+      o = next;
+    }
+    return [items, o];
   }
   const def = typeDefs.get(t.defined.name);
   if (!def) throw new Error(`unknown type ${t.defined.name}`);

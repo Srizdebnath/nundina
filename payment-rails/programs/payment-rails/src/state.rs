@@ -69,9 +69,11 @@ impl RailsConfig {
     }
 
     /// Deterministic fingerprint over config fields for event provenance.
-    /// Same FNV-1a placeholder as credit-gate (anchor-lang 1.1 re-exports no
-    /// hasher); swaps to SHA-256 with the gate's, and the event field stays
-    /// `[u8; 32]` so consumers are unaffected.
+    /// FNV-1a-64 in bytes 0..8, bytes 8..32 zero: not cryptographic.
+    /// credit-gate has moved to SHA-256 via `solana-sha256-hasher` (#49).
+    /// The rails keep FNV until their next deliberate upgrade, because
+    /// swapping it changes the live devnet program's event values. The event
+    /// field stays `[u8; 32]` either way.
     pub fn fingerprint(&self) -> [u8; 32] {
         const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
         const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
