@@ -3226,6 +3226,19 @@
         125,
         98
       ]
+    },
+    {
+      "name": "TransferInstruction",
+      "discriminator": [
+        107,
+        88,
+        92,
+        152,
+        248,
+        72,
+        206,
+        84
+      ]
     }
   ],
   "errors": [
@@ -4219,6 +4232,32 @@
       }
     },
     {
+      "name": "ExemptionPath",
+      "docs": [
+        "Legal basis a fill relies on (doc 07 L3–L5, SRS 08 AE-P8). Wire-stable",
+        "by index and append-only. `NotRecorded` means the rails were not given",
+        "one, which is the case for every fill until the gate's per-fill checklist",
+        "(CG-4) exists."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "NotRecorded"
+          },
+          {
+            "name": "Section4a7"
+          },
+          {
+            "name": "Section4a1Half"
+          },
+          {
+            "name": "IssuanceExemption"
+          }
+        ]
+      }
+    },
+    {
       "name": "Facility",
       "docs": [
         "A liquidity-facility fund (LF-P1/P2): USDC in a program-owned vault,",
@@ -4580,6 +4619,56 @@
               "Seller proceeds: the remainder."
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GateCheck",
+      "docs": [
+        "Whether the gate's AE-P8 final re-check (attestation still valid, lot",
+        "seasoning OK, block-list miss) ran inside this settlement. Append-only."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "NotPerformed"
+          },
+          {
+            "name": "Passed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotRef",
+      "docs": [
+        "One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lot_index",
+            "docs": [
+              "Index in the seller's `HolderLots` ring."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "acquired_ts",
+            "docs": [
+              "When the lot was acquired (unix seconds)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "restriction_expiry",
+            "docs": [
+              "When the lot's seasoning ends (unix seconds)."
+            ],
+            "type": "i64"
           }
         ]
       }
@@ -5031,6 +5120,114 @@
           },
           {
             "name": "Sell"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TransferInstruction",
+      "docs": [
+        "The AE-P8 transfer record, emitted once per settled fill right after",
+        "`FillSettled` (#61). `FillSettled` carries the economics. This event",
+        "carries what a transfer agent (doc 07 L21) and a books-and-records export",
+        "(L22) need to show the transfer was lawful.",
+        "",
+        "Until the gate's lot ledger and settle-time re-check exist, every fill",
+        "emits `lot_ids = []`, `exemption_path = NotRecorded` and",
+        "`gate_check = NotPerformed`. The absence of a compliance check is then",
+        "visible in the event stream, not only in a doc (#53)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "Session."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "docs": [
+              "Fill index within the session (joins to `FillSettled`)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "from",
+            "docs": [
+              "Seller wallet (asset leaves)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "to",
+            "docs": [
+              "Buyer wallet (asset arrives; issuer on the ROFR path)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Asset base units transferred."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Price, micro-USDC per whole asset unit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lot_ids",
+            "docs": [
+              "Lots the transferred units came from, at most `MAX_LOTS_PER_FILL`."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "LotRef"
+                }
+              }
+            }
+          },
+          {
+            "name": "exemption_path",
+            "docs": [
+              "Exemption basis relied on for this resale."
+            ],
+            "type": {
+              "defined": {
+                "name": "ExemptionPath"
+              }
+            }
+          },
+          {
+            "name": "gate_check",
+            "docs": [
+              "Whether the gate's final re-check ran in this transaction."
+            ],
+            "type": {
+              "defined": {
+                "name": "GateCheck"
+              }
+            }
+          },
+          {
+            "name": "disclosure_hash",
+            "docs": [
+              "Disclosure-policy hash (same value as `FillSettled`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }

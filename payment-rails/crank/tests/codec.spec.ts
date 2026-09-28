@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AccountRole, address, generateKeyPairSigner } from "@solana/kit";
-import { accountDiscriminator, decodeAccount, decodeAt, encode, errorCode, errorName, idl, ix } from "../src/idl.ts";
+import { accountDiscriminator, decodeAccount, decodeAt, decodeEvent, encode, errorCode, errorName, idl, ix } from "../src/idl.ts";
 
 const A = address("GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn");
 const B = address("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
@@ -59,4 +59,31 @@ test("error codes map both ways (append-only codes)", () => {
   assert.equal(errorCode("Unauthorized"), 6000);
   assert.equal(errorName(6011), "DestinationNotAllowlisted");
   assert.equal(errorCode("DestinationRevoked"), 6034);
+});
+
+test("TransferInstruction (AE-P8) round-trips, including a Vec<LotRef>", () => {
+  const disc = idl.events.find((e) => e.name === "TransferInstruction")!.discriminator;
+  const ev = {
+    session: A, fill_index: 3, from: B, to: A, qty: 2_000_000n, price: 1_000_411n,
+    lot_ids: [
+      { lot_index: 0, acquired_ts: 1_790_000_000n, restriction_expiry: 1_790_604_800n },
+      { lot_index: 5, acquired_ts: -1n, restriction_expiry: 0n },
+    ],
+    exemption_path: "Section4a7", gate_check: "Passed", disclosure_hash: new Uint8Array(32).fill(4),
+  };
+  const body = encode({ defined: { name: "TransferInstruction" } }, ev);
+  // 32+4+32+32+8+8 | 4-byte vec len + 2×(4+8+8) | enum | enum | 32
+  assert.equal(body.length, 116 + 4 + 40 + 1 + 1 + 32);
+  assert.deepEqual(decodeEvent(new Uint8Array([...disc, ...body])), { name: "TransferInstruction", data: ev });
+  // What every fill emits today: no lots, nothing recorded, no gate check.
+  const today = { ...ev, lot_ids: [], exemption_path: "NotRecorded", gate_check: "NotPerformed" };
+  const b2 = encode({ defined: { name: "TransferInstruction" } }, today);
+  assert.deepEqual(decodeEvent(new Uint8Array([...disc, ...b2]))!.data, today);
+});
+
+test("vec: truncated length prefix or body is rejected, never mis-decoded", () => {
+  const t = { vec: "u64" } as const;
+  const b = encode(t, [1n, 2n]);
+  assert.deepEqual(decodeAt(t, b, 0)[0], [1n, 2n]);
+  assert.throws(() => decodeAt(t, b.subarray(0, b.length - 1), 0), /too short/);
 });

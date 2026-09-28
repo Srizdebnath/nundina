@@ -44,3 +44,12 @@ cd token && CLUSTER=devnet npm run verify
   on `main` but is **not deployed** until the upgrade authority redeploys.
   Nothing consumes this skeleton yet, but configs created on devnet before
   that upgrade aren't trustworthy.
+- **Gate authority hand-over (#50):** a `MarketConfig`'s
+  `gate_config_authority` starts as the upgrade authority that initialized
+  it, which on devnet today is the single bootstrap key above, not a Squads
+  vault. Moving the *program* upgrade authority to Squads does **not** move
+  any existing config's authority. Each config moves with its own two-step
+  hand-over: the current authority calls `propose_gate_authority(<squads
+  vault>)`, then the vault calls `accept_gate_authority`. Do this for every
+  config when the bootstrap key is retired, and before the key is
+  destroyed. A config whose authority key is lost cannot be governed again.

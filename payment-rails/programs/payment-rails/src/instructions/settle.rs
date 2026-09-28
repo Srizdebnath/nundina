@@ -13,7 +13,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::error::RailsError;
-use crate::events::FillSettled;
+use crate::events::{ExemptionPath, FillSettled, GateCheck, TransferInstruction};
 use crate::instructions::token;
 use crate::state::{CashSession, Escrow, FillReceipt, FillSplit, RailsConfig, SessionStatus, Side};
 
@@ -112,6 +112,20 @@ fn record_fill(
         fee: split.fee,
         to_reserve: split.to_reserve,
         rofr,
+        disclosure_hash,
+    });
+    // AE-P8 transfer record. No lot ledger and no gate re-check exist yet,
+    // so this states that honestly instead of omitting the fields (#61, #53).
+    emit!(TransferInstruction {
+        session: session_key,
+        fill_index,
+        from: seller,
+        to: buyer,
+        qty,
+        price,
+        lot_ids: Vec::new(),
+        exemption_path: ExemptionPath::NotRecorded,
+        gate_check: GateCheck::NotPerformed,
         disclosure_hash,
     });
     Ok(())

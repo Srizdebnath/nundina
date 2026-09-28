@@ -256,6 +256,12 @@ solana program set-upgrade-authority GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPoc
 After that, upgrades go through a Squads proposal. Record the change as a new
 row in `DEPLOYMENTS.md`.
 
+`credit-gate` is different. Each `MarketConfig` has its own
+`gate_config_authority`, and handing the upgrade authority to Squads does not
+change it. Move each config with `propose_gate_authority` →
+`accept_gate_authority` before the old key is retired (root
+[`DEPLOYMENTS.md`](../DEPLOYMENTS.md), #50).
+
 ### Verifying without any key
 
 Anyone can check that the live program is the recorded build, with no secret:
