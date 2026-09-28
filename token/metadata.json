@@ -7,9 +7,11 @@
   "extensions": {
     "standard": "token2022",
     "default_account_state": "frozen",
-    "permissioning": "Token ACL (sRFC37) -> credit-gate",
+    "permanent_delegate": "issuer admin key (bootstrap; Squads 2-of-2 at P1)",
+    "metadata_pointer": "self (TLV metadata inside the mint)",
+    "permissioning": "Token ACL (sRFC37) -> credit-gate (target, P1; today the bootstrap freeze key thaws manually)",
     "nav_precision": "pico (1e12)",
-    "backing": "USDC 1:1 (invariant I1)",
+    "backing": "USDC 1:1 (invariant I1; by process, not yet enforced on-chain)",
     "seasoning": "7d compressed Rule-144 analog (pilot)",
     "governor_cap": 8
   }

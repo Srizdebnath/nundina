@@ -3,17 +3,30 @@
 NPCS has **no tokenomics in the crypto sense** — by design. No distribution,
 no vesting, no emissions, no staking, no governance. What it has instead is
 **three invariants**: the complete, testable description of what the token is
-worth and who may hold it. All arithmetic is implemented, hand-vector-tested,
-and property-fuzzed in `../programs/credit-math`.
+worth and who may hold it. They are the **design**. Below is what enforces
+each one today.
+
+## 0 · What is enforced today (#43)
+
+| Invariant | Arithmetic | Enforced on-chain? |
+|---|---|---|
+| **I1** backing (`supply == deposits × 10⁶`) | nothing to compute | ❌ **No.** No deposit instruction, no mint-on-deposit or burn-on-redemption script, no recorded supply check. It is enforced by process and event evidence, not by a program (doc 09 §12). The mint authority is a single bootstrap key, not Squads |
+| **I2** NAV | ✅ implemented and tested in `credit-math` (`nav.rs`) | ❌ **No program calls it yet** (no mark engine) |
+| **I3** eligibility | ❌ no lot ledger, no governor | ❌ **No.** `credit-gate` has no validate/thaw path. Every account is born frozen, and today the freeze authority, the bootstrap wallet `2xhjfAdr…6sRXMh`, thaws by hand. `seasoning_seconds` and `holder_cap` are stored config that nothing reads |
+
+Until P1 wires the gate, the eligibility of every holder rests on the
+operator of one wallet. That is the shape doc 09 §2.1 warns is
+indistinguishable from a honeypot, so the diagram below is the target, not
+the current state.
 
 ---
 
-## 1 · The three invariants
+## 1 · The three invariants (target design)
 
 ```mermaid
 flowchart TB
     subgraph I1["I1 · BACKING — what exists"]
-        A["USDC deposit<br/>confirmed in sleeve"] -->|"|mint 1:1<br/>Squads 2-of-2|"| S["NPCS supply<br/>(base units)"]
+        A["USDC deposit<br/>confirmed in sleeve"] -->|"|mint 1:1<br/>Squads 2-of-2 (P1; bootstrap key today)|"| S["NPCS supply<br/>(base units)"]
         S -->|"|redemption burn<br/>at published NAV|"| R["USDC out of sleeve"]
         S --- N1["supply_base == deposits_usdc × 10⁶<br/>at all times"]
     end
@@ -36,8 +49,9 @@ flowchart TB
 
 ## 2 · The exact math (integer, u128, floor-against-initiator)
 
-Every formula below runs in `../programs/credit-math` (41 tests, 7 property
-suites × 512 fuzz cases). NAV is carried at **pico precision (10¹² per whole
+The I2 formulas below are implemented in `../programs/credit-math` (unit tests
+plus property suites × 512 fuzz cases; run `cargo test -p credit-math`). I1 and
+I3 are specifications with no implementation yet (§0). NAV is carried at **pico precision (10¹² per whole
 NPCS)** — a decision the test suite forced: at 6dp the pilot fee floors to
 zero for weeks.
 
@@ -47,7 +61,7 @@ zero for weeks.
 | I2a | `nav_gross_pico = floor(treasury_micros × 10¹² ÷ supply_base)` | the weekly mark from real money |
 | I2b | `fee_pico = floor(nav_gross × fee_bps × Δt ÷ (10⁴ × 31,536,000))` | 10bps/yr, Julian year clock |
 | I2c | `nav_published = nav_gross − fee` | never inflating; publisher floors against itself |
-| I3 | `restriction_expiry = acquired_ts + 604_800` | compressed Rule-144 analog; real constants are per-market config |
+| I3 | `restriction_expiry = acquired_ts + 604_800` | compressed Rule-144 analog; real constants are per-market config. **Specified, not implemented**: no lot ledger exists yet |
 
 **Worked example at pilot scale** ($3,000.00 sleeve → 3,000 NPCS, weekly Δt):
 
@@ -74,7 +88,7 @@ flowchart LR
     NPCS --> QC["queue-claim<br/>PV = Σ E[fillₜ] × dᵗ<br/>claim behind a 5%/qtr gate<br/>prices ~850–950bps under NAV"]
     NPCS --> LF["liquidity-facility<br/>advance ≤ 50% of MARK_PROTECTIVE<br/>interest: floor(P × 1200bps × Δt ÷ year)"]
     NPCS --> TE["tranche-engine<br/>6-line cash waterfall +<br/>bottom-up loss waterfall,<br/>exact conservation"]
-    AE --> CM["credit-math<br/>41 tests · 7 property suites<br/>round against the initiator, always"]
+    AE --> CM["credit-math<br/>unit + property suites<br/>round against the initiator, always"]
     QC --> CM
     LF --> CM
     TE --> CM
