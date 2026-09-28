@@ -17,9 +17,14 @@ defined = set(re.findall(rf"^\| ({PFX}-P\d+) \|", srs.read_text(encoding="utf-8"
 if not defined:
     sys.exit(f"no requirement definitions found in {srs}")
 
-files = subprocess.check_output(
-    ["git", "ls-files", "*.md", "*.rs", "*.ts", "*.tsx", "*.toml", "*.yml"], cwd=root, text=True
-).split()
+files = [
+    f
+    for f in subprocess.check_output(
+        ["git", "ls-files", "*.md", "*.rs", "*.ts", "*.tsx", "*.toml", "*.yml"], cwd=root, text=True
+    ).split()
+    # The checker's own wiring quotes bad IDs as examples.
+    if f != ".github/workflows/docs.yml"
+]
 bad = []
 for f in files:
     for n, line in enumerate((root / f).read_text(encoding="utf-8", errors="replace").splitlines(), 1):
