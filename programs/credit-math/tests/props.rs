@@ -9,6 +9,7 @@ use credit_math::allocation::{allocate_pro_rata, find_uniform_clear_price, Order
 use credit_math::nav::{nav_gross_pico, weekly_publish, PICO};
 use credit_math::pv::{pv_of_claim, ExpectedFill};
 use credit_math::waterfall::{apply_loss, distribute_cash, WaterfallParams};
+use credit_math::MathError;
 use proptest::prelude::*;
 
 /// Random order book: prices around 1.0 USDC, sizes ≤ 1M base units.
@@ -41,12 +42,21 @@ proptest! {
         total in 0u128..5_000_000,
         bids in prop::collection::vec((0u64..1000, 1u128..250_000), 1..8),
     ) {
-        let out = allocate_pro_rata(total, &bids).unwrap();
+        let sum_qty: u128 = bids.iter().map(|&(_, q)| q).sum();
+        let res = allocate_pro_rata(total, &bids);
+        if total > sum_qty {
+            // Over-allocation is a typed rejection, never a silent scale-up.
+            prop_assert_eq!(res.unwrap_err(), MathError::OverAllocation);
+            return Ok(());
+        }
+        let out = res.unwrap();
         let sum: u128 = out.iter().map(|&(_, a)| a).sum();
         prop_assert_eq!(sum, total);
-        // No bidder receives more than their proportional ceiling (+1 dust).
-        let sum_qty: u128 = bids.iter().map(|&(_, q)| q).sum();
-        for ((_, a), (_, q)) in out.iter().zip(bids.iter()) {
+        for ((id, a), (bid_id, q)) in out.iter().zip(bids.iter()) {
+            prop_assert_eq!(id, bid_id);
+            // Nobody is allocated more than they committed …
+            prop_assert!(a <= q);
+            // … nor more than their proportional ceiling (+1 dust).
             prop_assert!(*a <= q * total / sum_qty + 1);
         }
     }
