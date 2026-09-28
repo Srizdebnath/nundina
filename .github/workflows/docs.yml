@@ -1,15 +1,13 @@
 name: docs
 
+# No `paths:` filter. The four jobs below are *required* status checks in
+# the main-branch ruleset, and a path-filtered workflow never reports on a PR
+# that touches no Markdown. Such a PR would then sit "Expected — waiting"
+# forever and could not merge. The jobs are cheap (under a minute).
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.md"
-      - ".github/workflows/docs.yml"
   pull_request:
-    paths:
-      - "**/*.md"
-      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
@@ -77,19 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Verify every mapped file exists
-        run: |
-          for f in \
-            preresearch/architecture/00-README.md \
-            preresearch/architecture/05-Problem-Register.md \
-            preresearch/architecture/06-Solution-Architecture-v2.md \
-            preresearch/architecture/07-Legal-Topology-and-Compliance.md \
-            preresearch/architecture/08-SRS-Pilot-Rails.md \
-            preresearch/research/12-Validation-2026-Reality-Check.md \
-            payment-rails/programs/payment-rails/Cargo.toml \
-            payment-rails/tests-svm/Cargo.toml \
-            payment-rails/crank/package.json \
-            payment-rails/DEPLOYMENTS.md; do
-            test -f "$f" || { echo "README maps a missing file: $f"; exit 1; }
-          done
-          echo "README repo map OK."
+      - name: Verify every mapped path and relative link exists
+        # Derived from README.md itself (tree block + links), so the check
+        # can't fall behind the map.
+        run: python3 .github/scripts/check-readme-map.py

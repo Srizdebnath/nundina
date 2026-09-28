@@ -26,7 +26,7 @@ NUNDINA never moves the security off Solana; **only cash moves** (HACKATHON.md �
 - **Everything lives in `payment-rails/`.** Nothing outside this folder is edited.
 - The folder has its **own Cargo/Anchor workspace**. `credit-math` is consumed **read-only** via a path dependency (`path = "../../../programs/credit-math"` from `programs/payment-rails/Cargo.toml`).
 - Before merge, the token leg is tested against a **local test mint with the NPCS extension manifest** (`token/params.toml`), not the friend's live mint.
-- Root wiring at merge: the rails get CI in `.github/workflows/ci.yml` — **done** in #27, as dedicated `payment-rails` and `payment-rails/crank` jobs run from inside this folder. The program deliberately stays out of the root `Cargo.toml`/`Anchor.toml`: merging workspaces merges lockfiles and lets litesvm/anchor-spl re-resolve crates the root SBF build depends on.
+- Root wiring at merge: the rails get CI in `.github/workflows/ci.yml` — **done** in #27, as dedicated `payment-rails` and `payment-rails/crank` jobs run from inside this folder. The program deliberately stays out of the root `Cargo.toml`/`Anchor.toml`. For `tests-svm` that is required, because litesvm would re-resolve (downgrade) crates the root SBF build depends on. For the program crate it is an isolation choice: adding it to the root workspace re-resolves nothing (README § Layout).
 
 ## 3 · Phases
 
