@@ -286,6 +286,17 @@ Interface: `payment-rails/INTERFACE.md`. Phases: `payment-rails/PHASES.md`. Regi
 | **crank-runner** | Node bot, bonded wallet | Phase-deadline cranks, seasoning merges, settlement pagination, distribution cranks; escalating priority fees + jitter (D11); **kill-switch drill is part of AC-11** | Bonded per 06 §8 |
 | **evidence-exporter** | Node CLI | Session evidence bundles (all events + marks + model versions + inputs) → signed JSON files in repo/storage | AC-12; L23 |
 
+**As-built status (2026-09, #58).** This table is the target; this is what exists:
+
+| Service | Built | Gap |
+|---|---|---|
+| indexer | ❌ no DB, schema, webhook or backfill; the crank reads chain state directly (`payment-rails/crank/src/chain.ts`) | Decide before P6 whether the RPC-read design is enough for the pilot, or build the indexer. The UI and AC-12 need *one* source |
+| api | ❌ no route handlers | P6 (#10) |
+| nav-publisher | ❌ no cron, key, publisher set or `publish_nav` (no mark-engine) | P2 (#6); the arithmetic exists in `credit-math` |
+| treasury-agent | 🟡 manual checklist in `token/runbook.md` § Treasury (sleeve reconciliation) | No Kamino integration; backup mode is a plain USDC account |
+| crank-runner | 🟡 settlement pagination + refunds, idempotent on on-chain state; **escalating priority fee (×1.5 per retry from a floor) + ±10% jitter on fee and backoff (D11)**; kill-switch drill in CI | No phase-deadline, seasoning-merge or distribution cranks (the programs don't exist yet); no bonded crank wallet (it uses the operator's `id.json`) |
+| evidence-exporter | 🟡 program-scoped JSONL of the rails' own events + SHA-256 manifest | Not **signed** (a hash is not a signature), not session-scoped, no marks or model versions yet |
+
 ---
 
 ## 7 · Frontend — Next.js 16
