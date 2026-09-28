@@ -115,6 +115,11 @@ pub fn find_uniform_clear_price(
 ///    unit at a time in order of (larger committed qty first, lower
 ///    bidder_id first) — a published rule, not a favor.
 ///
+/// Precondition (checked, not assumed): `total ≤ Σqty`. Pro-rata can only
+/// scale commitments **down** — a larger `total` would hand a bidder more
+/// than they committed, so it is rejected with [`MathError::OverAllocation`].
+/// Given the precondition, every `alloc_i ≤ qty_i`.
+///
 /// `bids` may be in any order; the returned vector preserves input order.
 pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, u128)>, MathError> {
     let sum_qty: u128 = bids
@@ -127,6 +132,9 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
         } else {
             Err(MathError::InvalidInput)
         };
+    }
+    if total > sum_qty {
+        return Err(MathError::OverAllocation);
     }
 
     let mut out: Vec<(u64, u128)> = bids
@@ -150,7 +158,12 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
         out[i].1 += 1;
         residue -= 1;
     }
-    debug_assert_eq!(residue, 0);
+    // Flooring loses < 1 unit per bidder, so residue < n and the loop above
+    // always drains it. Checked in release too: a residue left here would be
+    // silently dropped, breaking exact conservation (crate rule 4).
+    if residue != 0 {
+        return Err(MathError::InvalidInput);
+    }
     Ok(out)
 }
 
@@ -213,16 +226,16 @@ mod tests {
 
     #[test]
     fn pro_rata_sums_exactly() {
-        let r = allocate_pro_rata(999, &[(1, 100), (2, 100), (3, 100)]).unwrap();
+        let r = allocate_pro_rata(999, &[(1, 1_000), (2, 1_000), (3, 1_000)]).unwrap();
         assert_eq!(r.iter().map(|&(_, a)| a).sum::<u128>(), 999);
         assert!(r.iter().all(|&(_, a)| a == 333));
     }
 
     #[test]
     fn pro_rata_residue_goes_to_larger_commit() {
-        // total 101 over {30, 70}: floors {30, 70}, residue 1 → qty-70 bidder.
-        let r = allocate_pro_rata(101, &[(5, 30), (1, 70)]).unwrap();
-        assert_eq!(r, vec![(5, 30), (1, 71)]);
+        // total 99 over {30, 70}: floors {29, 69}, residue 1 → qty-70 bidder.
+        let r = allocate_pro_rata(99, &[(5, 30), (1, 70)]).unwrap();
+        assert_eq!(r, vec![(5, 29), (1, 70)]);
     }
 
     #[test]
@@ -240,5 +253,24 @@ mod tests {
             MathError::InvalidInput
         );
         assert_eq!(allocate_pro_rata(0, &[(1, 0)]).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn pro_rata_rejects_total_above_committed() {
+        // One bidder commits 1 unit; allocating 100 would over-allocate 100×.
+        assert_eq!(
+            allocate_pro_rata(100, &[(1, 1)]).unwrap_err(),
+            MathError::OverAllocation
+        );
+        assert_eq!(
+            allocate_pro_rata(301, &[(1, 100), (2, 100), (3, 100)]).unwrap_err(),
+            MathError::OverAllocation
+        );
+    }
+
+    #[test]
+    fn pro_rata_total_equal_to_committed_passes_through() {
+        let bids = [(3, 7), (1, 250), (2, 1)];
+        assert_eq!(allocate_pro_rata(258, &bids).unwrap(), bids.to_vec());
     }
 }
