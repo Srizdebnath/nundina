@@ -45,8 +45,12 @@ cd token && CLUSTER=devnet npm run verify
   is the only way to deploy at this fixed ID on a new cluster. Back it up
   before any `cargo clean`. Upgrades of the live program need only the
   upgrade authority, which makes that key the one whose loss is permanent.
-  Backup policy, recovery and the Squads 2-of-2 hand-over for every key in
-  this table: [`payment-rails/README.md` § Keys](payment-rails/README.md#keys).
+  Every key in this file (credit-gate, NPCS admin, payment-rails, plus the
+  rails' fee and reserve accounts) is listed, by public key, in
+  [`payment-rails/README.md` § Keys](payment-rails/README.md#keys), with what
+  losing or leaking it costs. As of 2026-09 **none has a recorded offline
+  backup and none is under Squads** (#57); that section's backup policy and
+  hand-over commands are the plan, not a record.
 - Verifiable-build reproduction (deterministic SBF flags) lands with the P1
   CI pipeline; until then hashes are recorded from this machine's build.
 - **Security (#26):** the credit-gate v0.1.0 build above lets *any* signer
