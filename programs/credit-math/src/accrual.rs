@@ -1,16 +1,18 @@
 //! Interest accrual for liquidity-facility advances (doc 09 §6; LF-P6).
 //!
-//! `floor(principal × rate_bps × Δt_seconds / (10⁴ × 31_536_000))`
-//! — same clock as the NAV fee (Julian year), same floor-against-initiator
-//! rule: the *borrower* initiates time passing on their own debt position
-//! only at repayment; accrual is computed by the protocol at every touch,
-//! and floors **in the borrower's favor is forbidden** — the lender-side
-//! initiator rule means accrued interest rounds **up** to the next micro
-//! only at explicit `settle` boundaries, and is carried as a floored
-//! running value between them. Pilot uses fixed 12% APR (LF-P6).
+//! `floor(principal × rate_bps × Δt_seconds / (10⁴ × 31_536_000))`, with the
+//! same Julian-year clock as the NAV fee. Pilot uses a fixed 12% APR (LF-P6).
+//!
+//! **Rounding: `Floor`, at every call.** There is no separate settle-time
+//! round-up. The sub-micro remainder of each accrual (< 1 µUSDC per call)
+//! stays with the borrower. Strictly, rule 2 in the crate docs would round
+//! *up* here, because the borrower initiates `repay`. The floor is a
+//! deliberate, bounded exception: `payment-rails`' live facility accrues with
+//! it, and changing it is a rails upgrade.
 
-use crate::error::MathError;
+use crate::error::{MathError, RoundDirection};
 use crate::nav::SECONDS_PER_YEAR;
+use crate::RoundAwayFromInitiator;
 
 /// Accrued interest over `delta_seconds` on `principal_micros` at
 /// `rate_bps` annual, floored. Pure function — no state.
@@ -26,7 +28,7 @@ pub fn accrue_interest(
         .checked_mul(u128::from(rate_bps))
         .and_then(|x| x.checked_mul(u128::from(delta_seconds)))
         .ok_or(MathError::Overflow)?;
-    Ok(numer / denom)
+    numer.div_round(denom, RoundDirection::Floor)
 }
 
 /// Balance after accrual: principal + floored interest, overflow-checked.

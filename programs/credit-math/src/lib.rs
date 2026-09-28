@@ -42,7 +42,11 @@ pub use prudential::{check_advance_rate, BPS_DENOMINATOR, MAX_ADVANCE_RATE_BPS};
 pub use pv::pv_of_claim;
 pub use waterfall::{apply_loss, distribute_cash, WaterfallParams, WaterfallResult};
 
-/// Rounding policy: every division floors **against the initiator**.
+/// Rounding policy: every division rounds **against the initiator**.
+///
+/// Every division site in this crate calls [`RoundAwayFromInitiator::div_round`]
+/// with its direction written at the call site, so the policy is greppable
+/// (`div_round(`) and exercised by tests, not only stated here.
 ///
 /// The initiator is the party whose action invokes the math:
 /// * a depositor / seller / borrower initiating a claim on the protocol →
@@ -54,9 +58,9 @@ pub use waterfall::{apply_loss, distribute_cash, WaterfallParams, WaterfallResul
 ///
 /// Programs must pass the direction explicitly; this crate never guesses.
 pub trait RoundAwayFromInitiator {
-    /// Divide `numerator / denominator`, flooring, asserting `direction`
-    /// matches the caller's initiator analysis. Zero denominator is
-    /// [`MathError::DivisionByZero`].
+    /// Divide `self / denominator`, rounding in `direction` (`Floor` and
+    /// `AgainstInitiator` truncate; `Ceil` rounds up). A zero denominator is
+    /// [`MathError::DivisionByZero`] in every build, never a panic.
     fn div_round(&self, denominator: Self, direction: RoundDirection) -> Result<Self, MathError>
     where
         Self: Sized;
@@ -69,15 +73,26 @@ impl RoundAwayFromInitiator for u128 {
         }
         match direction {
             RoundDirection::Floor | RoundDirection::AgainstInitiator => Ok(self / denominator),
-            RoundDirection::Ceil => Ok(ceil_div(*self, denominator)),
+            RoundDirection::Ceil => checked_ceil_div(*self, denominator),
         }
     }
 }
 
-/// Ceiling division without overflow: `(a + b - 1) / b` in checked form.
+/// Ceiling division without overflow: `⌈a / b⌉`.
+///
+/// **Panics if `b == 0`** (Rust's divide-by-zero, in every build). Callers
+/// that don't already guarantee `b ≠ 0` use [`checked_ceil_div`] or
+/// `div_round(b, RoundDirection::Ceil)` for a typed error.
 pub fn ceil_div(a: u128, b: u128) -> u128 {
-    debug_assert!(b != 0);
     a / b + u128::from(!a.is_multiple_of(b))
+}
+
+/// [`ceil_div`] with a typed [`MathError::DivisionByZero`] instead of a panic.
+pub fn checked_ceil_div(a: u128, b: u128) -> Result<u128, MathError> {
+    if b == 0 {
+        return Err(MathError::DivisionByZero);
+    }
+    Ok(ceil_div(a, b))
 }
 
 /// `a * b / c` for u128 without overflowing the multiply: splits via
@@ -109,6 +124,32 @@ mod tests {
         // (2^100) * 3 / 2 == 3 * 2^99 — fits u128, would overflow naive mul.
         let a: u128 = 1 << 100;
         assert_eq!(mul_div(a, 3, 2).unwrap(), 3 * (1 << 99));
+    }
+
+    #[test]
+    fn div_round_every_arm() {
+        use RoundDirection::*;
+        assert_eq!(7u128.div_round(2, Floor).unwrap(), 3);
+        assert_eq!(7u128.div_round(2, AgainstInitiator).unwrap(), 3);
+        assert_eq!(7u128.div_round(2, Ceil).unwrap(), 4);
+        assert_eq!(8u128.div_round(2, Ceil).unwrap(), 4, "exact: no bump");
+        assert_eq!(0u128.div_round(9, Ceil).unwrap(), 0);
+        assert_eq!(u128::MAX.div_round(1, Ceil).unwrap(), u128::MAX);
+        for d in [Floor, Ceil, AgainstInitiator] {
+            assert_eq!(
+                1u128.div_round(0, d).unwrap_err(),
+                MathError::DivisionByZero
+            );
+        }
+    }
+
+    #[test]
+    fn checked_ceil_div_rejects_zero() {
+        assert_eq!(
+            checked_ceil_div(5, 0).unwrap_err(),
+            MathError::DivisionByZero
+        );
+        assert_eq!(checked_ceil_div(11, 5).unwrap(), 3);
     }
 
     #[test]
