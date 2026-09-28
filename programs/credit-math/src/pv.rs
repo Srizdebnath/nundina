@@ -10,7 +10,8 @@
 //! value rounds against them → conservative — what the facility underwrites
 //! with, MARK_PROTECTIVE style).
 
-use crate::error::MathError;
+use crate::error::{MathError, RoundDirection};
+use crate::RoundAwayFromInitiator;
 
 /// One expected fill in the schedule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,10 +43,13 @@ pub fn pv_of_claim(
             .qty_base
             .checked_mul(f.price_micros)
             .ok_or(MathError::Overflow)?
-            / 1_000_000;
+            .div_round(1_000_000, RoundDirection::AgainstInitiator)?;
         let mut term = term0;
         for _ in 0..f.period {
-            term = term.checked_mul(keep).ok_or(MathError::Overflow)? / 10_000;
+            term = term
+                .checked_mul(keep)
+                .ok_or(MathError::Overflow)?
+                .div_round(10_000, RoundDirection::AgainstInitiator)?;
         }
         total = total.checked_add(term).ok_or(MathError::Overflow)?;
     }

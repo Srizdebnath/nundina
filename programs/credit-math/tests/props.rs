@@ -9,7 +9,7 @@ use credit_math::allocation::{allocate_pro_rata, find_uniform_clear_price, Order
 use credit_math::nav::{nav_gross_pico, weekly_publish, PICO};
 use credit_math::pv::{pv_of_claim, ExpectedFill};
 use credit_math::waterfall::{apply_loss, distribute_cash, WaterfallParams};
-use credit_math::MathError;
+use credit_math::{ceil_div, MathError, RoundAwayFromInitiator, RoundDirection};
 use proptest::prelude::*;
 
 /// Random order book: prices around 1.0 USDC, sizes ≤ 1M base units.
@@ -215,5 +215,54 @@ proptest! {
         // Monotone in dt.
         let i2 = accrue_interest(principal, rate, dt + 1).unwrap();
         prop_assert!(i2 >= i);
+    }
+
+    // ---------------------------------------------------------------
+    // Clearing is volume-maximal (AE-P5): brute force every candidate
+    // price ≥ reserve and check nothing beats the returned volume. A
+    // function returning the first crossing price would fail this.
+    // ---------------------------------------------------------------
+    #[test]
+    fn prop_clearing_maximizes_executed_volume(
+        orders in order_strategy(),
+        reserve in 900_000u128..1_100_000,
+        reference in 950_000u128..1_050_000,
+    ) {
+        let executed_at = |p: u128| -> u128 {
+            let sell: u128 = orders.iter().filter(|o| !o.is_buy && o.limit_price <= p).map(|o| o.qty).sum();
+            let buy: u128 = orders.iter().filter(|o| o.is_buy && o.limit_price >= p).map(|o| o.qty).sum();
+            sell.min(buy)
+        };
+        let best = orders
+            .iter()
+            .map(|o| o.limit_price)
+            .filter(|p| *p >= reserve)
+            .map(executed_at)
+            .max()
+            .unwrap_or(0);
+        match find_uniform_clear_price(&orders, reserve, reference).unwrap() {
+            Some(r) => {
+                prop_assert_eq!(r.executed_qty, best);
+                prop_assert_eq!(executed_at(r.clear_price), r.executed_qty);
+            }
+            None => prop_assert_eq!(best, 0),
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Rounding sites round in their declared direction: Floor/Against-
+    // Initiator never exceed the exact quotient, Ceil never falls below
+    // it, and both stay within one unit of it.
+    // ---------------------------------------------------------------
+    #[test]
+    fn prop_div_round_respects_direction(a in any::<u128>(), b in 1u128..=u128::MAX) {
+        let f = a.div_round(b, RoundDirection::Floor).unwrap();
+        let g = a.div_round(b, RoundDirection::AgainstInitiator).unwrap();
+        let c = a.div_round(b, RoundDirection::Ceil).unwrap();
+        prop_assert_eq!(f, g);
+        prop_assert_eq!(f, a / b);
+        prop_assert_eq!(c, ceil_div(a, b));
+        prop_assert!(c == f || c == f + 1);
+        prop_assert_eq!(c == f, a % b == 0);
     }
 }

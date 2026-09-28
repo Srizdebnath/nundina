@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3fda1ca8074ac85bc31e31af089fedc7f27fc4204c2ca3ae61e12b370ffd9d28 # shrinks to orders = [Order { bidder_id: 0, limit_price: 936554, qty: 1, is_buy: false }, Order { bidder_id: 0, limit_price: 936555, qty: 1, is_buy: false }, Order { bidder_id: 0, limit_price: 936555, qty: 2, is_buy: true }], reserve = 900000, reference = 950000
