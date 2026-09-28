@@ -13,6 +13,15 @@
 //!    allocated; waterfall lines sum exactly to cash received. Residue is
 //!    re-attached by rule, never dropped.
 //!
+//! **Who calls what (2026-09, #48).** The only program consumer is
+//! `payment-rails`: [`ceil_div`], [`mul_div`], [`accrue_interest`],
+//! [`distribute_cash`] and [`MathError`]. Everything else (clearing,
+//! pro-rata, NAV, haircut, PV, loss waterfall, prudential floor) is pure and
+//! tested but **has no program consumer yet**. The planned consumers
+//! (auction-engine, tranche-engine, liquidity-facility, queue-claim) are not
+//! built. Passing tests prove these functions correct in isolation, not
+//! correctly wired into a program.
+//!
 //! Units convention (doc 09 §3): amounts are integers in their smallest unit.
 //! NPCS base units and USDC micros are 1e6-scaled; NAV is **pico-NAV**
 //! (1e12 per whole NPCS, D-B corrected: 6dp NAV cannot represent the pilot

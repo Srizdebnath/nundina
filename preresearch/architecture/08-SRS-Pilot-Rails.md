@@ -109,7 +109,7 @@ flowchart TB
     OFF --> UI
 ```
 
-**Shared crate `credit-math`:** u128 intermediates, uniform-price clearing, pro-rata allocation, waterfall arithmetic, haircut curves. Every function rounds **against the initiator**. Consumed by auction-engine, tranche-engine, liquidity-facility, queue-claim. Unit-test target: 100% branch coverage on this crate (D8).
+**Shared crate `credit-math`:** u128 intermediates, uniform-price clearing, pro-rata allocation, waterfall arithmetic, haircut curves. Every function rounds **against the initiator**. *Planned* consumers: auction-engine, tranche-engine, liquidity-facility, queue-claim. **As built (2026-09), the only consumer is `payment-rails`**, which calls `ceil_div`, `mul_div`, `accrue_interest` and `distribute_cash`. Clearing, pro-rata, NAV, haircut, PV and the loss waterfall are pure, tested functions with **no program consumer yet** (#48). Unit-test target: 100% branch coverage on this crate (D8); CI job `credit-math — coverage` publishes the measured figure.
 
 ---
 

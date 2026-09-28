@@ -1,6 +1,8 @@
 # NPCS — NUNDINA Pilot Credit Sleeve
 
-> **The pilot asset.** A real, USDC 1:1-backed Token-2022 token that NUNDINA issues and controls end-to-end — the asset every mechanism in the protocol (gate, auction, queue-claim, facility, tranching) runs on. **Live on devnet.**
+> **The pilot asset.** A Token-2022 token that NUNDINA issues and controls end-to-end — the asset every mechanism in the protocol (gate, auction, queue-claim, facility, tranching) is designed to run on. **Mint live on devnet.**
+>
+> **Honest status (#43):** mint created and extension manifest verified. It is **not yet backed** (no deposit/mint-on-deposit path exists), **not yet gated** (`credit-gate` has no validate/thaw path), and **not yet Squads-owned** (one bootstrap wallet, `2xhjfAdr…6sRXMh`, holds mint, freeze, permanent-delegate and metadata authority). The invariants in [`TOKENOMICS.md`](TOKENOMICS.md) are the design target; its §0 says which are enforced today.
 
 **Status:** mint created · manifest verified · `PILOT-DEMO-ASSET — NOT AN OFFER`
 
@@ -8,10 +10,10 @@
 |---|---|
 | Mint (devnet) | `Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i` |
 | Standard | Token-2022 (Token Extensions), 6 decimals |
-| Backing | USDC 1:1 — supply only ever equals confirmed deposits (invariant I1) |
-| Default state | **Frozen** — every token account is born locked; thaws only through `credit-gate` |
+| Backing | USDC 1:1 **by design** (invariant I1). Enforced by process and event evidence, not by a program (doc 09 §12). No mint-on-deposit path exists yet |
+| Default state | **Frozen**: every token account is born locked. **Today a thaw is a decision by the bootstrap wallet `2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh`** (the freeze authority). `credit-gate` has no thaw path yet. After P1 ACL wiring, thaws go only through `credit-gate` ([ARCHITECTURE §4](ARCHITECTURE.md)) |
 | Metadata | TLV **inside the mint** (self-pointer), label pairs on-chain incl. `PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL` |
-| Authorities | single admin key (bootstrap) — Squads 2-of-2 at P1; freeze authority moves to Token ACL `MintConfig` PDA when the gate wires in |
+| Authorities | **one bootstrap key `2xhjfAdr…6sRXMh` holds all four**: mint, freeze, permanent delegate and metadata update. Squads 2-of-2 at P1; freeze authority moves to the Token ACL `MintConfig` PDA when the gate wires in |
 | Size | 275 B (pods) → 581 B (with metadata) |
 
 ## Layout
@@ -26,7 +28,7 @@ token/
 ├── scripts/
 │   ├── init-mint.ts     ← creates the mint with the exact extension manifest
 │   └── verify.ts        ← asserts manifest + provenance against a live mint
-├── tests/               ← (P1: LiteSVM mint specs)
+├── tests/               ← offline drift tests (params.toml vs metadata, credit-math, verify.ts)
 └── keys/                ← gitignored: mint + authority keypairs, deployment records
 ```
 
