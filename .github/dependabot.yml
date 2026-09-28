@@ -32,11 +32,18 @@ updates:
       - "onchain"
       - "dependencies"
     open-pull-requests-limit: 5
+    # anchor-lang/anchor-spl are exact-pinned (`=1.1.2`) in every manifest on
+    # purpose: 1.2.x is a different solana-program generation, and even a
+    # patch bump rewrites the pin and changes the audited SBF build. No
+    # anchor-* update of any kind is automated. Bump it deliberately, by
+    # hand, together with Anchor.toml [toolchain] and ANCHOR_VERSION in
+    # ci.yml (the `pins` CI step checks that they agree).
+    ignore:
+      - dependency-name: "anchor-*"
 
   # payment-rails: its own Cargo workspace and a separate LiteSVM test
   # workspace, each with its own lockfile (payment-rails/README.md).
-  # anchor-lang/anchor-spl are exact-pinned to 1.1.2 on purpose (1.2.x is a
-  # different solana-program generation), so only patch bumps are proposed.
+  # Same anchor-* rule as the root entry above.
   - package-ecosystem: "cargo"
     directory: "/payment-rails"
     schedule:
@@ -47,7 +54,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "anchor-*"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: "cargo"
     directory: "/payment-rails/tests-svm"
@@ -59,7 +65,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "anchor-*"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/payment-rails/crank"
