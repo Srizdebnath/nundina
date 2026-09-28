@@ -52,8 +52,8 @@ flowchart TB
 The I2 formulas below are implemented in `../programs/credit-math` (unit tests
 plus property suites × 512 fuzz cases; run `cargo test -p credit-math`). I1 and
 I3 are specifications with no implementation yet (§0). NAV is carried at **pico precision (10¹² per whole
-NPCS)** — a decision the test suite forced: at 6dp the pilot fee floors to
-zero for weeks.
+NPCS)** — a decision the test suite forced: the weekly fee is ≈ 19.18 µUSDC per
+NPCS, and a 6dp NAV truncates up to 1 µUSDC of it (~5%) at every publish.
 
 | # | Formula | Note |
 |---|---|---|
