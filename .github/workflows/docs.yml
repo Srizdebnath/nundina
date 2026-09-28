@@ -1,17 +1,13 @@
 name: docs
 
+# No `paths:` filter. The four jobs below are *required* status checks in
+# the main-branch ruleset, and a path-filtered workflow never reports on a PR
+# that touches no Markdown. Such a PR would then sit "Expected — waiting"
+# forever and could not merge. The jobs are cheap (under a minute).
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.md"
-      - ".github/workflows/docs.yml"
-      - ".github/scripts/check-readme-map.py"
   pull_request:
-    paths:
-      - "**/*.md"
-      - ".github/workflows/docs.yml"
-      - ".github/scripts/check-readme-map.py"
 
 permissions:
   contents: read

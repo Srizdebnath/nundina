@@ -561,3 +561,70 @@ fn session_schedule_and_amounts_validated() {
         );
     });
 }
+
+// ── shortfall (#62) ─────────────────────────────────────────────────────
+
+/// Sets a token account's balance directly: simulates a settlement-mint
+/// permanent delegate or clawback pulling from an escrow vault.
+fn shrink_vault(env: &mut Env, vault: &anchor_lang::prelude::Pubkey, amount: u64) {
+    let mut a = env.svm.get_account(vault).expect("vault");
+    a.data[64..72].copy_from_slice(&amount.to_le_bytes());
+    env.svm.set_account(*vault, a).unwrap();
+}
+
+/// A vault drained below its recorded amount must not block the refund
+/// (AE-P10 / doc 06 §11 H5): the owner gets what's left, everything closes.
+#[test]
+fn short_cash_vault_still_refunds_and_closes() {
+    each(|tp| {
+        let mut env = Env::new(tp);
+        let s = env.open_session(1);
+        let (a, ta) = env.bidder(500_000_000);
+        env.deposit(&s, &a, &ta, 100_000_000).unwrap();
+        let op = env.authority.insecure_clone();
+        env.fail_session_as(&op, &s).unwrap();
+
+        let e = escrow_pda(&s, &a.pubkey());
+        shrink_vault(&mut env, &vault_pda(&e), 60_000_000);
+        let before = env.bal(&ta);
+        let crank = env.funded();
+        env.refund(&crank, &s, &a.pubkey(), &ta)
+            .expect("refund completes despite the shortfall");
+        assert_eq!(
+            env.bal(&ta),
+            before + 60_000_000,
+            "{tp:?} owner gets what is held"
+        );
+        assert!(
+            !env.exists(&vault_pda(&e)) && !env.exists(&e),
+            "{tp:?} closed"
+        );
+        let sess = env.session(&s);
+        assert_eq!(
+            (sess.open_escrows, sess.total_cash, sess.total_bonds),
+            (0, 0, 0)
+        );
+    });
+}
+
+/// With a forfeit due and fewer micros held than the bond, the reserve gets
+/// everything held and the refund still closes (no underflow, no revert).
+#[test]
+fn short_vault_pays_forfeit_first_without_underflow() {
+    each(|tp| {
+        let mut env = Env::new(tp);
+        let s = env.open_session(1);
+        let (a, ta) = env.bidder(500_000_000);
+        env.deposit(&s, &a, &ta, 100_000_000).unwrap();
+        env.set_time(REVEAL_END); // never revealed ⇒ bond forfeits
+        let e = escrow_pda(&s, &a.pubkey());
+        shrink_vault(&mut env, &vault_pda(&e), BOND - 1);
+        let before = env.bal(&ta);
+        env.set_time(SETTLE_DEADLINE);
+        let crank = env.funded();
+        env.refund(&crank, &s, &a.pubkey(), &ta).unwrap();
+        assert_eq!(env.bal(&env.reserve), BOND - 1, "{tp:?}");
+        assert_eq!(env.bal(&ta), before, "{tp:?}");
+        assert!(!env.exists(&e));
+    });
+}

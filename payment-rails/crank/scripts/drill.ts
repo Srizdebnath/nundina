@@ -254,6 +254,10 @@ async function main(): Promise<void> {
   const body = readFileSync(join(dir, "events.jsonl"));
   check(createHash("sha256").update(body).digest("hex") === manifest.sha256, `evidence manifest SHA-256 re-verifies (${manifest.events} events, ${manifest.transactions} txs)`);
   check(manifest.byEvent.FillSettled === 2, `evidence: 2 FillSettled (got ${manifest.byEvent.FillSettled})`);
+  check(
+    manifest.byEvent.TransferInstruction === manifest.byEvent.FillSettled,
+    `evidence: one TransferInstruction per fill (got ${manifest.byEvent.TransferInstruction})`,
+  );
   const lines = body.toString().trim().split("\n").map((l) => JSON.parse(l));
   const refunded = lines.filter((l) => l.event === "EscrowEvent" && l.data.action === "Refunded").length;
   const forfeited = lines.filter((l) => l.event === "EscrowEvent" && l.data.action === "BondForfeited").length;

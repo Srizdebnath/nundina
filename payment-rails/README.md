@@ -121,6 +121,7 @@ senior and junior coupons.
 - Refunds and forfeits can be called by **anyone**. Every destination is fixed to the escrow owner's accounts, or to the reserve recorded at open.
 - `paused` and `depeg_breaker` block `open_session`, deposits and **settlement**. They **never** block refunds (AE-P10, AC-11).
 - Tokens donated into a vault can't block its close. The surplus goes to the owner.
+- A vault holding **less** than recorded, for example because NPCS's permanent delegate pulled asset from an ask vault, can't block it either. The refund returns what is held plus the bond, closes everything, and emits `AssetShortfall` / `CashShortfall` (#62). One case remains outside the rails' control: if the asset's **freeze** authority freezes an ask vault, `refund_ask` fails until it is thawed.
 - Deposits check that the vault received exactly what was recorded, so a lossy mint is refused.
 - The bid stays sealed. The rails only see the cash amount (`qty × limit`), never qty or limit separately.
 - **Trust assumption:** the operator reports reveals and chooses the fills (see above). It's meant to be the auction engine's signer PDA (PHASES Q1).
@@ -254,6 +255,12 @@ solana program set-upgrade-authority GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPoc
 
 After that, upgrades go through a Squads proposal. Record the change as a new
 row in `DEPLOYMENTS.md`.
+
+`credit-gate` is different. Each `MarketConfig` has its own
+`gate_config_authority`, and handing the upgrade authority to Squads does not
+change it. Move each config with `propose_gate_authority` →
+`accept_gate_authority` before the old key is retired (root
+[`DEPLOYMENTS.md`](../DEPLOYMENTS.md), #50).
 
 ### Verifying without any key
 

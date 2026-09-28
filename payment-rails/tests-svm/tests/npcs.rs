@@ -351,3 +351,69 @@ fn open_asset_vault_is_owner_only_and_commit_window_only() {
         Err(Fail::rails(payment_rails::RailsError::OutsideWindow))
     );
 }
+
+/// #62: the NPCS permanent delegate can pull asset out of an ask vault (by
+/// design, SRS 08 §3.1). The seller's refund must still complete: the bond
+/// comes back, whatever asset is left comes back, the escrow closes, and the
+/// shortfall is recorded as an `AssetShortfall` event. AE-P10 / H5 must hold
+/// in every configuration.
+#[test]
+fn delegate_seizure_cannot_strand_the_ask_bond() {
+    for seized in [UNIT / 2, 2 * UNIT] {
+        let mut n = Npcs::new(Tp::Spl);
+        let s = n.env.open_session(1);
+        let seller = n.party(BOND, 2 * UNIT);
+        n.env.open_asset_vault(&s, &seller).unwrap();
+        let se = escrow_pda(&s, &seller.key.pubkey());
+        let vault = asset_vault_pda(&se);
+        n.thaw(&vault);
+        n.env.deposit_ask_only(&s, &seller, 2 * UNIT).unwrap();
+        let usdc_before = n.env.bal(&seller.usdc);
+
+        // The permanent delegate (the gate keypair here) seizes from the vault.
+        let g = n.gate.insecure_clone();
+        let sink = n.holder_account(&g.pubkey(), 0);
+        n.env.raw_asset_transfer(&vault, &sink, &g, seized).unwrap();
+        assert_eq!(n.env.bal(&vault), 2 * UNIT - seized);
+
+        n.env
+            .fail_session_as(&n.env.authority.insecure_clone(), &s)
+            .unwrap();
+        let crank = n.env.funded();
+        n.env
+            .refund_ask(&crank, &s, &seller)
+            .expect("refund_ask completes despite the seizure");
+
+        assert_eq!(n.env.bal(&seller.usdc), usdc_before + BOND, "bond returned");
+        assert_eq!(
+            n.env.bal(&seller.asset),
+            2 * UNIT - seized,
+            "remaining asset returned"
+        );
+        assert!(!n.env.exists(&vault), "asset vault closed");
+        assert!(!n.env.exists(&se), "escrow closed");
+        let sess = n.env.session(&s);
+        assert_eq!(
+            (sess.open_escrows, sess.total_asset, sess.total_bonds),
+            (0, 0, 0)
+        );
+    }
+}
+
+/// The happy path is unchanged: no seizure ⇒ everything returned, no
+/// shortfall, and an unseized vault still can't be under-reported.
+#[test]
+fn refund_ask_without_seizure_returns_everything() {
+    let mut n = Npcs::new(Tp::T22);
+    let s = n.env.open_session(1);
+    let seller = n.party(BOND, UNIT);
+    n.env.open_asset_vault(&s, &seller).unwrap();
+    n.thaw(&asset_vault_pda(&escrow_pda(&s, &seller.key.pubkey())));
+    n.env.deposit_ask_only(&s, &seller, UNIT).unwrap();
+    n.env
+        .fail_session_as(&n.env.authority.insecure_clone(), &s)
+        .unwrap();
+    let crank = n.env.funded();
+    n.env.refund_ask(&crank, &s, &seller).unwrap();
+    assert_eq!(n.env.bal(&seller.asset), UNIT);
+}
