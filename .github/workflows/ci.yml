@@ -18,6 +18,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - name: Anchor pins agree (Anchor.toml · Cargo.toml · Cargo.lock · ci.yml)
+        run: bash .github/scripts/check-anchor-pins.sh
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
