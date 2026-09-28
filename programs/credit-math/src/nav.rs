@@ -13,6 +13,7 @@
 
 use crate::error::{MathError, RoundDirection};
 use crate::mul_div;
+use crate::prudential::BPS_DENOMINATOR;
 
 /// Whole NAV per NPCS in pico (1e12). NAV of 1.000411 USDC/NPCS = 1_000_411_522_333 pico.
 pub const PICO: u128 = 1_000_000_000_000;
@@ -68,13 +69,21 @@ pub fn nav_published_pico(nav_gross_pico: u128, fee_pico: u128) -> Result<u128, 
 }
 
 /// Haircut application (ME-P3): `nav_effective = nav × (10⁴ − h) / 10⁴`,
-/// with `h ≤ ceiling_bps` enforced (hard on-chain bound; governance cannot
-/// exceed it). Floors against the mark consumer.
+/// with `h ≤ ceiling_bps ≤ 10⁴` enforced. Floors against the mark consumer.
+///
+/// `ceiling_bps` is supplied by the caller. It is rejected above 100%
+/// (a haircut cannot exceed the whole NAV). The doc 06 §11 H3 ceiling has
+/// no plan-of-record value yet, so it is not a crate constant (see
+/// [`crate::prudential`]).
 pub fn haircut_bps(nav_pico: u128, haircut: u64, ceiling_bps: u64) -> Result<u128, MathError> {
-    if haircut > ceiling_bps {
+    if ceiling_bps > BPS_DENOMINATOR || haircut > ceiling_bps {
         return Err(MathError::InvalidInput);
     }
-    mul_div(nav_pico, u128::from(10_000 - haircut), 10_000)
+    mul_div(
+        nav_pico,
+        u128::from(BPS_DENOMINATOR - haircut),
+        u128::from(BPS_DENOMINATOR),
+    )
 }
 
 /// Convenience: the full weekly publish chain in one call.
@@ -145,6 +154,29 @@ mod tests {
         assert_eq!(haircut_bps(nav, 200, 2_000).unwrap(), 980_000_000_000);
         assert_eq!(
             haircut_bps(nav, 2_001, 2_000).unwrap_err(),
+            MathError::InvalidInput
+        );
+    }
+
+    #[test]
+    fn haircut_ceiling_bounds() {
+        let nav = 1_000_000_000_000;
+        // ceiling 0: only a zero haircut passes.
+        assert_eq!(haircut_bps(nav, 0, 0).unwrap(), nav);
+        assert_eq!(haircut_bps(nav, 1, 0).unwrap_err(), MathError::InvalidInput);
+        // ceiling 100%: a full haircut is representable.
+        assert_eq!(haircut_bps(nav, 10_000, 10_000).unwrap(), 0);
+        // ceiling above 100% is rejected before it can underflow `10⁴ − h`.
+        assert_eq!(
+            haircut_bps(nav, 15_000, 20_000).unwrap_err(),
+            MathError::InvalidInput
+        );
+        assert_eq!(
+            haircut_bps(nav, 0, 20_000).unwrap_err(),
+            MathError::InvalidInput
+        );
+        assert_eq!(
+            haircut_bps(nav, u64::MAX, u64::MAX).unwrap_err(),
             MathError::InvalidInput
         );
     }
