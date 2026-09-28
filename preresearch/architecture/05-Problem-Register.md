@@ -2,6 +2,8 @@
 
 > **Purpose:** the complete adversarial inventory. Every problem that can plausibly break this product, from market design down to compute units, with a failure mechanism, a severity, and a pointer to the architectural answer in `06-Solution-Architecture-v2.md`.
 >
+> **ID namespaces (#63):** the `L1`–`L6` rows here are *governance* problems; doc 07 reuses `L1`–`L27` for its *legal* register. `I1`–`I8` here are *integration* problems; doc 09 reuses `I1`–`I3` for the NPCS asset invariants. Cite with the doc number (`05 L5`, `07 L5`) when ambiguous. Code comments that say "L5 snapshot discipline" mean `05 L5`.
+>
 > **Severity:** **S1** = kills the product · **S2** = kills a feature or causes principal loss · **S3** = degrades materially · **S4** = friction.
 > **Likelihood:** H / M / L, assuming no mitigation.
 >

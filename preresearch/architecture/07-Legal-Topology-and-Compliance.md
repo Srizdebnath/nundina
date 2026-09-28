@@ -2,6 +2,8 @@
 
 > **Status:** The linked legal + engineering compliance layer. Derives from `05-Problem-Register.md` (C-domain), `06-Solution-Architecture-v2.md` (§7, §9, §10, §11, §13) and `../research/12-Validation-2026-Reality-Check.md` §6.
 >
+> **ID namespace (#63):** `L1`–`L27` here are the *legal* register. Doc 05 uses `L1`–`L6` for *governance* problems, so a bare `L5` in code or another doc means `05 L5` unless it says `07`.
+>
 > **Scope decisions locked by the founder (24 Sep 2026):**
 > 1. **US operating posture with partner broker-dealer topology** (§9 Option A for v1, Option B for v2 US investor-to-investor flow)
 > 2. **Full v1→v3 coverage** (windows → ATS flow → tranching SPV + facility + offshore parallel)

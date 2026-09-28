@@ -1,11 +1,10 @@
 //! NAV arithmetic — invariants I1/I2 (doc 09 §3) and §6 function inventory.
 //!
 //! **Precision decision (D-B correction):** NAV is carried at **pico**
-//! precision — [`PICO`] = 10¹² sub-units per whole NPCS. The original 6dp
-//! plan cannot represent the pilot fee accrual: at $3K / 10bps the weekly
-//! fee is ~19.18 micro-NPCS per unit, i.e. **0.19 micro-USDC of NAV impact
-//! per NPCS** — a 6dp NAV floors it to zero for the first weeks. At pico
-//! precision the fee is exact from week one.
+//! precision — [`PICO`] = 10¹² sub-units per whole NPCS. At $3K / 10bps the
+//! weekly fee on NAV 1.0 is 19_178_082 pico, i.e. **≈ 19.18 µUSDC of NAV per
+//! NPCS**. A 6dp (micro-USDC) NAV can hold that, but truncates up to 1 µUSDC
+//! (~5% of the fee) at every publish. At pico precision the fee is exact.
 //!
 //! All functions floor (`div_round(…, RoundDirection::AgainstInitiator)`): the publisher
 //! (NUNDINA, in the pilot) is the initiator of a mark, so rounding goes

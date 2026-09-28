@@ -2,6 +2,8 @@
 
 > **Purpose:** the complete, build-ready specification of **NPCS** (`NUNDINA Pilot Credit Sleeve`) — the real, USDC-backed pilot asset that every program in `08-SRS-Pilot-Rails.md` runs on. This doc implements `08` §3 at decision level: token structure, the three invariants and their integer math, **the full movement topology (every path a unit can take on Solana)**, account/rent/CU budgets, adversarial containment, and deployment.
 >
+> **ID namespaces (#63):** in this doc, `I1`–`I3` are the **NPCS asset invariants** (§3). In doc 05, `I1`–`I8` are *integration* problems (Kamino, Orca, Jupiter, …). `L`-numbers cited here follow doc 07's **legal register**, not doc 05's governance `L1`–`L6`.
+>
 > **Supersedes nothing.** Implements `08` §3. Depends on `06` §3 (Token ACL / sRFC37) and `07` Part III (CG-*).
 >
 > **Decision record — locked by the founder, 25 Sep 2026:**
@@ -86,7 +88,7 @@ fee_pico           = floor( nav_gross_pico × fee_bps × Δt_seconds / (10⁴ ×
 nav_published_pico = nav_gross_pico − fee_pico
 ```
 
-- **NAV precision (D-B correction):** NAV is carried at **pico precision — 10¹² sub-units per whole NPCS**, not 6dp. At pilot scale the 10bps/yr fee is ≈ 19 micro-NPCS/unit/week, which a 6dp mark floors to zero; pico represents it exactly. Implemented and tested in `credit-math`.
+- **NAV precision (D-B correction):** NAV is carried at **pico precision — 10¹² sub-units per whole NPCS**, not 6dp. At pilot scale the 10bps/yr fee is ≈ **19.18 µUSDC of NAV per NPCS per week** (19_178_082 pico at NAV 1.0). A 6dp (micro-USDC) mark can hold that, but truncates up to 1 µUSDC, about 5% of the fee, at every publish; pico represents it exactly. Implemented and tested in `credit-math`.
 - `treasury_value_micros` = USDC value of sleeve holdings read from the Kamino vault account + rate data (backup mode: plain USDC balance, NAV accrues flat).
 - Publish sequence per `08` §3.2: compute → attach `model_version`, `raw_inputs_hash`, `computed_ts` → sign a **real SAS attestation** → `mark-engine::publish_nav` (attestation verified on-chain).
 - Rounding: **floor on both lines** — the publisher (us) is the initiator, so rounding goes against us. Documented, deterministic, reproducible from raw inputs + model version (J1, ME-1).
@@ -159,7 +161,7 @@ flowchart TB
 |---|---|---|---|---|
 | **1** | Primary mint | `mint_to` to a *thawed* ATA; mint authority = Squads vault transaction; event `{deposit_ref, qty, sleeve_balance_before/after}` | Holder must already be gate-thawed | None (mint is unconditional once proposed) |
 | **2** | P2P transfer | Plain `transfer_checked` between thawed ATAs; **zero extra CU** (the sRFC37 payoff) | Indirect: seller lots must be seasoned (lot ledger checked at acquisition, not at transfer — pilot policy records the check at thaw + acquisition) | None |
-| **3** | Auction escrow | Seller `transfer_checked` → session escrow PDA at commit (pre-funded, F2); settle does per-fill DvP: escrow → buyer ATA, cash → seller; buyer's thaw re-validated at settle (CG-P8) | Commit pre-check + per-fill re-check | None — every terminal path refunds (AC-11) |
+| **3** | Auction escrow | Seller `transfer_checked` → session escrow PDA at commit (pre-funded, F2); settle does per-fill DvP: escrow → buyer ATA, cash → seller; buyer's thaw re-validated at settle (AE-P8) | Commit pre-check + per-fill re-check | None — every terminal path refunds (AC-11) |
 | **4** | Facility pledge | `transfer_checked` → collateral PDA; maintenance via `MARK_PROTECTIVE`; ladder per `06` §5 | Pledge = acquisition for facility PDA (lot append, affiliate=false) | None — workout assignment is a state, not a stuck transfer |
 | **5** | Claim wrap | **NPCS does not move.** The claim is a separate non-transferable position minted against a TA-attested redemption request; the NPCS leaves at the actual gated window | Claim transferability is a flag set by issuer consent (QC-P2) | None — claim is a state machine, not custody |
 | **6** | Tranche deposit | `transfer_checked` → pool collateral PDA; tranche mints are separate Token-2022 assets with their own gate class | Subordination invariant pre-check (TE-P5) | None — wind-down via auction session |
@@ -172,11 +174,11 @@ flowchart TB
 
 | Account | Seeds / owner | Size & rent | Written by | Budget note |
 |---|---|---|---|---|
-| Mint | keypair; extensions per §2 | ~350B + metadata ≈ **~1.3KB** | init once | One-time init tx |
+| Mint | keypair; extensions per §2 | **581B live** (275B pods + TLV metadata; `token/keys/deployment-devnet.json`) ≈ 0.0036 SOL rent | init once | One-time init tx |
 | User ATA (frozen) | ATA program | ~160B | user (or payer) | ~0.0021 SOL rent, paid by onboarding tx |
 | `MintConfig` PDA | Token ACL program | ACL-managed | ACL init | One-time wiring tx |
 | `MarketConfig` PDA | `credit-gate` — seeds `[b"config", mint]` | ~200B fixed | gate-config authority | CG-P2; snapshot-read by sessions |
-| `HolderLots` PDA | `credit-gate` — seeds `[b"lots", mint, owner]` | **1,088B ≈ 0.0086 SOL** — 128 lots × 8B qty/ts fields + header (D4 cap) | gate (append/split/merge) | Compaction keeps ≤ 128; ring-buffer overwrite if full (D15) |
+| `HolderLots` PDA | `credit-gate` — seeds `[b"lots", mint, owner]` | **≈ 3.5KB ≈ 0.0186 SOL**: 128 lots × 27B (`{qty u64, acquired_ts i64, source u8, affiliate_flag u8, restriction_expiry i64, exemption_path u8}` per CG-P3) + ~75B header (D4 cap). The earlier 1,088B figure allowed only 8.5B per lot, which cannot hold the CG-P3 record. The bounded-ring argument (D4/D15) still holds, at ~3.2× the rent | gate (append/split/merge) | Compaction keeps ≤ 128; ring-buffer overwrite if full (D15) |
 | Governor ledger PDA | `credit-gate` — seeds `[b"gov", mint]` | ~96B — 8 investor_id slots × 12B | gate (project_and_check) | Cap 8 ⇒ bounded forever |
 | Session escrow PDA | `auction-engine` — seeds `[b"escrow", session, bidder]` | ~120B, **rent-exempt, closed at settle/refund** | engine | Closed ⇒ rent returned; no dust |
 | Collateral PDA | `liquidity-facility` — seeds `[b"collat", advance_id]` | ~140B | facility | Closed at ladder completion |
@@ -187,28 +189,28 @@ flowchart TB
 
 ## 6 · `credit-math` inventory — every function NPCS economics touches
 
-Pilot scale: **$3,000 USDC sleeve**. All functions integer, u128 intermediates, property-tested (proptest) from P0.
+Pilot scale: **$3,000 USDC sleeve**. All functions integer, u128 intermediates, property-tested (proptest) from P0. Names below are the real `credit-math` names; a row marked *not implemented* has no function yet.
 
 | Function | Formula | Worked example (pilot scale) |
 |---|---|---|
-| `supply_from_deposit` | `deposit_usdc_micros × 10⁶ ÷ 10⁶ = supply_base` | 3,000.00 USDC → **3_000_000_000 base** (3.000B = 3,000 × 10⁶) |
+| *`supply_from_deposit`: not implemented* | `deposit_usdc_micros × 10⁶ ÷ 10⁶ = supply_base`. No function and no mint-on-deposit script exist; I1 is enforced by process (§11) | 3,000.00 USDC → **3_000_000_000 base** (3.000B = 3,000 × 10⁶) |
 | `nav_gross_pico` | `floor(treasury_micros × 10¹² ÷ supply_base)` | treasury 3,001.234567 → **1_000_411_522_333 pico** (1.000411522333 NPCS) — hand-verified test vector |
-| `fee_accrual` | `floor(nav_pico × fee_bps × Δt ÷ (10⁴ × 31_536_000))` | 10bps over 7 days on 1.000411… → **≈ 19.19 micro-NPCS per unit** (~1.9e7 pico) — exact at pico precision, invisible at 6dp. *This is why NAV is pico (D-B correction)* |
-| `nav_published` | `nav_gross − fee` | see above; drift ≈ 4th–6th decimal (accepted) |
-| `pro_rata_at_margin` | uniform-price allocation: fill marginal bidders proportionally, `round_against_initiator` | 2,000 bid @ clearing vs 1,500 offered → each marginal bidder gets floor-adjusted share; remainder dust to *next-best* rules, never to filler |
-| `uniform_clear_price` | price maximizing executed volume; tie-break: min imbalance → nearest reference mark | 3 bidders (AC-3): deterministic single price |
-| `haircut` | `nav_effective = nav × (1 − haircut_bps ÷ 10⁴)`, bounded by hard on-chain ceiling | Fresh state = 0bps; Stale = param (e.g. 200bps) ⇒ $3,000 sleeve marks to $2,940 *reference*, never published as NAV |
-| `pv_of_claim` | `Σ E[fill_t] × (1 − discount_bps·t)⁻¹` over quarterly windows | claim on 1,000 NPCS behind a gate filling ~5%/qtr → PV ≈ 850–950bps discount band — the *real* pricing math of the pilot |
-| `waterfall_line` | top-down cash, bottom-up loss, u128, no underflow | AC-10 distribution: fees → senior coupon → reserve → junior |
+| `fee_accrual_per_period` | `floor(nav_pico × fee_bps × Δt ÷ (10⁴ × 31_536_000))` | 10bps over 7 days on NAV 1.0 → **19_178_082 pico ≈ 19.18 µUSDC per NPCS**: exact at pico precision, truncated by up to 1 µUSDC (~5%) at 6dp. *This is why NAV is pico (D-B correction)* |
+| `nav_published_pico` | `nav_gross − fee` | see above; drift ≈ 4th–6th decimal (accepted) |
+| `allocate_pro_rata` | uniform-price allocation (rejects `total > Σqty` with `OverAllocation`): fill marginal bidders proportionally, `round_against_initiator` | 2,000 bid @ clearing vs 1,500 offered → each marginal bidder gets floor-adjusted share; remainder dust to *next-best* rules, never to filler |
+| `find_uniform_clear_price` | price maximizing executed volume; tie-break: min imbalance → nearest reference mark | 3 bidders (AC-3): deterministic single price |
+| `haircut_bps` | `nav_effective = nav × (1 − haircut_bps ÷ 10⁴)`, ceiling ≤ 100% checked; the doc 06 §11 H3 ceiling itself has no value yet (`credit_math::prudential`) | Fresh state = 0bps; Stale = param (e.g. 200bps) ⇒ $3,000 sleeve marks to $2,940 *reference*, never published as NAV |
+| `pv_of_claim` | `Σ floor(E[fill_t] × dᵗ)`, `d = (10⁴ − discount_bps) ÷ 10⁴` per quarterly window (a discount: a higher rate gives a *lower* PV) | claim on 1,000 NPCS behind a gate filling ~5%/qtr → PV ≈ 850–950bps discount band — the *real* pricing math of the pilot |
+| `distribute_cash` / `apply_loss` | top-down cash, bottom-up loss, u128, no underflow | AC-10 distribution: fees → senior coupon → reserve → junior |
 | `accrue_interest` | facility: `floor(principal × rate_bps × Δt ÷ (10⁴ × 31_536_000))` | 12% APR on 1,000 USDC = **328_767 micros/day ≈ $0.33** ($120/yr) — hand-verified test vector |
 
-**Property-test invariants (P0 skeleton, 100% branch target):** `nav_published ≤ nav_gross ≤ treasury × 10⁶` · `supply == deposits` at every step · `Σ pro_rata allocations == min(supply_offered, bid_depth)` exactly · `waterfall lines sum == cash received, exactly, no residue` · `round_against_initiator` holds on every rounding site (fuzzed).
+**Property-test invariants (100% branch target; the measured figure is published by the `credit-math — coverage` CI job):** `nav_published ≤ nav_gross` and the NAV floor definition · `Σ pro_rata allocations == total` exactly, each `≤ committed` · clearing is volume-maximal (brute-force cross-check) · `waterfall lines sum == cash received, exactly, no residue` · every rounding site goes through `div_round` with a declared direction, and each direction is fuzzed. **Not property-tested:** `supply == deposits`, because no function implements I1.
 
 ## 7 · Adversarial movement cases & containment
 
 | Case | Attack | Containment (already in design) |
 |---|---|---|
-| **Double-pledge** | Holder pledges same lot to facility AND commits it to an auction | Lot ledger is the single source of truth: `append_lot`/escrow marks the lot `encumbered`; both paths CPI-check lot state at commit (CG-P3 + LF/P4 + AE-P3). Second mover reverts. |
+| **Double-pledge** | Holder pledges same lot to facility AND commits it to an auction | Lot ledger is the single source of truth: `append_lot`/escrow marks the lot `encumbered`; both paths CPI-check lot state at commit (CG-P3 + LF-P1 + AE-P3). Second mover reverts. |
 | **Free-transfer gap** | Two thawed wallets move tokens *outside* the lot ledger via plain `transfer_checked`, defeating seasoning | Accepted pilot residue, by design: sRFC37 has no transfer-time hook (that's its point, D1). Seasoning is enforced **where units are acquired in the protocol** (mint, auction settle, pledge) and re-checked at every protocol exit (auction commit, pledge, burn). Raw P2P between thawed team wallets can bypass — contained pre-Q3 because all thawed wallets are team wallets, and disclosed as the known v1 boundary (production issuers add transfer-class config or keep books via TA). |
 | **Thaw-expiry race** | Attestation expires between commit and settlement; settlement would complete to an ineligible holder | AE-P8 re-runs the full gate check per fill; fail ⇒ fill skipped, escrow refunded to the failed side (state `PartialSettled`), print flagged (AC-3/AC-5 paths). |
 | **Governor run-around** | Use many wallets (same investor_id) to fake holder-count headroom | Governor maps **wallet → investor_id from attestation** (CG-P4), not wallet count; one id = one slot regardless of wallets. |
@@ -241,13 +243,14 @@ token/                    ← the asset, everything about it, nothing else
 ├── metadata.json              # name, symbol, URI content; PILOT-DEMO-ASSET — NOT AN OFFER
 ├── scripts/
 │   ├── init-mint.ts           # kit: create Token-2022 mint w/ extension set, metadata, ACL MintConfig wiring
-│   ├── mint-on-deposit.ts     # deposit-confirmed mint flow (Squads-proposed)
-│   ├── burn-on-redemption.ts  # redemption burn flow
+│   ├── mint-on-deposit.ts     # PLANNED, not yet written: deposit-confirmed mint flow (Squads-proposed)
+│   ├── burn-on-redemption.ts  # PLANNED, not yet written: redemption burn flow
 │   └── verify.ts              # extension audit: reads mint account, asserts the §2 manifest
 │                              #   + provenance check: freeze-authority owner == Token ACL program (§2.1)
 ├── runbook.md                 # key ceremony, deposit/mint ops, redemption ops, break-glass
 └── tests/
-    └── mint.spec.ts           # LiteSVM: born-frozen, metadata label, delegate identity, ACL wiring
+    ├── manifest.spec.ts       # offline drift tests: params.toml vs metadata.json, credit-math, verify.ts
+    └── mint.spec.ts           # PLANNED: LiteSVM born-frozen, metadata label, delegate identity, ACL wiring
 
 programs/credit-gate/          ← P1, same phase (D-C): CG-P1..7 per 08 §4.1
 programs/…                     ← P2+: mark-engine, auction-engine, queue-claim, liquidity-facility, tranche-engine
@@ -276,7 +279,7 @@ NPCS is **not a program** — it is a mint plus scripts plus config. All *behavi
 
 ## 12 · Acceptance hooks
 
-This doc is satisfied when: **AC-1** passes E2E on devnet (attestation → thaw through gate; ineligible wallet rejected with typed reason), **AC-6/AC-7** pass (lot seasoning + governor on NPCS), `token/scripts/verify.ts` asserts the §2 extension manifest **and** the §2.1 provenance check on a live mint, and every §6 function is property-tested. NAV math (I2) is covered by `credit-math` from P0.
+This doc is satisfied when: **AC-1** passes E2E on devnet (attestation → thaw through gate; ineligible wallet rejected with typed reason), **AC-6/AC-7** pass (lot seasoning + governor on NPCS), `token/scripts/verify.ts` asserts the §2 extension manifest **and** the §2.1 provenance check on a live mint (today the §2.1 check is printed as *informational*, because the freeze authority is still the bootstrap wallet; it becomes REQUIRED at ACL wiring), and every §6 function is property-tested. NAV math (I2) is covered by `credit-math` from P0.
 
 ---
 

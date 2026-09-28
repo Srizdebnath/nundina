@@ -162,7 +162,7 @@ for its two crates:
 - The program crate is kept out **by choice**, for isolation. It is not
   forced by the resolver: adding it to the root `members` only adds crates
   and changes none of the root's existing versions (checked 2026-09 against
-  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only via
+  anchor 1.1.2). Consolidating it later is possible. `credit-math` is used read-only (the rails are its only program consumer today: `ceil_div`, `mul_div`, `accrue_interest`, `distribute_cash`) via
 `path = "../../../programs/credit-math"`. CI covers it with dedicated jobs in
 `.github/workflows/ci.yml` (`payment-rails`, `payment-rails/crank`) that run
 everything in "Build and test" below from inside this folder, plus an IDL

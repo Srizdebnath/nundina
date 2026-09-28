@@ -13,21 +13,26 @@
 
 ## The one-paragraph version
 
-Tokenized private credit funds (ACRED, STAC, ONyc, SCOPE…) are locked, gated at ~5% per quarter, and NAV-priced only quarterly by the manager itself. In 2026 the gate crisis became the market's defining event — Apollo capped redemptions at 17% of NAV requested vs. a 5% cap; $5B+ sits trapped. NUNDINA builds the six-program mechanism nobody else has built: a **sealed-bid uniform-price batch auction** that manufactures an arms-length price where a passive AMM would bleed to adverse selection, a **mark engine** that makes stale appraisals usable, a **queue-claim** that tokenizes denied redemption requests, a **liquidity facility** that can actually liquidate permissioned collateral, a **credit-loss tranching waterfall**, and a **compliance gate** (Token ACL / sRFC37) enforcing per-lot Rule 144 seasoning, holder caps, and jurisdiction policy at account activation.
+Tokenized private credit funds (ACRED, STAC, ONyc, SCOPE…) are locked, gated at ~5% per quarter, and NAV-priced only quarterly by the manager itself. In 2026 the gate crisis became the market's defining event — Apollo capped redemptions at 17% of NAV requested vs. a 5% cap; $5B+ sits trapped. NUNDINA is designing and building the mechanism nobody else has built. This paragraph is the **target architecture**; the table below says what exists today: a **sealed-bid uniform-price batch auction** that manufactures an arms-length price where a passive AMM would bleed to adverse selection, a **mark engine** that makes stale appraisals usable, a **queue-claim** that tokenizes denied redemption requests, a **liquidity facility** that can actually liquidate permissioned collateral, a **credit-loss tranching waterfall**, and a **compliance gate** (Token ACL / sRFC37) enforcing per-lot Rule 144 seasoning, holder caps, and jurisdiction policy at account activation.
 
 ## Build status — real, on devnet
 
-Nothing here is a mock. The pilot runs on a real, self-issued, USDC-backed asset.
+Everything marked ✅ below is real and independently checkable. Nothing is
+mocked, and nothing is claimed that isn't built. The pilot asset is a real,
+self-issued Token-2022 mint, but its USDC backing is maintained by process
+today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 
 | Component | Status | Where to verify |
 |---|---|---|
-| `credit-math` — shared fixed-point crate (NAV, clearing, waterfall, PV) | ✅ built · 41 tests + 7 property suites green | `cargo test --workspace` |
-| `credit-gate` — sRFC37 Gate Program skeleton (CG-P2 config anchor) | ✅ **deployed devnet** | `DEPLOYMENTS.md` |
-| **NPCS** — the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **live devnet** · manifest verified | [`token/`](token/) · `DEPLOYMENTS.md` |
-| Next.js 16 app shell | ✅ builds | `app/` |
-| CI (fmt · clippy `-D warnings` · tests · app build) | ✅ green | `.github/workflows/ci.yml` |
+| **`payment-rails`**: the USDC cash layer. Escrow and bonds (AE-P3/P4), permissionless never-pausable refunds (AE-P10), atomic one-fill DvP (AE-P8), issuer ROFR (AE-P7), facility funding, advances, interest and sweep (LF-P2/P6), exact-conservation cash waterfall (TE-P4) | ✅ **live devnet** · LiteSVM suite + kill-the-crank drill on a real validator. Auction, mark, claim and tranche *semantics* are not built; the rails move their cash | [`payment-rails/`](payment-rails/) · `bash payment-rails/crank/scripts/devnet/verify.sh` |
+| `credit-math`: shared fixed-point crate (NAV, clearing, pro-rata, waterfall, PV, prudential floor) | ✅ built · unit + property suites · coverage measured in CI. **Wired:** `payment-rails` uses 4 functions; clearing, pro-rata, NAV, haircut and PV have no program consumer yet | `cargo test --workspace` |
+| `credit-gate`: sRFC37 Gate Program skeleton | ⚠️ **config PDA only**: gate logic (validate, lot ledger, governor, block-list check) not built. Devnet runs the **pre-#26 build**; the fixes on `main` await a redeploy (#45) | `DEPLOYMENTS.md` |
+| **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** · manifest verified. Not yet gated or backed on-chain; one bootstrap key holds every authority | [`token/`](token/) · `DEPLOYMENTS.md` |
+| Off-chain services | 🔨 crank + evidence exporter only. No indexer, database or NAV publisher (#58) | `payment-rails/crank/` |
+| Next.js 16 app | shell only (one static page; no wallet, no routes) | `app/` |
+| CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app build) | ✅ green | `.github/workflows/ci.yml` |
 | CG-P1..P6 gate logic + Token ACL wiring | 🔨 P1, in progress | SRS 08 §4.1 |
-| mark-engine · auction-engine · queue-claim · facility · tranching | scheduled P2–P5 | SRS 08 §12 |
+| mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
 
 ## Repo structure
 
@@ -69,6 +74,10 @@ cd token && npm install && CLUSTER=devnet npm run verify
 
 # the deployed credit-gate program
 solana program show 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c -u devnet
+
+# the live payment-rails program: keyless, read-only; checks source id,
+# genesis, build SHA-256, upgrade authority and slot against the registry
+bash payment-rails/crank/scripts/devnet/verify.sh
 ```
 
 ## Reading order for a newcomer
