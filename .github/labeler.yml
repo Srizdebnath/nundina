@@ -30,6 +30,11 @@ onchain:
           - "payment-rails/Anchor.toml"
           - "payment-rails/Cargo.*"
           - "payment-rails/crank/idl/**"
+          - "payment-rails/crank/src/**"
+          - "payment-rails/crank/tests/**"
+          - "payment-rails/crank/scripts/**"
+          - "Cargo.toml"
+          - "Cargo.lock"
           - "token/**"
 
 web:
