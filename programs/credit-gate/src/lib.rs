@@ -32,13 +32,16 @@ pub const MAX_ATTESTERS: usize = 4;
 /// Seeded per-mint. Every consumer (auction-engine sessions, facility
 /// underwriting) snapshots the fields it depends on — the gate never
 /// mutates config mid-session (L5 snapshot discipline). Updates are
-/// governed (Squads 2-of-2) and always evented (CG-P7).
+/// governed by `gate_config_authority` and always evented (CG-P7).
 #[account]
 #[derive(InitSpace)]
 pub struct MarketConfig {
     /// The gated mint this config governs.
     pub mint: Pubkey,
-    /// Squads 2-of-2: sole authority for this PDA. All updates propose here.
+    /// Sole authority for this PDA. Starts as the program upgrade authority
+    /// that initialized it (a single bootstrap key on devnet today, see
+    /// DEPLOYMENTS.md). Moves to the Squads 2-of-2 vault (SRS 08 §8) only
+    /// through `propose_gate_authority` + `accept_gate_authority`.
     pub gate_config_authority: Pubkey,
     /// Policy class (pilot: `PILOT_506C_TEST`) — stable u32 for consumers.
     pub policy_class: u32,
@@ -67,6 +70,26 @@ impl MarketConfig {
     pub const SEED: &'static [u8] = b"config";
 }
 
+/// A pending hand-over of one market's `gate_config_authority` (#50).
+/// Exists only between `propose_gate_authority` and accept/cancel.
+#[account]
+#[derive(InitSpace)]
+pub struct PendingGateAuthority {
+    /// The gated mint whose config is being handed over.
+    pub mint: Pubkey,
+    /// The authority that proposed (and paid rent; refunded on close).
+    pub proposed_by: Pubkey,
+    /// The key that must sign `accept_gate_authority`.
+    pub new_authority: Pubkey,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+impl PendingGateAuthority {
+    /// PDA seed prefix: `["pending_gate_authority", mint]`.
+    pub const SEED: &'static [u8] = b"pending_gate_authority";
+}
+
 /// CG-P7: every state change emits exactly one event from these families.
 #[event]
 #[derive(Debug)]
@@ -78,6 +101,25 @@ pub struct ConfigUpdated {
     pub new_config_hash: [u8; 32],
     /// Authority that performed the update.
     pub authority: Pubkey,
+}
+
+/// Emitted by the gate-authority hand-over instructions (#50). Exactly one
+/// per instruction. `kind`: 0 = proposed, 1 = cancelled, 2 = accepted.
+/// On `accepted` the config changed: `new_config_hash` is its fingerprint,
+/// otherwise it is the unchanged config's fingerprint.
+#[event]
+#[derive(Debug)]
+pub struct GateAuthorityTransfer {
+    /// 0 = proposed, 1 = cancelled, 2 = accepted.
+    pub kind: u8,
+    /// The gated mint.
+    pub mint: Pubkey,
+    /// `gate_config_authority` before this instruction.
+    pub old_authority: Pubkey,
+    /// The proposed (or, on accept, the now-current) authority.
+    pub new_authority: Pubkey,
+    /// `MarketConfig::fingerprint()` after this instruction.
+    pub new_config_hash: [u8; 32],
 }
 
 /// Emitted when a thaw/at-rest validate decision is made (P1: CG-P1).
@@ -146,6 +188,12 @@ pub enum GateError {
     /// Appended (never renumber): codes above are wire-stable.
     #[msg("Signer is not the program upgrade authority")]
     NotUpgradeAuthority,
+    /// Proposed gate authority is the default key or the current authority.
+    #[msg("Proposed gate authority is invalid")]
+    InvalidNewAuthority,
+    /// Signer is not the key named by the pending hand-over.
+    #[msg("Signer is not the proposed gate authority")]
+    NotProposedAuthority,
 }
 
 #[program]
@@ -153,9 +201,9 @@ pub mod credit_gate {
     use super::*;
 
     /// CG-P2: initialize the per-mint market config. Called once per gated
-    /// mint by the gate-config authority (Squads 2-of-2). The signer must be
-    /// this program's upgrade authority, so the first-caller-wins `init`
-    /// cannot be front-run by anyone watching for a new mint (#26).
+    /// mint. The signer must be this program's upgrade authority, so the
+    /// first-caller-wins `init` cannot be front-run by anyone watching for a
+    /// new mint (#26).
     #[allow(clippy::too_many_arguments)]
     pub fn initialize_config(
         ctx: Context<InitializeConfig>,
@@ -253,6 +301,66 @@ pub mod credit_gate {
         });
         Ok(())
     }
+
+    /// Step 1 of 2: the current `gate_config_authority` names its successor
+    /// (#50). The upgrade authority has no role here, so a Squads vault can
+    /// take over from a key it does not control. One pending proposal per
+    /// mint; `cancel_gate_authority` withdraws it.
+    pub fn propose_gate_authority(
+        ctx: Context<ProposeGateAuthority>,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        require!(
+            new_authority != Pubkey::default() && new_authority != cfg.gate_config_authority,
+            GateError::InvalidNewAuthority
+        );
+        ctx.accounts.pending.set_inner(PendingGateAuthority {
+            mint: cfg.mint,
+            proposed_by: cfg.gate_config_authority,
+            new_authority,
+            bump: ctx.bumps.pending,
+        });
+        emit!(GateAuthorityTransfer {
+            kind: 0,
+            mint: cfg.mint,
+            old_authority: cfg.gate_config_authority,
+            new_authority,
+            new_config_hash: cfg.fingerprint(),
+        });
+        Ok(())
+    }
+
+    /// Withdraws a pending proposal. Only the current authority may cancel.
+    pub fn cancel_gate_authority(ctx: Context<CancelGateAuthority>) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        emit!(GateAuthorityTransfer {
+            kind: 1,
+            mint: cfg.mint,
+            old_authority: cfg.gate_config_authority,
+            new_authority: ctx.accounts.pending.new_authority,
+            new_config_hash: cfg.fingerprint(),
+        });
+        Ok(())
+    }
+
+    /// Step 2 of 2: the proposed key signs to take over. Proving it can sign
+    /// before anything moves means a typo'd or unreachable key can never
+    /// strand the config.
+    pub fn accept_gate_authority(ctx: Context<AcceptGateAuthority>) -> Result<()> {
+        let new_authority = ctx.accounts.new_authority.key();
+        let cfg = &mut ctx.accounts.config;
+        let old_authority = cfg.gate_config_authority;
+        cfg.gate_config_authority = new_authority;
+        emit!(GateAuthorityTransfer {
+            kind: 2,
+            mint: cfg.mint,
+            old_authority,
+            new_authority,
+            new_config_hash: cfg.fingerprint(),
+        });
+        Ok(())
+    }
 }
 
 /// Domain separator for [`MarketConfig::fingerprint`]. Bump the version if
@@ -313,8 +421,10 @@ pub struct InitializeConfig<'info> {
     /// CHECK: mint key is used for PDA seeding; token-type validation of
     /// this mint happens at ACL wiring in P1 (CG-P1).
     pub mint: UncheckedAccount<'info>,
-    /// Upgrade authority (Squads 2-of-2); becomes the gate-config authority
-    /// and pays rent.
+    /// Program upgrade authority (a single bootstrap key on devnet today,
+    /// Squads 2-of-2 is the SRS 08 §8 target); becomes the gate-config
+    /// authority and pays rent. Rotate it later with
+    /// `propose_gate_authority` + `accept_gate_authority`.
     #[account(mut)]
     pub authority: Signer<'info>,
     /// This program — used only to locate its ProgramData account.
@@ -330,6 +440,81 @@ pub struct InitializeConfig<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ProposeGateAuthority<'info> {
+    #[account(
+        seeds = [MarketConfig::SEED, mint.key().as_ref()],
+        bump = config.bump,
+        has_one = gate_config_authority @ GateError::Unauthorized
+    )]
+    pub config: Account<'info, MarketConfig>,
+    /// One pending proposal per mint (`init` fails while one exists).
+    #[account(
+        init,
+        payer = gate_config_authority,
+        space = 8 + PendingGateAuthority::INIT_SPACE,
+        seeds = [PendingGateAuthority::SEED, mint.key().as_ref()],
+        bump
+    )]
+    pub pending: Account<'info, PendingGateAuthority>,
+    /// CHECK: mint key must derive both PDAs above.
+    pub mint: UncheckedAccount<'info>,
+    /// Current authority (checked by `has_one`); pays the pending rent.
+    #[account(mut)]
+    pub gate_config_authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelGateAuthority<'info> {
+    #[account(
+        seeds = [MarketConfig::SEED, mint.key().as_ref()],
+        bump = config.bump,
+        has_one = gate_config_authority @ GateError::Unauthorized
+    )]
+    pub config: Account<'info, MarketConfig>,
+    #[account(
+        mut,
+        close = proposed_by,
+        seeds = [PendingGateAuthority::SEED, mint.key().as_ref()],
+        bump = pending.bump,
+        has_one = proposed_by
+    )]
+    pub pending: Account<'info, PendingGateAuthority>,
+    /// CHECK: mint key must derive both PDAs above.
+    pub mint: UncheckedAccount<'info>,
+    pub gate_config_authority: Signer<'info>,
+    /// CHECK: rent refund target, pinned by `has_one` on `pending`.
+    #[account(mut)]
+    pub proposed_by: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptGateAuthority<'info> {
+    #[account(
+        mut,
+        seeds = [MarketConfig::SEED, mint.key().as_ref()],
+        bump = config.bump
+    )]
+    pub config: Account<'info, MarketConfig>,
+    #[account(
+        mut,
+        close = proposed_by,
+        seeds = [PendingGateAuthority::SEED, mint.key().as_ref()],
+        bump = pending.bump,
+        has_one = proposed_by,
+        constraint = pending.new_authority == new_authority.key() @ GateError::NotProposedAuthority
+    )]
+    pub pending: Account<'info, PendingGateAuthority>,
+    /// CHECK: mint key must derive both PDAs above.
+    pub mint: UncheckedAccount<'info>,
+    /// The proposed key; must sign.
+    pub new_authority: Signer<'info>,
+    /// CHECK: rent refund target, pinned by `has_one` on `pending`.
+    #[account(mut)]
+    pub proposed_by: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct UpdateConfig<'info> {
     /// Per-mint policy PDA; only its governing authority may update.
     #[account(
@@ -341,7 +526,7 @@ pub struct UpdateConfig<'info> {
     pub config: Account<'info, MarketConfig>,
     /// CHECK: mint key must derive the config PDA above.
     pub mint: UncheckedAccount<'info>,
-    /// Squads 2-of-2 authority (checked by `has_one`).
+    /// Current gate-config authority (checked by `has_one`).
     pub gate_config_authority: Signer<'info>,
 }
 
