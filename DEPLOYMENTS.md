@@ -59,6 +59,21 @@ cd token && CLUSTER=devnet npm run verify
   on `main` but is **not deployed** until the upgrade authority redeploys.
   Nothing consumes this skeleton yet, but configs created on devnet before
   that upgrade aren't trustworthy.
+- **Checking and closing the #45 gap.** Anyone can run
+  `bash programs/credit-gate/scripts/verify.sh`. It verifies the row above
+  keylessly (source id, genesis, dump SHA-256, authority, slot) and reports
+  whether this checkout's `anchor build` equals the live build. Today it
+  does not: the live build is the pre-#26 one. The redeploy needs the
+  upgrade authority `Bprm…jKgp`:
+  1. `anchor build` on `main`, then `solana program deploy
+     target/deploy/credit_gate.so --program-id 7yREa5V3…Qa9c
+     --upgrade-authority <Bprm….json> -u devnet` (bare id: the program
+     keypair is not needed);
+  2. update this row's Slot, signature and Build SHA-256, then re-run
+     `verify.sh` (it must now print `local anchor build == live build`);
+  3. discard any `MarketConfig` created against the old build (none are
+     consumed today), and follow the #50 hand-over note below before the
+     bootstrap key is retired.
 - **Gate authority hand-over (#50):** a `MarketConfig`'s
   `gate_config_authority` starts as the upgrade authority that initialized
   it, which on devnet today is the single bootstrap key above, not a Squads
