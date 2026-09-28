@@ -901,6 +901,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "credit-math",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
@@ -908,6 +909,7 @@ name = "credit-gate-svm-tests"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "base64 0.22.1",
  "credit-gate",
  "litesvm",
  "solana-instruction-error",

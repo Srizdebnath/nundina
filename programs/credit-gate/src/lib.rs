@@ -73,7 +73,8 @@ impl MarketConfig {
 pub struct ConfigUpdated {
     /// Which field group changed (off-chain schema maps the code).
     pub field_group: u8,
-    /// Hash of the post-update config values (no PII; full values in IDL).
+    /// SHA-256 of the post-update config (`MarketConfig::fingerprint`):
+    /// every governed field, domain-separated. No PII.
     pub new_config_hash: [u8; 32],
     /// Authority that performed the update.
     pub authority: Pubkey,
@@ -193,7 +194,7 @@ pub mod credit_gate {
         });
         emit!(ConfigUpdated {
             field_group: 0,
-            new_config_hash: config_hash(cfg),
+            new_config_hash: cfg.fingerprint(),
             authority: authority_key,
         });
         Ok(())
@@ -247,39 +248,55 @@ pub mod credit_gate {
         }
         emit!(ConfigUpdated {
             field_group: 1,
-            new_config_hash: config_hash(cfg),
+            new_config_hash: cfg.fingerprint(),
             authority: authority_key,
         });
         Ok(())
     }
 }
 
-/// Deterministic fingerprint over config fields for event provenance
-/// (CG-P7). P0 uses FNV-1a (pure Rust, no deps); P1 replaces this with the
-/// platform SHA-256 via the anchor-1.1 hash API once that re-export path is
-/// pinned — the event field stays `[u8; 32]` so consumers are unaffected.
-fn config_hash(cfg: &MarketConfig) -> [u8; 32] {
-    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut h = FNV_OFFSET;
-    let mut mix = |bytes: &[u8]| {
-        for b in bytes {
-            h ^= u64::from(*b);
-            h = h.wrapping_mul(FNV_PRIME);
-        }
-    };
-    mix(cfg.mint.as_ref());
-    mix(&cfg.policy_class.to_le_bytes());
-    mix(&cfg.holder_cap.to_le_bytes());
-    mix(&cfg.seasoning_seconds.to_le_bytes());
-    mix(&cfg.settlement_horizon_seconds.to_le_bytes());
-    mix(&cfg.attester_count.to_le_bytes());
-    for a in cfg.attesters.iter() {
-        mix(a.as_ref());
+/// Domain separator for [`MarketConfig::fingerprint`]. Bump the version if
+/// the field encoding below ever changes.
+pub const CONFIG_HASH_DOMAIN: &[u8] = b"nundina.credit-gate.MarketConfig.v1";
+
+impl MarketConfig {
+    /// SHA-256 over every governed field, for event provenance (CG-P7).
+    ///
+    /// Covered: mint, gate_config_authority, policy_class, identity_schema,
+    /// accreditation_schema, all `MAX_ATTESTERS` attester slots,
+    /// attester_count, holder_cap, seasoning_seconds,
+    /// settlement_horizon_seconds and blocklist (a 0/1 tag, then the key).
+    /// Not covered: `bump`. It is PDA derivation metadata, not governed
+    /// state, which matches `payment-rails`' `RailsConfig::fingerprint`.
+    /// Any change to a governed field changes the hash (#49).
+    pub fn fingerprint(&self) -> [u8; 32] {
+        let blocklist_tag = [u8::from(self.blocklist.is_some())];
+        let blocklist_key = self.blocklist.unwrap_or_default();
+        let (policy, cap) = (
+            self.policy_class.to_le_bytes(),
+            self.holder_cap.to_le_bytes(),
+        );
+        let (season, horizon) = (
+            self.seasoning_seconds.to_le_bytes(),
+            self.settlement_horizon_seconds.to_le_bytes(),
+        );
+        let mut parts: Vec<&[u8]> = vec![
+            CONFIG_HASH_DOMAIN,
+            self.mint.as_ref(),
+            self.gate_config_authority.as_ref(),
+            &policy,
+            self.identity_schema.as_ref(),
+            self.accreditation_schema.as_ref(),
+            core::slice::from_ref(&self.attester_count),
+            &cap,
+            &season,
+            &horizon,
+            &blocklist_tag,
+            blocklist_key.as_ref(),
+        ];
+        parts.extend(self.attesters.iter().map(|a| a.as_ref()));
+        solana_sha256_hasher::hashv(&parts).to_bytes()
     }
-    let mut out = [0u8; 32];
-    out[..8].copy_from_slice(&h.to_le_bytes());
-    out
 }
 
 #[derive(Accounts)]
@@ -326,4 +343,96 @@ pub struct UpdateConfig<'info> {
     pub mint: UncheckedAccount<'info>,
     /// Squads 2-of-2 authority (checked by `has_one`).
     pub gate_config_authority: Signer<'info>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> MarketConfig {
+        MarketConfig {
+            mint: Pubkey::new_from_array([1; 32]),
+            gate_config_authority: Pubkey::new_from_array([2; 32]),
+            policy_class: 1,
+            identity_schema: Pubkey::new_from_array([3; 32]),
+            accreditation_schema: Pubkey::new_from_array([4; 32]),
+            attesters: [
+                Pubkey::new_from_array([5; 32]),
+                Pubkey::default(),
+                Pubkey::default(),
+                Pubkey::default(),
+            ],
+            attester_count: 1,
+            holder_cap: 8,
+            seasoning_seconds: 604_800,
+            settlement_horizon_seconds: 86_400,
+            blocklist: None,
+            bump: 255,
+        }
+    }
+
+    #[test]
+    fn fingerprint_tracks_every_governed_field() {
+        let base = cfg().fingerprint();
+        assert_eq!(base, cfg().fingerprint(), "deterministic");
+        let k = Pubkey::new_from_array([9; 32]);
+        let mut last_slot = cfg();
+        last_slot.attesters[3] = k;
+        let variants = [
+            MarketConfig { mint: k, ..cfg() },
+            MarketConfig {
+                gate_config_authority: k,
+                ..cfg()
+            },
+            MarketConfig {
+                policy_class: 2,
+                ..cfg()
+            },
+            MarketConfig {
+                identity_schema: k,
+                ..cfg()
+            },
+            MarketConfig {
+                accreditation_schema: k,
+                ..cfg()
+            },
+            last_slot,
+            MarketConfig {
+                attester_count: 2,
+                ..cfg()
+            },
+            MarketConfig {
+                holder_cap: 9,
+                ..cfg()
+            },
+            MarketConfig {
+                seasoning_seconds: 604_801,
+                ..cfg()
+            },
+            MarketConfig {
+                settlement_horizon_seconds: 86_401,
+                ..cfg()
+            },
+            MarketConfig {
+                blocklist: Some(k),
+                ..cfg()
+            },
+            // `Some(default)` must not collide with `None`.
+            MarketConfig {
+                blocklist: Some(Pubkey::default()),
+                ..cfg()
+            },
+        ];
+        for (i, v) in variants.iter().enumerate() {
+            assert_ne!(v.fingerprint(), base, "variant {i} did not change the hash");
+        }
+        // The bump is derivation metadata, not governed state.
+        assert_eq!(MarketConfig { bump: 1, ..cfg() }.fingerprint(), base);
+    }
+
+    #[test]
+    fn fingerprint_uses_the_full_32_bytes() {
+        let h = cfg().fingerprint();
+        assert!(h[8..].iter().any(|b| *b != 0), "not a padded 64-bit hash");
+    }
 }
