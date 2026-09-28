@@ -9,7 +9,7 @@ use credit_math::allocation::{allocate_pro_rata, find_uniform_clear_price, Order
 use credit_math::nav::{nav_gross_pico, weekly_publish, PICO};
 use credit_math::pv::{pv_of_claim, ExpectedFill};
 use credit_math::waterfall::{apply_loss, distribute_cash, WaterfallParams};
-use credit_math::MathError;
+use credit_math::{ceil_div, MathError, RoundAwayFromInitiator, RoundDirection};
 use proptest::prelude::*;
 
 /// Random order book: prices around 1.0 USDC, sizes ≤ 1M base units.
