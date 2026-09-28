@@ -6,6 +6,7 @@
   "scripts": {
     "init-mint": "tsx scripts/init-mint.ts",
     "verify": "tsx scripts/verify.ts",
+    "typecheck": "tsc",
     "test": "tsx --test tests/*.spec.ts"
   },
   "dependencies": {
