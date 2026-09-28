@@ -38,6 +38,15 @@ jobs:
           done
           echo "All legal anchors present."
 
+  # SRS requirement IDs (CG-P3, AE-P8, …) cited anywhere must be defined in
+  # SRS 08, and written with a hyphen (#63 found CG-P8 and LF/P4).
+  req-ids:
+    name: Requirement IDs resolve to SRS 08
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 .github/scripts/check-req-ids.py
+
   # Mermaid blocks must render on GitHub: every ```mermaid fence needs a
   # recognized diagram type on its first line.
   mermaid:

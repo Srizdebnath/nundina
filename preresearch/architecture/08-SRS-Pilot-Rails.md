@@ -218,7 +218,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 | LF-P3 | Health check: `MARK_PROTECTIVE`-based maintenance; breach → grace window (top-up allowed) → ladder | LF-1/2 |
 | LF-P4 | **No liquidation when mark state ∈ {Warned?, Stale, Suspended}** — enforced by reading mark-engine state inside the liquidate instruction (Warned blocks new advances only) | LF-1; B5 |
 | LF-P5 | Ladder exactly per 06 §5: (1) issuer ROFR at MARK_PROTECTIVE (multisig), (2) backstop bidder (pre-registered team wallet, contracted haircut), (3) forced-sale auction session via auction-engine with `forced_sale=true`, (4) workout assignment to lender PDA; shortfall → reserve → lender, non-recourse, evented | F8; M2 |
-| LF-P6 | Repayment/sweep hooks from queue-claim fills; interest accrues per block by `credit-math` (pilot rate: fixed 12% APR, config) | QC-P4 |
+| LF-P6 | Repayment/sweep hooks from queue-claim fills; interest accrues per second over `Δt_seconds`, computed at each touch by `credit_math::accrue_interest` (pilot rate: fixed 12% APR, config) | QC-P4 |
 
 **Acceptance:** AC-9.
 
