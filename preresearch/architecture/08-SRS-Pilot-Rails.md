@@ -273,6 +273,23 @@ Interface: `payment-rails/INTERFACE.md`. Phases: `payment-rails/PHASES.md`. Regi
 | Rotation/revocation | Attester rotation: add-new → re-attest → remove-old, both in market config attester sets (multisig). Revocation = expiry + block-list, per CG-P5 |
 | Mainnet note | Real SAS program on mainnet-beta; attestations cost real fees — negligible at pilot scale |
 
+**As-built status (2026-09, #52): nothing in this section exists yet.** There
+is no SAS program id, no schema, no attester keypair or custody runbook, no
+issuance path, and no on-chain read. `credit-gate`'s schema and attester
+fields are storage only, and `payment-rails` admits payout destinations on a
+registrar-supplied hash. The header's "real SAS attestations from day 1"
+decision and §12's P1 placement stand, but they are unmet. The minimum P1
+slice, in dependency order:
+1. author and version the three schemas in the repo;
+2. create the attester keypair with the custody above (and add it to the
+   key table in `payment-rails/README.md § Keys`);
+3. `credit-gate::validate` performs the SAS read: owner program,
+   attester ∈ `attesters`, schema match, expiry vs settlement horizon, and
+   `investor_id` extraction (CG-P6);
+4. wire the Token ACL so NPCS thaws route through the gate.
+If this slips past P1, amend §12 rather than leave the decision and the plan
+in contradiction.
+
 ---
 
 ## 6 · Off-chain services

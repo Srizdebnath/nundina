@@ -373,6 +373,8 @@ pub struct PayoutDestination {
     /// The one USDC token account payouts may go to (owned by `owner`).
     pub token_account: Pubkey,
     /// Hash of the off-chain attestation / KYC reference. Never raw data.
+    /// Supplied by the registrar and **not checked** against any SAS
+    /// attestation: the registrar key vouches for it (#52).
     pub attestation_ref_hash: [u8; 32],
     /// Registrar that admitted / last renewed it.
     pub registrar: Pubkey,

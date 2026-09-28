@@ -137,6 +137,13 @@ flowchart LR
     end
 ```
 
+**What exists today (#52):** none of the TARGET box. `credit-gate` stores
+`identity_schema`, `accreditation_schema` and an `attesters` set, but no
+instruction reads a SAS attestation. There is no SAS program id, no schema
+definition, no attester key and no issuance path. Those fields are storage
+only, and their presence must not be read as enforcement. SRS 08 §5
+describes the design; it is unbuilt.
+
 After wiring, the §2.1 provenance check becomes REQUIRED: the freeze-authority
 account's owner must be the Token ACL program — the only structural
 discriminator between a regulated permissioned fund and a honeypot (since
