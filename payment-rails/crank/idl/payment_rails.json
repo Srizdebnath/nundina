@@ -4164,6 +4164,12 @@
           },
           {
             "name": "AssetReturned"
+          },
+          {
+            "name": "AssetShortfall"
+          },
+          {
+            "name": "CashShortfall"
           }
         ]
       }

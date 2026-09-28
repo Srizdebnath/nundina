@@ -267,7 +267,13 @@ pub fn process_forfeit_bond(ctx: Context<ForfeitBond>) -> Result<()> {
 
 /// Pay out an escrow's USDC vault per `route` and close it: the bond goes to
 /// the reserve when forfeit; everything else (remaining cash, bond, donated
-/// dust) goes to the owner. Returns `(to_reserve, to_owner)`.
+/// dust) goes to the owner. Returns `(to_reserve, to_owner, shortfall)`.
+///
+/// A vault holding less than `recorded` (a settlement mint with a permanent
+/// delegate or clawback) still drains and closes. The forfeit is paid first,
+/// up to what is held, and the owner gets the rest. The caller reports
+/// `shortfall` as `CashShortfall`. A refund must never be blocked (AE-P10,
+/// doc 06 §11 H5, #62).
 #[allow(clippy::too_many_arguments)]
 fn drain_usdc_vault<'info>(
     token_program: &Interface<'info, TokenInterface>,
@@ -280,12 +286,13 @@ fn drain_usdc_vault<'info>(
     seeds: &[&[u8]],
     recorded: u64,
     forfeit: u64,
-) -> Result<(u64, u64)> {
+) -> Result<(u64, u64, u64)> {
     // Anyone can send tokens to the vault; a donation must not be able to
     // block the close (griefing), so everything above the reserve's share
     // goes to the owner.
     let held = vault.amount;
-    require!(held >= recorded, RailsError::ConservationViolated);
+    let shortfall = recorded.saturating_sub(held);
+    let forfeit = forfeit.min(held);
     let to_owner = held - forfeit;
     let vault_info = vault.to_account_info();
     token::transfer(
@@ -307,7 +314,7 @@ fn drain_usdc_vault<'info>(
         to_owner,
     )?;
     token::close(token_program, vault_info, owner, escrow, &[seeds])?;
-    Ok((forfeit, to_owner))
+    Ok((forfeit, to_owner, shortfall))
 }
 
 /// AE-P10 / AC-11: return a **buy** escrow to its owner. Permissionless —
@@ -340,7 +347,7 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
         &[escrow.bump],
     ];
     let recorded = cash.checked_add(bond).ok_or(RailsError::MathOverflow)?;
-    let (to_reserve, to_owner) = drain_usdc_vault(
+    let (to_reserve, to_owner, cash_shortfall) = drain_usdc_vault(
         &ctx.accounts.token_program,
         &ctx.accounts.usdc_mint,
         &ctx.accounts.vault,
@@ -373,13 +380,24 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
         to_owner,
         caller,
     );
+    if cash_shortfall > 0 {
+        emit_escrow(
+            EscrowAction::CashShortfall,
+            session_key,
+            escrow_key,
+            owner_key,
+            cash_shortfall,
+            caller,
+        );
+    }
     // `close = owner` on the escrow account returns its rent.
     Ok(())
 }
 
 /// AE-P10 sell side: return unsold asset + bond (or just the asset, when
 /// the bond is forfeit) to the seller. Same permissionless, never-pausable
-/// rules as `refund`; closes both vaults and the escrow.
+/// rules as `refund`; closes both vaults and the escrow. Completes even if
+/// the asset vault was drained below the recorded amount (#62).
 pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let escrow = &ctx.accounts.escrow;
@@ -403,7 +421,7 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
     ];
     let escrow_info = ctx.accounts.escrow.to_account_info();
     let owner_info = ctx.accounts.owner.to_account_info();
-    let (to_reserve, to_owner) = drain_usdc_vault(
+    let (to_reserve, to_owner, cash_shortfall) = drain_usdc_vault(
         &ctx.accounts.token_program,
         &ctx.accounts.usdc_mint,
         &ctx.accounts.vault,
@@ -417,18 +435,25 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
     )?;
 
     // Asset: everything held (incl. any donated dust) back to the seller.
+    // The vault can hold *less* than recorded: an asset with a permanent
+    // delegate (NPCS, SRS 08 §3.1) can pull from it at any time. That must
+    // not block the refund, or the seller's bond is stranded forever
+    // (AE-P10 / doc 06 §11 H5, #62). Return what is there and record the
+    // gap as `AssetShortfall`.
     let held = ctx.accounts.asset_vault.amount;
-    require!(held >= asset, RailsError::ConservationViolated);
+    let shortfall = asset.saturating_sub(held);
     let asset_vault_info = ctx.accounts.asset_vault.to_account_info();
-    token::transfer(
-        &ctx.accounts.asset_token_program,
-        &ctx.accounts.asset_mint,
-        asset_vault_info.clone(),
-        ctx.accounts.owner_asset.to_account_info(),
-        escrow_info.clone(),
-        &[seeds],
-        held,
-    )?;
+    if held > 0 {
+        token::transfer(
+            &ctx.accounts.asset_token_program,
+            &ctx.accounts.asset_mint,
+            asset_vault_info.clone(),
+            ctx.accounts.owner_asset.to_account_info(),
+            escrow_info.clone(),
+            &[seeds],
+            held,
+        )?;
+    }
     token::close(
         &ctx.accounts.asset_token_program,
         asset_vault_info,
@@ -457,6 +482,16 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         to_owner,
         caller,
     );
+    if cash_shortfall > 0 {
+        emit_escrow(
+            EscrowAction::CashShortfall,
+            session_key,
+            escrow_key,
+            owner_key,
+            cash_shortfall,
+            caller,
+        );
+    }
     emit_escrow(
         EscrowAction::AssetReturned,
         session_key,
@@ -465,6 +500,16 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         held,
         caller,
     );
+    if shortfall > 0 {
+        emit_escrow(
+            EscrowAction::AssetShortfall,
+            session_key,
+            escrow_key,
+            owner_key,
+            shortfall,
+            caller,
+        );
+    }
     Ok(())
 }
 
