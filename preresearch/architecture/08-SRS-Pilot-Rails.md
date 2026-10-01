@@ -249,8 +249,9 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 |---|---|---|
 | AE-P3 / AE-P4 | pre-funded bid escrow + forfeitable bond; ask escrow (asset + bond) | ✅ R1/R2 |
 | AE-P7 | issuer ROFR cash-for-asset fill | ✅ R2 |
-| AE-P8 | one-fill-per-instruction atomic DvP; `TransferInstruction` record. **Gate re-check not yet performed** (`gate_check = NotPerformed`) | ⚠️ R2, pending gate P1 |
-| AE-P10 | permissionless, never-pausable refunds; PDA-only escrow; completes even on a delegate-drained vault | ✅ R1 (+#62) |
+| AE-P8 | one-fill-per-instruction atomic DvP; `TransferInstruction` record **schema only** (#88): no lot ledger, no exemption basis, **gate re-check not performed** (`gate_check = NotPerformed`), so no fill is provably lawful (doc 07 L4/L21 unmet); evidence manifests count such fills as `unproven` | ⚠️ R2, pending gate P1 (#53) |
+| AE-P10 | permissionless, never-pausable refunds; PDA-only escrow; completes even on a delegate-drained vault and books the shortfall (#89); frozen destinations fail typed (#90) | ✅ R1 (+#62, #89, #90) |
+| LF-P1 (H1 only) | `advance_rate_bps ≤ 50%` hard ceiling and `amount ≤ collateral mark × rate`, recorded on the `Advance`; the mark is curator-supplied; maintenance ratio, state and health are not built | ⚠️ R3 + #94 |
 | LF-P2 / LF-P6 | facility fund, advances to registered destinations, simple-interest accrual, repayment | ✅ R3 |
 | QC-P4 | proceeds sweep: facility repayment first, then holder | ✅ R3 |
 | TE-P4 | cash waterfall with exact conservation | ✅ R3 |

@@ -1,7 +1,8 @@
 /**
  * Reconciliation: prove from chain state alone that escrowed balances equal
  * open obligations (R4). Every check is `expected` vs `actual`; a report is
- * clean only if all pass. Donated dust (a vault holding *more* than its
+ * clean only if all pass, and a shortfall a refund booked on the session
+ * (#89) is a failed check, not a footnote. Donated dust (a vault holding *more* than its
  * escrow records) is surfaced as a warning — it is the owner's on refund.
  */
 import type { Address } from "@solana/kit";
@@ -37,6 +38,11 @@ export async function reconcileSession(rpc: R, session: Address): Promise<Report
   checks.push(eq("Σ escrow.cash = session.total_cash", s.total_cash, sum((e) => e.cash)));
   checks.push(eq("Σ escrow.bond = session.total_bonds", s.total_bonds, sum((e) => e.bond)));
   checks.push(eq("Σ escrow.asset = session.total_asset", s.total_asset, sum((e) => e.asset)));
+  // A refund that found a vault short still closes the escrow, so the gap
+  // leaves the live totals; the program books it here instead (#89). A
+  // non-zero figure is a real loss (clawback / delegate pull): never clean.
+  checks.push(eq("no cash shortfall booked (session.total_cash_shortfall)", 0n, s.total_cash_shortfall));
+  checks.push(eq("no asset shortfall booked (session.total_asset_shortfall)", 0n, s.total_asset_shortfall));
 
   for (const { address, data: e } of escrows) {
     const usdc = (await tokenBalance(rpc, e.vault)) ?? -1n;

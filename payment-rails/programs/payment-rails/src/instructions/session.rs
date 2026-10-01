@@ -83,6 +83,8 @@ pub fn process_open_session(
         fills_settled: 0,
         volume_settled: 0,
         gross_settled: 0,
+        total_cash_shortfall: 0,
+        total_asset_shortfall: 0,
         bump: ctx.bumps.session,
     });
     emit!(SessionEvent {
@@ -117,6 +119,7 @@ pub fn process_mark_revealed(ctx: Context<OperatorEscrow>) -> Result<()> {
         escrow: escrow.key(),
         owner: escrow.owner,
         amount: 0,
+        unit: EscrowAction::Revealed.unit(),
         caller: ctx.accounts.operator.key(),
     });
     Ok(())

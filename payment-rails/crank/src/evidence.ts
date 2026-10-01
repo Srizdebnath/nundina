@@ -50,12 +50,41 @@ export function toJson(v: unknown): unknown {
   return v;
 }
 
+/**
+ * What the AE-P8 transfer records in a bundle can prove (#88). A fill is
+ * `proven` only if its `TransferInstruction` says the gate re-check passed
+ * AND names an exemption basis AND lists the lots it drew from. Until the
+ * lot ledger and settle-time gate check exist (#53) every fill is
+ * `unproven`, and the manifest says so instead of letting the bare event
+ * count read as compliance evidence (doc 07 L4/L21 are not met yet).
+ */
+export interface TransferProof {
+  fills: number;
+  proven: number;
+  unproven: number;
+}
+
+/** Pure: classify the bundle's `TransferInstruction` records. */
+export function transferProof(records: readonly Pick<EvidenceRecord, "event" | "data">[]): TransferProof {
+  const transfers = records.filter((r) => r.event === "TransferInstruction");
+  const proven = transfers.filter(
+    (r) =>
+      r.data.gate_check === "Passed" &&
+      r.data.exemption_path !== "NotRecorded" &&
+      Array.isArray(r.data.lot_ids) &&
+      r.data.lot_ids.length > 0,
+  ).length;
+  return { fills: transfers.length, proven, unproven: transfers.length - proven };
+}
+
 export interface Manifest {
   program: string;
   generatedAt: string;
   transactions: number;
   events: number;
   byEvent: Record<string, number>;
+  /** AE-P8 lawfulness coverage of the fills in this bundle (#88). */
+  transferProof: TransferProof;
   slotRange: [string, string] | null;
   file: string;
   sha256: string;
@@ -113,6 +142,7 @@ export async function exportEvidence(rpc: R, outDir: string, opts: { limit?: num
     transactions: txs,
     events: records.length,
     byEvent,
+    transferProof: transferProof(records),
     slotRange: records.length ? [records[0]!.slot, records[records.length - 1]!.slot] : null,
     file: "events.jsonl",
     sha256: createHash("sha256").update(body).digest("hex"),

@@ -10,7 +10,8 @@
     {
       "name": "advance_funds",
       "docs": [
-        "LF-P1: advance to a registered destination (curator)."
+        "LF-P1: advance to a registered destination (curator), bounded by the",
+        "stated collateral mark × an advance rate ≤ the H1 ceiling (#94)."
       ],
       "discriminator": [
         198,
@@ -167,6 +168,14 @@
               32
             ]
           }
+        },
+        {
+          "name": "collateral_value",
+          "type": "u64"
+        },
+        {
+          "name": "advance_rate_bps",
+          "type": "u64"
         }
       ]
     },
@@ -3451,6 +3460,36 @@
       "code": 6041,
       "name": "AssetVaultFrozen",
       "msg": "Asset vault is frozen; the gate must thaw it before deposit_ask"
+    },
+    {
+      "code": 6042,
+      "name": "RefundAssetDestinationFrozen",
+      "msg": "Refund asset destination is frozen; pass a thawed account of the owner"
+    },
+    {
+      "code": 6043,
+      "name": "RefundUsdcDestinationFrozen",
+      "msg": "Refund USDC destination is frozen; pass a thawed account of the owner"
+    },
+    {
+      "code": 6044,
+      "name": "EscrowDrained",
+      "msg": "Seller asset vault holds less than the fill quantity"
+    },
+    {
+      "code": 6045,
+      "name": "AdvanceRateTooHigh",
+      "msg": "Advance rate above the hard ceiling"
+    },
+    {
+      "code": 6046,
+      "name": "AdvanceExceedsRate",
+      "msg": "Advance exceeds collateral value × advance rate"
+    },
+    {
+      "code": 6047,
+      "name": "TooManyLots",
+      "msg": "Too many lots in one fill"
     }
   ],
   "types": [
@@ -3489,6 +3528,24 @@
             }
           },
           {
+            "name": "collateral_value",
+            "docs": [
+              "Collateral mark the advance was sized against (micro-USDC), as",
+              "supplied by the curator (#94). There is no mark engine yet, so the",
+              "rails cannot verify it; they bound the advance by it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "advance_rate_bps",
+            "docs": [
+              "Advance rate the curator applied, in bps; at most the H1 ceiling",
+              "`credit_math::MAX_ADVANCE_RATE_BPS` (#94). Original principal ≤",
+              "`collateral_value × advance_rate_bps / 10⁴`."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "principal",
             "docs": [
               "Principal still owed."
@@ -3515,6 +3572,24 @@
               "PDA bump."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmountUnit",
+      "docs": [
+        "Unit of [`EscrowEvent::amount`] (#89). Explicit so a consumer that books",
+        "`amount` never mixes micro-USDC with asset base units."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "MicroUsdc"
+          },
+          {
+            "name": "AssetBase"
           }
         ]
       }
@@ -3768,6 +3843,25 @@
             "name": "gross_settled",
             "docs": [
               "Cash (gross) paid across settled fills."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_cash_shortfall",
+            "docs": [
+              "Micro-USDC that refunds recorded but did not find in a vault (#89):",
+              "the sum of every `CashShortfall`. A refund still completes and stops",
+              "tracking the recorded amount, so without this the loss would leave",
+              "the books. Non-zero means escrowed cash was taken (e.g. by a",
+              "settlement-mint clawback) and reconciliation must not report clean."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_asset_shortfall",
+            "docs": [
+              "Asset base units that `refund_ask` recorded but did not find (#89):",
+              "the sum of every `AssetShortfall` (e.g. a permanent-delegate pull)."
             ],
             "type": "u64"
           },
@@ -4217,9 +4311,20 @@
           {
             "name": "amount",
             "docs": [
-              "Micro-USDC moved by this step."
+              "Amount moved (or missing, for the shortfall actions), in `unit`."
             ],
             "type": "u64"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "`MicroUsdc` or `AssetBase` — always `action.unit()` (#89)."
+            ],
+            "type": {
+              "defined": {
+                "name": "AmountUnit"
+              }
+            }
           },
           {
             "name": "caller",
@@ -5129,15 +5234,17 @@
     {
       "name": "TransferInstruction",
       "docs": [
-        "The AE-P8 transfer record, emitted once per settled fill right after",
-        "`FillSettled` (#61). `FillSettled` carries the economics. This event",
-        "carries what a transfer agent (doc 07 L21) and a books-and-records export",
-        "(L22) need to show the transfer was lawful.",
+        "The AE-P8 transfer record **schema**, emitted once per settled fill right",
+        "after `FillSettled` (#61). `FillSettled` carries the economics. This",
+        "event has the fields a transfer agent (doc 07 L21) and a",
+        "books-and-records export (L22) need to show the transfer was lawful.",
         "",
-        "Until the gate's lot ledger and settle-time re-check exist, every fill",
-        "emits `lot_ids = []`, `exemption_path = NotRecorded` and",
-        "`gate_check = NotPerformed`. The absence of a compliance check is then",
-        "visible in the event stream, not only in a doc (#53)."
+        "**It does not prove that today (#88).** Until the gate's lot ledger and",
+        "settle-time re-check exist (#53), every fill emits `lot_ids = []`,",
+        "`exemption_path = NotRecorded` and `gate_check = NotPerformed`: no lot",
+        "is validated, no exemption is derived, no check runs. Those values",
+        "state the absence, and the crank's evidence manifest counts every such",
+        "fill as `unproven` — doc 07 L4/L21 are **not** satisfiable yet."
       ],
       "type": {
         "kind": "struct",

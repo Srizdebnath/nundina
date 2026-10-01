@@ -87,6 +87,33 @@ pub enum EscrowAction {
     CashShortfall,
 }
 
+/// Unit of [`EscrowEvent::amount`] (#89). Explicit so a consumer that books
+/// `amount` never mixes micro-USDC with asset base units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+pub enum AmountUnit {
+    /// Micro-USDC (settlement mint, 6 dp).
+    MicroUsdc,
+    /// Base units of the session's asset (`CashSession::asset_decimals`).
+    AssetBase,
+}
+
+impl EscrowAction {
+    /// The unit this action's `amount` is in.
+    pub fn unit(self) -> AmountUnit {
+        match self {
+            EscrowAction::AssetDeposited
+            | EscrowAction::AssetReturned
+            | EscrowAction::AssetShortfall => AmountUnit::AssetBase,
+            EscrowAction::Deposited
+            | EscrowAction::BondPosted
+            | EscrowAction::BondForfeited
+            | EscrowAction::Refunded
+            | EscrowAction::Revealed
+            | EscrowAction::CashShortfall => AmountUnit::MicroUsdc,
+        }
+    }
+}
+
 /// Emitted for every escrow/bond movement (R1).
 #[event]
 #[derive(Debug)]
@@ -99,8 +126,10 @@ pub struct EscrowEvent {
     pub escrow: Pubkey,
     /// Depositor wallet.
     pub owner: Pubkey,
-    /// Micro-USDC moved by this step.
+    /// Amount moved (or missing, for the shortfall actions), in `unit`.
     pub amount: u64,
+    /// `MicroUsdc` or `AssetBase` — always `action.unit()` (#89).
+    pub unit: AmountUnit,
     /// Signer that triggered it (any participant for refunds).
     pub caller: Pubkey,
 }
@@ -174,20 +203,23 @@ pub struct LotRef {
     pub restriction_expiry: i64,
 }
 
-/// Upper bound on `TransferInstruction.lot_ids` once the lot ledger fills
-/// it: a fill spanning more lots must be split into several fills. This
-/// keeps the event size bounded.
+/// Upper bound on `TransferInstruction.lot_ids`: a fill spanning more lots
+/// must be split into several fills. Enforced by
+/// [`TransferInstruction::checked`], the only constructor settle uses
+/// (#88), so it binds as soon as the lot ledger supplies lots.
 pub const MAX_LOTS_PER_FILL: usize = 8;
 
-/// The AE-P8 transfer record, emitted once per settled fill right after
-/// `FillSettled` (#61). `FillSettled` carries the economics. This event
-/// carries what a transfer agent (doc 07 L21) and a books-and-records export
-/// (L22) need to show the transfer was lawful.
+/// The AE-P8 transfer record **schema**, emitted once per settled fill right
+/// after `FillSettled` (#61). `FillSettled` carries the economics. This
+/// event has the fields a transfer agent (doc 07 L21) and a
+/// books-and-records export (L22) need to show the transfer was lawful.
 ///
-/// Until the gate's lot ledger and settle-time re-check exist, every fill
-/// emits `lot_ids = []`, `exemption_path = NotRecorded` and
-/// `gate_check = NotPerformed`. The absence of a compliance check is then
-/// visible in the event stream, not only in a doc (#53).
+/// **It does not prove that today (#88).** Until the gate's lot ledger and
+/// settle-time re-check exist (#53), every fill emits `lot_ids = []`,
+/// `exemption_path = NotRecorded` and `gate_check = NotPerformed`: no lot
+/// is validated, no exemption is derived, no check runs. Those values
+/// state the absence, and the crank's evidence manifest counts every such
+/// fill as `unproven` — doc 07 L4/L21 are **not** satisfiable yet.
 #[event]
 #[derive(Debug)]
 pub struct TransferInstruction {
@@ -211,6 +243,41 @@ pub struct TransferInstruction {
     pub gate_check: GateCheck,
     /// Disclosure-policy hash (same value as `FillSettled`).
     pub disclosure_hash: [u8; 32],
+}
+
+impl TransferInstruction {
+    /// Build the record, rejecting more than [`MAX_LOTS_PER_FILL`] lots
+    /// with `TooManyLots` (#88): the fill must be split instead.
+    #[allow(clippy::too_many_arguments)]
+    pub fn checked(
+        session: Pubkey,
+        fill_index: u32,
+        from: Pubkey,
+        to: Pubkey,
+        qty: u64,
+        price: u64,
+        lot_ids: Vec<LotRef>,
+        exemption_path: ExemptionPath,
+        gate_check: GateCheck,
+        disclosure_hash: [u8; 32],
+    ) -> Result<Self> {
+        require!(
+            lot_ids.len() <= MAX_LOTS_PER_FILL,
+            crate::error::RailsError::TooManyLots
+        );
+        Ok(Self {
+            session,
+            fill_index,
+            from,
+            to,
+            qty,
+            price,
+            lot_ids,
+            exemption_path,
+            gate_check,
+            disclosure_hash,
+        })
+    }
 }
 
 /// Why cash is being paid out (R3).
@@ -321,4 +388,60 @@ pub struct FacilityEvent {
     pub amount: u64,
     /// Signer.
     pub actor: Pubkey,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lots(n: usize) -> Vec<LotRef> {
+        (0..n)
+            .map(|i| LotRef {
+                lot_index: i as u32,
+                acquired_ts: 0,
+                restriction_expiry: 0,
+            })
+            .collect()
+    }
+
+    fn record(n: usize) -> Result<TransferInstruction> {
+        TransferInstruction::checked(
+            Pubkey::default(),
+            0,
+            Pubkey::default(),
+            Pubkey::default(),
+            1,
+            1,
+            lots(n),
+            ExemptionPath::NotRecorded,
+            GateCheck::NotPerformed,
+            [0; 32],
+        )
+    }
+
+    #[test]
+    fn lot_cap_is_enforced_at_the_only_constructor() {
+        assert!(record(0).is_ok());
+        assert_eq!(record(MAX_LOTS_PER_FILL).unwrap().lot_ids.len(), 8);
+        assert_eq!(
+            record(MAX_LOTS_PER_FILL + 1).unwrap_err(),
+            error!(crate::error::RailsError::TooManyLots)
+        );
+    }
+
+    #[test]
+    fn every_escrow_action_has_one_unit() {
+        use EscrowAction::*;
+        let asset = [AssetDeposited, AssetReturned, AssetShortfall];
+        let usdc = [
+            Deposited,
+            BondPosted,
+            BondForfeited,
+            Refunded,
+            Revealed,
+            CashShortfall,
+        ];
+        assert!(asset.iter().all(|a| a.unit() == AmountUnit::AssetBase));
+        assert!(usdc.iter().all(|a| a.unit() == AmountUnit::MicroUsdc));
+    }
 }

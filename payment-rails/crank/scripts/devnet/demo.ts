@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     ix("advance_funds", {
       config, facility, advance: await advancePda(facility, H.address), vault: fVault, borrower: H.address,
       destination: hDest, destination_token: hPayout, usdc_mint: usdc, curator: authority, token_program: usdcTp,
-    }, { amount: ADVANCE, collateral_ref_hash: new Uint8Array(32).fill(0xc1) }),
+    }, { amount: ADVANCE, collateral_ref_hash: new Uint8Array(32).fill(0xc1), collateral_value: 2n * ADVANCE, advance_rate_bps: 5_000n }),
   ]);
   record(rpcUrl, `1 · PAYOUT: facility advanced ${fmt(ADVANCE)} USDC to H's registered wallet`, advSig);
 

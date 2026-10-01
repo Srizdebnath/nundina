@@ -30,6 +30,7 @@ pub const REVEAL_END: i64 = T0 + 200;
 pub const SETTLE_DEADLINE: i64 = T0 + 300;
 pub const BOND: u64 = 5_000_000; // 5 USDC
 pub const MAX_CASH: u64 = 1_000_000_000; // 1,000 USDC
+pub use credit_math::MAX_ADVANCE_RATE_BPS;
 
 const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 
@@ -1049,7 +1050,9 @@ impl Env {
         self.send(&[ix], &[&funder.key])
     }
 
-    /// Advance with explicit destination accounts (for spoofing tests).
+    /// Advance with explicit destination accounts (for spoofing tests),
+    /// sized against a collateral mark of `2 × amount` at the 50% H1
+    /// ceiling, so the rate bound (#94) is exactly met and never in the way.
     pub fn advance_to(
         &mut self,
         curator: &Keypair,
@@ -1058,6 +1061,31 @@ impl Env {
         destination: &Pubkey,
         destination_token: &Pubkey,
         amount: u64,
+    ) -> Res {
+        self.advance_full(
+            curator,
+            facility,
+            borrower,
+            destination,
+            destination_token,
+            amount,
+            amount.saturating_mul(2),
+            MAX_ADVANCE_RATE_BPS,
+        )
+    }
+
+    /// Advance with explicit collateral mark and advance rate (#94).
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_full(
+        &mut self,
+        curator: &Keypair,
+        facility: &Pubkey,
+        borrower: &Pubkey,
+        destination: &Pubkey,
+        destination_token: &Pubkey,
+        amount: u64,
+        collateral_value: u64,
+        advance_rate_bps: u64,
     ) -> Res {
         let ix = Instruction {
             program_id: PROGRAM_ID,
@@ -1078,6 +1106,8 @@ impl Env {
             data: ix::AdvanceFunds {
                 amount,
                 collateral_ref_hash: [0xC1; 32],
+                collateral_value,
+                advance_rate_bps,
             }
             .data(),
         };

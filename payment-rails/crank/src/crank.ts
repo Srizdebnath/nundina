@@ -34,6 +34,8 @@ export interface CashSession extends Struct {
   fills_settled: number;
   volume_settled: bigint;
   gross_settled: bigint;
+  total_cash_shortfall: bigint;
+  total_asset_shortfall: bigint;
 }
 
 export interface Escrow extends Struct {

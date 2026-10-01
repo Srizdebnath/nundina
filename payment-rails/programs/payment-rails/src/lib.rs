@@ -203,13 +203,22 @@ pub mod payment_rails {
         instructions::facility::process_fund_facility(ctx, amount)
     }
 
-    /// LF-P1: advance to a registered destination (curator).
+    /// LF-P1: advance to a registered destination (curator), bounded by the
+    /// stated collateral mark × an advance rate ≤ the H1 ceiling (#94).
     pub fn advance_funds(
         ctx: Context<AdvanceFunds>,
         amount: u64,
         collateral_ref_hash: [u8; 32],
+        collateral_value: u64,
+        advance_rate_bps: u64,
     ) -> Result<()> {
-        instructions::facility::process_advance(ctx, amount, collateral_ref_hash)
+        instructions::facility::process_advance(
+            ctx,
+            amount,
+            collateral_ref_hash,
+            collateral_value,
+            advance_rate_bps,
+        )
     }
 
     /// LF-P6: repay an advance, interest first (anyone).

@@ -216,6 +216,55 @@ fn facility_interest_is_exact_and_repayment_interest_first() {
     });
 }
 
+/// #94: doc 06 §11 H1 is enforced, not a dead constant. The rate may not
+/// exceed `credit_math::MAX_ADVANCE_RATE_BPS` (50%), and the advance may not
+/// exceed the stated collateral mark × rate. Both are recorded on the
+/// `Advance`, so the bound an advance was made under is auditable.
+#[test]
+fn advance_is_bounded_by_the_h1_ceiling() {
+    each(|tp| {
+        let (mut env, fac, _) = with_facility(tp);
+        let bob = env.party(0, 0);
+        env.register(&bob, FAR).unwrap();
+        let cur = env.authority.insecure_clone();
+        let owner = bob.key.pubkey();
+        let d = dest_pda(&owner);
+        let value = 1_000 * USDC;
+        let adv = |env: &mut Env, amount: u64, rate: u64| {
+            env.advance_full(&cur, &fac, &owner, &d, &bob.usdc, amount, value, rate)
+        };
+
+        assert_eq!(
+            adv(&mut env, USDC, MAX_ADVANCE_RATE_BPS + 1).unwrap_err(),
+            err(RailsError::AdvanceRateTooHigh),
+            "{tp:?} above the 50% ceiling, whatever the amount"
+        );
+        assert_eq!(
+            adv(&mut env, USDC, u64::MAX).unwrap_err(),
+            err(RailsError::AdvanceRateTooHigh)
+        );
+        assert_eq!(
+            adv(&mut env, 500 * USDC + 1, MAX_ADVANCE_RATE_BPS).unwrap_err(),
+            err(RailsError::AdvanceExceedsRate),
+            "{tp:?} one micro over mark × 50%"
+        );
+        assert_eq!(
+            adv(&mut env, 250 * USDC + 1, 2_500).unwrap_err(),
+            err(RailsError::AdvanceExceedsRate),
+            "{tp:?} a curator rate below the ceiling binds too"
+        );
+        assert!(!env.exists(&advance_pda(&fac, &owner)), "nothing advanced");
+
+        adv(&mut env, 250 * USDC, 2_500).expect("exactly mark × rate");
+        let a = env.advance_state(&fac, &owner);
+        assert_eq!(
+            (a.principal, a.collateral_value, a.advance_rate_bps),
+            (250 * USDC, value, 2_500),
+            "{tp:?} terms recorded on the advance"
+        );
+    });
+}
+
 #[test]
 fn facility_guards() {
     each(|tp| {
