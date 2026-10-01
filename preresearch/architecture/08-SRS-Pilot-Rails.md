@@ -1,6 +1,6 @@
 # 08 · SRS — NUNDINA Pilot: Proving the Rails on a Real, Self-Issued Asset
 
-> **Purpose:** build-level Software Requirements Specification for the pilot that proves all six programs end-to-end **with zero third-party permissions**, then supports the issuer conversations (OnRe, Figure/Hastra, Securitize; Kamino as venue integration, phase 3).
+> **Purpose:** build-level Software Requirements Specification for the pilot that proves all seven programs (the six engines of doc 06 plus the `payment-rails` cash layer, §4.7) end-to-end **with zero third-party permissions**, then supports the issuer conversations (OnRe, Figure/Hastra, Securitize; Kamino as venue integration, phase 3).
 >
 > **Related:** `05-Problem-Register.md` (problem IDs) · `06-Solution-Architecture-v2.md` (§ refs) · `07-Legal-Topology-and-Compliance.md` (CG-*/AE-*/QC-*/LF-*/TE-*/ME-* requirements) · `../research/12` (evidence).
 >
@@ -118,22 +118,25 @@ flowchart TB
 
 ## 3 · The pilot fund — "NUNDINA Pilot Credit Sleeve" (NPCS)
 
-This is the asset the rails run on. It is **real**: real USDC backs it, real yield accrues, NAV is really computed. It is also **clearly labeled** a pilot/demo asset in metadata and prints.
+**As-built status (2026-09, #92).** This section is the **target**. What exists on devnet today:
+the NPCS mint with its extension manifest (`DefaultAccountState=Frozen`, `PermanentDelegate`, `MetadataPointer` + metadata; `token/`, `DEPLOYMENTS.md`). **Supply is 0.** A **single bootstrap key** (`2xhjfAdr…6sRXMh`) holds all four authorities (mint, freeze, permanent delegate, metadata update) — not a Squads vault. There is **no** Token ACL extension, **no** `MintConfig` PDA and **no** gate program wired to the mint (`credit-gate` has no `validate` entrypoint yet); the bootstrap key thaws manually. There is **no** NAV publisher and **no** deployed backing (no Kamino vault, no treasury PDA). doc 09 §2.1 names default-frozen + a gate-owned freeze authority as the discriminator between a regulated fund and a honeypot: **today NPCS has the honeypot shape**, as `token/TOKENOMICS.md` §0 states. Nothing below should be read as a present-tense control until the "As built today" column says so.
+
+This is the asset the rails **will** run on. The target is a **real** asset: real USDC backing, real yield, NAV really computed. It is also **clearly labeled** a pilot/demo asset in metadata and prints.
 
 ### 3.1 Structure
 
-| Parameter | Value | Notes |
-|---|---|---|
-| Token standard | Token-2022 SPL | Extensions: `DefaultAccountState=frozen`, `MetadataPointer` + Token Metadata, `PermanentDelegate` |
-| Mint authority | Squads multisig (2-of-2: founder + ops key) | Minting only via "deposit confirmed" treasury instruction |
-| Permanent delegate | **Squads multisig (we are the issuer)** | Deliberate: AC-9 depends on it; disclosed in every demo ("in production this stays with the fund issuer" — D14 discipline) |
-| Transfer authority model | Token ACL (sRFC37): MintConfig PDA delegates thaw decisions to **`credit-gate`** | Zero-CU transfer path once thawed (D1) |
-| Backing | $2–5K USDC (mainnet budget tranche) deposited in a **Kamino USDC supply vault** (permissionless market — no token-access approval needed) | Backup if Kamino integration is troublesome: hold USDC in a program-controlled treasury PDA, NAV accrues flat. Real, just boring. Decide at P2, note in demo script |
-| Supply cap | = treasury USDC at deposit, 1:1 | Additional mint only on new deposit event |
-| Metadata | name `NUNDINA Pilot Credit Sleeve`, symbol `NPCS`, `PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL` in metadata + on every print | Dataset pollution guard (research/12 §8.7) |
-| Holder cap (governor) | 8 investor_ids (far below the real-world governor's purpose, but exercises the code path) | CG-2 |
-| Eligibility policy | `PILOT_506C_TEST`: accredited-flag SAS attestation (ours), jurisdiction US or non-US test flag, block-list empty but enforced | CG-3 config class |
-| Seasoning (lot ledger) | Pilot uses a **compressed Rule-144 analog**: `restriction_expiry = acquired_ts + 7 days` | Exercises identical code paths with pilot-friendly timing; real constants are config, switched per-market (CG-1) |
+| Parameter | Target (plan of record) | As built today (2026-09) | Notes |
+|---|---|---|---|
+| Token standard | Token-2022 SPL | ✅ as target | Extensions: `DefaultAccountState=frozen`, `MetadataPointer` + Token Metadata, `PermanentDelegate` |
+| Mint authority | Squads multisig (2-of-2: founder + ops key) | ❌ single bootstrap key `2xhjfAdr…6sRXMh` (#57) | Target: minting only via "deposit confirmed" treasury instruction |
+| Permanent delegate | **Squads multisig (we are the issuer)** | ❌ the same single bootstrap key | Deliberate: AC-9 depends on it; disclosed in every demo ("in production this stays with the fund issuer" — D14 discipline) |
+| Transfer authority model | Token ACL (sRFC37): MintConfig PDA delegates thaw decisions to **`credit-gate`** | ❌ no ACL extension, no `MintConfig`, no gate wiring; manual thaw by the bootstrap key | Zero-CU transfer path once thawed (D1) |
+| Backing | $2–5K USDC (mainnet budget tranche) deposited in a **Kamino USDC supply vault** (permissionless market — no token-access approval needed) | ❌ not deployed; supply is 0 | Backup if Kamino integration is troublesome: hold USDC in a program-controlled treasury PDA, NAV accrues flat. Real, just boring. Decide at P2, note in demo script |
+| Supply cap | = treasury USDC at deposit, 1:1 | ❌ not enforced on-chain (process only, `token/TOKENOMICS.md` §0) | Additional mint only on new deposit event |
+| Metadata | name `NUNDINA Pilot Credit Sleeve`, symbol `NPCS`, `PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL` in metadata + on every print | ✅ on the mint (no prints yet) | Dataset pollution guard (research/12 §8.7) |
+| Holder cap (governor) | 8 investor_ids (far below the real-world governor's purpose, but exercises the code path) | ⚠️ stored in `MarketConfig`; no governor enforces it | CG-2 |
+| Eligibility policy | `PILOT_506C_TEST`: accredited-flag SAS attestation (ours), jurisdiction US or non-US test flag, block-list empty but enforced | ❌ no attestation read, no `validate` (#52) | CG-3 config class |
+| Seasoning (lot ledger) | Pilot uses a **compressed Rule-144 analog**: `restriction_expiry = acquired_ts + 7 days` | ❌ no lot ledger (#53) | Exercises identical code paths with pilot-friendly timing; real constants are config, switched per-market (CG-1) |
 
 ### 3.2 NAV computation (the "no simulation" core)
 

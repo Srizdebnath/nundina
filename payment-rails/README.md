@@ -15,7 +15,7 @@ here.
 - **No PII on-chain.** Every off-chain reference (claim id, advance id, disclosure policy, evidence) is a 32-byte hash.
 - **No Confidential Transfers.** They're incompatible with the permissioned book (05 D2, 09 §2). Privacy comes from commit–reveal plus aggregate-only prints.
 
-## Status: R4 crank + ledger
+## Status: R5 devnet + integration (live on devnet)
 
 | Piece | Phase | State |
 |---|---|---|
@@ -36,6 +36,7 @@ here.
 | **Reconciliation ledger**: escrow balances == open obligations; facility vault identity | R4 | ✅ |
 | **Evidence export**: decoded cash events as JSONL + a SHA-256 manifest | R4 | ✅ |
 | **Kill-the-crank drill** (`npm run drill`, real validator): refunds complete via any participant | R4 | ✅ |
+| **Devnet deploy + end-to-end demo** (commit → settle → payout on devnet; `crank/scripts/devnet/`, recorded in [`DEPLOYMENTS.md`](DEPLOYMENTS.md), keyless `verify.sh`) | R5 | ✅ |
 
 ### How a fill settles
 
@@ -224,9 +225,12 @@ no recorded backup, for every row.
 
 Verification artifact: the recorded **Build SHA-256** is committed for
 every deploy, and `verify.sh` checks it keylessly. The dumped `.so` bytes are
-**not** committed (`*.so` is gitignored). Publishing each deployed `.so` as a
-GitHub release asset next to its registry row is the open half of #29's
-fix #4.
+not committed (`*.so` is gitignored); they are published as GitHub release
+assets instead, with their SHA-256s:
+[`devnet-programs-2026-10`](https://github.com/Srizdebnath/nundina/releases/tag/devnet-programs-2026-10)
+holds the live payment-rails and credit-gate devnet builds (#29 fix #4, #99).
+That is the recovery path that does not depend on a key. Publish a new
+release after every deploy.
 
 ### Backup policy
 
