@@ -1,13 +1,18 @@
 //! #53: config values outside the hard bounds are rejected at init **and**
 //! at update, so no config can be put in a state where a later `validate`
 //! check passes vacuously. Attester edits fail loudly instead of no-op.
+//! #95: zero seasoning is vacuous too, and the holder cap may not reach the
+//! §12(g) trigger. #96: an update that writes nothing is rejected.
+
+mod common;
 
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use common::{deploy, root_pda, seed_root, PROGRAM_ID};
 use credit_gate::{
     accounts as acc, instruction as ix, GateError, MarketConfig, MAX_DURATION_SECONDS,
-    MAX_HOLDER_CAP,
+    MAX_HOLDER_CAP, MIN_SEASONING_SECONDS, MIN_SETTLEMENT_HORIZON_SECONDS,
 };
 use litesvm::LiteSVM;
 use solana_instruction_error::InstructionError;
@@ -15,9 +20,6 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
-
-const PROGRAM_ID: Pubkey = credit_gate::ID;
-const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 
 fn config_pda(mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[MarketConfig::SEED, mint.as_ref()], &PROGRAM_ID).0
@@ -55,31 +57,14 @@ struct Update {
 struct Env {
     svm: LiteSVM,
     auth: Keypair,
-    programdata: Pubkey,
 }
 
 impl Env {
     fn new() -> Env {
-        let so = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../target/deploy/credit_gate.so"
-        );
-        let bytes = std::fs::read(so)
-            .unwrap_or_else(|e| panic!("{so}: {e} — run `anchor build` at the repo root first"));
-        let mut svm = LiteSVM::new();
-        svm.add_program(PROGRAM_ID, &bytes).expect("load program");
         let auth = Keypair::new();
-        let (programdata, _) = Pubkey::find_program_address(&[PROGRAM_ID.as_ref()], &LOADER_V3);
-        let mut pd = svm.get_account(&programdata).expect("programdata");
-        pd.data[12] = 1;
-        pd.data[13..45].copy_from_slice(auth.pubkey().as_ref());
-        svm.set_account(programdata, pd).unwrap();
-        svm.airdrop(&auth.pubkey(), 10_000_000_000).unwrap();
-        Env {
-            svm,
-            auth,
-            programdata,
-        }
+        let mut svm = deploy(&auth);
+        seed_root(&mut svm, &auth);
+        Env { svm, auth }
     }
 
     fn send(&mut self, ix: Instruction) -> Result<(), u32> {
@@ -102,10 +87,9 @@ impl Env {
             program_id: PROGRAM_ID,
             accounts: acc::InitializeConfig {
                 config: config_pda(mint),
+                root: root_pda(),
                 mint: *mint,
                 authority: self.auth.pubkey(),
-                program: PROGRAM_ID,
-                program_data: self.programdata,
                 system_program: anchor_lang::system_program::ID,
             }
             .to_account_metas(None),
@@ -169,8 +153,22 @@ fn init_rejects_out_of_bounds_values() {
             holder_cap: MAX_HOLDER_CAP + 1,
             ..Init::default()
         },
+        // #95: the §12(g) trigger itself is out of bounds (doc 07 L7).
+        Init {
+            holder_cap: 2_000,
+            ..Init::default()
+        },
         Init {
             seasoning: -1,
+            ..Init::default()
+        },
+        // #95: zero seasoning passes `acquired + 0 ≤ now` for every lot.
+        Init {
+            seasoning: 0,
+            ..Init::default()
+        },
+        Init {
+            seasoning: MIN_SEASONING_SECONDS - 1,
             ..Init::default()
         },
         Init {
@@ -179,6 +177,14 @@ fn init_rejects_out_of_bounds_values() {
         },
         Init {
             horizon: 0,
+            ..Init::default()
+        },
+        Init {
+            horizon: 1,
+            ..Init::default()
+        },
+        Init {
+            horizon: MIN_SETTLEMENT_HORIZON_SECONDS - 1,
             ..Init::default()
         },
         Init {
@@ -207,14 +213,26 @@ fn init_rejects_out_of_bounds_values() {
         ),
         Err(gate(GateError::DuplicateAttester))
     );
-    // Boundary values are accepted.
+    // Boundary values are accepted, at both ends of each range.
+    assert_eq!(MAX_HOLDER_CAP, 1_999, "below the 2 000 trigger");
     let mint = Pubkey::new_unique();
     env.init(
         &mint,
         Init {
             holder_cap: MAX_HOLDER_CAP,
-            seasoning: 0,
+            seasoning: MIN_SEASONING_SECONDS,
             horizon: MAX_DURATION_SECONDS,
+            attesters: vec![],
+        },
+    )
+    .expect("boundary values are in bounds");
+    let mint = Pubkey::new_unique();
+    env.init(
+        &mint,
+        Init {
+            holder_cap: 1,
+            seasoning: MAX_DURATION_SECONDS,
+            horizon: MIN_SETTLEMENT_HORIZON_SECONDS,
             attesters: vec![],
         },
     )
@@ -238,7 +256,15 @@ fn update_rejects_out_of_bounds_values_and_keeps_state() {
             ..Update::default()
         },
         Update {
+            holder_cap: Some(2_000),
+            ..Update::default()
+        },
+        Update {
             seasoning: Some(-1),
+            ..Update::default()
+        },
+        Update {
+            seasoning: Some(0),
             ..Update::default()
         },
         Update {
@@ -247,6 +273,10 @@ fn update_rejects_out_of_bounds_values_and_keeps_state() {
         },
         Update {
             horizon: Some(0),
+            ..Update::default()
+        },
+        Update {
+            horizon: Some(1),
             ..Update::default()
         },
         Update {
@@ -262,6 +292,17 @@ fn update_rejects_out_of_bounds_values_and_keeps_state() {
     assert_eq!(
         after.settlement_horizon_seconds,
         before.settlement_horizon_seconds
+    );
+}
+
+#[test]
+fn update_that_writes_nothing_is_rejected() {
+    let mut env = Env::new();
+    let mint = Pubkey::new_unique();
+    env.init(&mint, Init::default()).unwrap();
+    assert_eq!(
+        env.update(&mint, Update::default()),
+        Err(gate(GateError::EmptyUpdate))
     );
 }
 
