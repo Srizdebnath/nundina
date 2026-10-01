@@ -204,7 +204,7 @@ Pilot scale: **$3,000 USDC sleeve**. All functions integer, u128 intermediates, 
 | `distribute_cash` / `apply_loss` | top-down cash, bottom-up loss, u128, no underflow | AC-10 distribution: fees → senior coupon → reserve → junior |
 | `accrue_interest` | facility: `floor(principal × rate_bps × Δt ÷ (10⁴ × 31_536_000))` | 12% APR on 1,000 USDC = **328_767 micros/day ≈ $0.33** ($120/yr) — hand-verified test vector |
 
-**Property-test invariants (100% branch target; the measured figure is published by the `credit-math — coverage` CI job):** `nav_published ≤ nav_gross` and the NAV floor definition · `Σ pro_rata allocations == total` exactly, each `≤ committed` · clearing is volume-maximal (brute-force cross-check) · `waterfall lines sum == cash received, exactly, no residue` · every rounding site goes through `div_round` with a declared direction, and each direction is fuzzed. **Not property-tested:** `supply == deposits`, because no function implements I1.
+**Property-test invariants (100% branch coverage, gated by the `credit-math — coverage` CI job, #87):** `nav_published ≤ nav_gross` and the NAV floor definition · `Σ pro_rata allocations == total` exactly, each `≤ committed` · clearing is volume-maximal (brute-force cross-check) · `waterfall lines sum == cash received, exactly, no residue` · every rounding site goes through `div_round` with a declared direction, and each direction is fuzzed. **Not property-tested:** `supply == deposits`, because no function implements I1.
 
 ## 7 · Adversarial movement cases & containment
 
