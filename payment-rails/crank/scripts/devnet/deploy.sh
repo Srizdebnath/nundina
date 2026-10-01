@@ -16,15 +16,25 @@
 # RPC_URL overrides the endpoint (the public devnet RPC rate-limits the ~800
 # buffer writes of a full deploy). The recorded cluster label is NEVER taken
 # from the caller: it is derived from the endpoint's genesis hash, and a
-# CLUSTER moniker that disagrees with it aborts the run (#28). Mainnet also
-# requires I_MEAN_MAINNET=1.
+# CLUSTER moniker that disagrees with it aborts the run (#28).
 # USE_RPC=0 sends those writes straight to leaders over QUIC instead, so a
 # rate-limited RPC only serves the few reads and status polls.
+#
+# Mainnet needs I_MEAN_MAINNET=1 AND a Squads vault pinned in
+# SQUADS_VAULT_PDA below (SRS §8, #57, #97). A first deploy hands the
+# upgrade authority to that vault before it is recorded; an existing
+# program must already be owned by it, and its upgrades go through a Squads
+# proposal, which this script cannot sign.
+#
+# Never run this with `bash -x` while RPC_URL is set: the trace would print
+# the URL, API key included. The script refuses to (#97).
 #
 # Idempotent: if the program already holds exactly this build, it does
 # nothing. Upgrading a different build requires UPGRADE=1.
 set -euo pipefail
 SELF=$(realpath "$0")
+. "$(dirname "$SELF")/common.sh"
+refuse_xtrace_with_rpc_url
 cd "$(dirname "$0")/../../.."   # → payment-rails/
 
 die() { echo "✗ $*" >&2; exit 1; }
@@ -43,9 +53,12 @@ for v in DRY_RUN UPGRADE USE_RPC I_MEAN_MAINNET; do
 done
 
 EXPECTED_ID=GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn
+# The Squads 2-of-2 vault that must hold the mainnet upgrade authority.
+# Empty until the vault exists (#57), so mainnet is refused until then.
+SQUADS_VAULT_PDA=
 REQUESTED=${CLUSTER:-}   # endpoint shorthand/URL, or a moniker to assert
 RPC=${RPC_URL:-${REQUESTED:-devnet}}
-RPC_SHOWN=${RPC%%\?*}   # for output: a query string may carry an API key
+RPC_SHOWN=$(rpc_shown "$RPC")   # for output: the URL may carry an API key
 AUTHORITY=${AUTHORITY:-$HOME/.config/solana/id.json}
 SO=target/deploy/payment_rails.so
 PROGRAM_KEY=keys/payment_rails-keypair.json
@@ -53,14 +66,7 @@ PRICE=${PRIORITY_FEE:-20000}   # µlamports / CU for deploy transactions
 SEND_VIA=(--use-rpc); [ "${USE_RPC:-1}" = 0 ] && SEND_VIA=()
 
 # The solana CLI embeds the full request URL in its errors, so anything it
-# prints can carry an `?api-key=`. Everything shown passes through redact.
-redact() {
-  local s
-  while IFS= read -r s || [ -n "$s" ]; do
-    s=${s//"$RPC"/"$RPC_SHOWN"}
-    printf '%s\n' "$s" | sed -E 's/([?&][A-Za-z_-]*(key|token|secret)[A-Za-z_-]*=)[^&[:space:]")]*/\1<redacted>/Ig'
-  done
-}
+# prints can carry a key. Everything shown passes through redact (common.sh).
 sol() { solana -u "$RPC" "$@" 2> >(redact >&2); }
 
 # Endpoint URL for raw JSON-RPC (the CLI accepts monikers too).
@@ -118,8 +124,12 @@ echo "rpc       $RPC_SHOWN"
 echo "genesis   $GENESIS"
 echo "cluster   $CLUSTER"
 if [ "$DRY_RUN" = 1 ]; then echo "(dry run — nothing sent, nothing recorded)"; exit 0; fi
-if [ "$CLUSTER" = mainnet-beta ] && [ "${I_MEAN_MAINNET:-0}" != 1 ]; then
-  die "refusing mainnet-beta without I_MEAN_MAINNET=1 (upgrade authority must be Squads 2-of-2 first, SRS §8)"
+if [ "$CLUSTER" = mainnet-beta ]; then
+  [ "${I_MEAN_MAINNET:-0}" = 1 ] || die "refusing mainnet-beta without I_MEAN_MAINNET=1"
+  # A message is not a check: with no vault pinned there is nothing to
+  # hand the authority to, and a single-key mainnet deploy is what SRS §8
+  # forbids. The on-chain authority is checked below, once it is readable.
+  [ -n "$SQUADS_VAULT_PDA" ] || die "refusing mainnet-beta: SQUADS_VAULT_PDA is not pinned in deploy.sh — create the Squads 2-of-2 first (SRS §8, #57)"
 fi
 
 # The program id is fixed; the keypair is only needed for a FIRST deploy at
@@ -161,16 +171,23 @@ verify_dump() {
 
 # Assigned first: a `die` inside $(…) only exits the subshell, and a bare
 # `[ "$(…)" = present ]` would then fall through to MODE=deploy.
-PROGRAM_STATE=$(account_state "$PROGRAM_ID")
+PROGRAM_STATE=$(account_state "$PROGRAM_ID") || exit 1
 if [ "$PROGRAM_STATE" = present ]; then
-  ONCHAIN=$(verify_dump)
+  # Same reason: verify_dump's own `die` names an RPC failure; it must not
+  # fall through and read as "a different build".
+  ONCHAIN=$(verify_dump) || exit 1
   if [ "$ONCHAIN" = "$BUILD_SHA" ]; then
     echo "✓ already deployed with this exact build — nothing to do"
     exit 0
   fi
   [ "${UPGRADE:-0}" = 1 ] || die "program exists with a different build ($ONCHAIN); re-run with UPGRADE=1 to upgrade"
   CURRENT_AUTH=$(sol program show "$PROGRAM_ID" | awk '/^Authority:/ {print $2}')
-  [ -n "$CURRENT_AUTH" ] || die "could not read the upgrade authority of $PROGRAM_ID" 
+  [ -n "$CURRENT_AUTH" ] || die "could not read the upgrade authority of $PROGRAM_ID"
+  if [ "$CLUSTER" = mainnet-beta ]; then
+    [ "$CURRENT_AUTH" = "$SQUADS_VAULT_PDA" ] \
+      || die "mainnet upgrade authority is $CURRENT_AUTH, not the pinned Squads vault $SQUADS_VAULT_PDA — refusing"
+    die "mainnet upgrades go through a Squads proposal (write-buffer, set its authority to $SQUADS_VAULT_PDA, propose); this script cannot sign for the vault"
+  fi
   [ "$CURRENT_AUTH" = "$AUTH_PK" ] || die "upgrade authority is $CURRENT_AUTH, not $AUTH_PK"
   MODE=upgrade
 else
@@ -230,37 +247,54 @@ OUT=$(sol program deploy "$SO" \
   --max-len "$LEN" \
   --with-compute-unit-price "$PRICE" \
   --max-sign-attempts 50 \
-  "${SEND_VIA[@]}" 2>&1) || { echo "$OUT" | redact >&2; stranded_buffers; die "deploy failed"; }
+  ${SEND_VIA[@]+"${SEND_VIA[@]}"} 2>&1) || { echo "$OUT" | redact >&2; stranded_buffers; die "deploy failed"; }
+# (`${a[@]+"${a[@]}"}`: an empty array under `set -u` is an unbound-variable
+# error before bash 4.4, and macOS ships 3.2.)
 echo "$OUT" | redact
 SIG=$(echo "$OUT" | awk '/^Signature:/ {print $2}')
 
-ONCHAIN=$(verify_dump)
+ONCHAIN=$(verify_dump) || exit 1
 [ "$ONCHAIN" = "$BUILD_SHA" ] || die "on-chain dump $ONCHAIN != build $BUILD_SHA"
+
+# Mainnet: the single key never keeps the authority. Hand it to the pinned
+# vault before anything is recorded (only a first deploy gets here).
+WANT_AUTH=$AUTH_PK
+AUTH_NOTE="single key, pilot; Squads 2-of-2 per SRS §8 before mainnet"
+if [ "$CLUSTER" = mainnet-beta ]; then
+  sol program set-upgrade-authority "$PROGRAM_ID" \
+    --upgrade-authority "$AUTHORITY" --keypair "$AUTHORITY" \
+    --new-upgrade-authority "$SQUADS_VAULT_PDA" \
+    --skip-new-upgrade-authority-signer-check | redact \
+    || die "deployed, but handing the upgrade authority to $SQUADS_VAULT_PDA FAILED — retry it now: the program is under a single key"
+  WANT_AUTH=$SQUADS_VAULT_PDA
+  AUTH_NOTE="Squads 2-of-2 vault (SRS §8)"
+fi
 SHOW=$(sol program show "$PROGRAM_ID")
 SLOT=$(echo "$SHOW" | awk '/Last Deployed In Slot:/ {print $NF}')
 ONCHAIN_AUTH=$(echo "$SHOW" | awk '/^Authority:/ {print $2}')
-[ "$ONCHAIN_AUTH" = "$AUTH_PK" ] || die "upgrade authority on-chain is $ONCHAIN_AUTH"
+[ "$ONCHAIN_AUTH" = "$WANT_AUTH" ] || die "upgrade authority on-chain is $ONCHAIN_AUTH, expected $WANT_AUTH"
 echo "✓ verified: dump SHA-256 == build, authority $ONCHAIN_AUTH, slot $SLOT"
 
 case "$CLUSTER" in
   devnet|testnet|mainnet-beta)
     F=DEPLOYMENTS.md
     if [ ! -f "$F" ]; then
-      cat >"$F" <<'EOF'
+      cat >"$F" <<'EOT'
 # payment-rails deployments
 
 Every row is verifiable: `solana genesis-hash -u <cluster>` must equal the
-Genesis hash; `solana program dump <id> x.so -u <cluster>` → `sha256sum x.so`
-must equal the Build SHA-256; `solana program show <id>` must show the
-Upgrade authority. Recorded by `crank/scripts/devnet/deploy.sh`, which
-derives the Cluster from the genesis hash (never from the caller).
+Genesis hash; `solana program dump <id> x.so -u <cluster>` → the first
+Bytes bytes must hash (`sha256sum`) to the Build SHA-256 and the rest must
+be zero padding; `solana program show <id>` must show the Upgrade
+authority. Recorded by `crank/scripts/devnet/deploy.sh`, which derives the
+Cluster from the genesis hash (never from the caller).
 
-| Program | Cluster | Genesis hash | Program ID | Slot | Signature | Build SHA-256 | Upgrade authority |
-|---|---|---|---|---|---|---|---|
-EOF
+| Program | Cluster | Genesis hash | Program ID | Slot | Signature | Build SHA-256 | Bytes | Upgrade authority |
+|---|---|---|---|---|---|---|---|---|
+EOT
     fi
     VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' programs/payment-rails/Cargo.toml | head -1)
-    echo "| payment-rails v$VERSION ($MODE) | $CLUSTER | \`$GENESIS\` | \`$PROGRAM_ID\` | $SLOT | \`${SIG:-n/a}\` | \`$BUILD_SHA\` | \`$AUTH_PK\` (single key, pilot; Squads 2-of-2 per SRS §8 before mainnet) |" >>"$F"
+    echo "| payment-rails v$VERSION ($MODE) | $CLUSTER | \`$GENESIS\` | \`$PROGRAM_ID\` | $SLOT | \`${SIG:-n/a}\` | \`$BUILD_SHA\` | $LEN | \`$ONCHAIN_AUTH\` ($AUTH_NOTE) |" >>"$F"
     echo "✓ recorded in payment-rails/$F"
     ;;
   *) echo "(local cluster — not recorded)";;

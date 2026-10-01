@@ -2,10 +2,14 @@
 //! the current authority proposes, the proposed key accepts. Nobody else
 //! (including the program upgrade authority, once it no longer governs the
 //! config) can move it.
+//! #96: the pending account's rent goes to the incoming authority.
+
+mod common;
 
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use common::{deploy, root_pda, seed_root, PROGRAM_ID};
 use credit_gate::PendingGateAuthority;
 use credit_gate::{accounts as acc, instruction as ix, GateError, MarketConfig};
 use litesvm::LiteSVM;
@@ -15,8 +19,6 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-const PROGRAM_ID: Pubkey = credit_gate::ID;
-const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 /// anchor `ConstraintHasOne`.
 const CONSTRAINT_HAS_ONE: u32 = 2001;
 /// anchor `AccountNotInitialized`.
@@ -37,23 +39,12 @@ fn pending_pda(mint: &Pubkey) -> Pubkey {
 }
 
 impl Env {
-    /// Program deployed, `upgrade` as upgrade authority, one config initialized.
+    /// Program deployed, `upgrade` as upgrade authority and gate root
+    /// authority, one config initialized.
     fn new() -> Env {
-        let so = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../target/deploy/credit_gate.so"
-        );
-        let bytes = std::fs::read(so)
-            .unwrap_or_else(|e| panic!("{so}: {e} — run `anchor build` at the repo root first"));
-        let mut svm = LiteSVM::new();
-        svm.add_program(PROGRAM_ID, &bytes).expect("load program");
         let upgrade = Keypair::new();
-        let (programdata, _) = Pubkey::find_program_address(&[PROGRAM_ID.as_ref()], &LOADER_V3);
-        let mut pd = svm.get_account(&programdata).expect("programdata");
-        pd.data[12] = 1;
-        pd.data[13..45].copy_from_slice(upgrade.pubkey().as_ref());
-        svm.set_account(programdata, pd).unwrap();
-        svm.airdrop(&upgrade.pubkey(), 10_000_000_000).unwrap();
+        let mut svm = deploy(&upgrade);
+        seed_root(&mut svm, &upgrade);
 
         let mint = Pubkey::new_unique();
         let mut env = Env { svm, upgrade, mint };
@@ -61,10 +52,9 @@ impl Env {
             program_id: PROGRAM_ID,
             accounts: acc::InitializeConfig {
                 config: config_pda(&mint),
+                root: root_pda(),
                 mint,
                 authority: env.upgrade.pubkey(),
-                program: PROGRAM_ID,
-                program_data: programdata,
                 system_program: anchor_lang::system_program::ID,
             }
             .to_account_metas(None),
@@ -110,6 +100,10 @@ impl Env {
         MarketConfig::try_deserialize(&mut a.data.as_slice())
             .unwrap()
             .gate_config_authority
+    }
+
+    fn balance(&self, key: &Pubkey) -> u64 {
+        self.svm.get_account(key).map_or(0, |a| a.lamports)
     }
 
     fn pending_exists(&self) -> bool {
@@ -205,9 +199,15 @@ fn hand_over_moves_all_governance_to_the_new_key() {
     // Proposing alone changes nothing.
     assert_eq!(env.authority(), old.pubkey());
 
+    let rent = env.balance(&pending_pda(&env.mint));
+    let (old_before, new_before) = (env.balance(&old.pubkey()), env.balance(&squads.pubkey()));
     env.accept(&squads, old.pubkey()).expect("accept");
     assert_eq!(env.authority(), squads.pubkey());
     assert!(!env.pending_exists(), "pending closed on accept");
+    // #96: the rent follows the authority, not the retiring key. The new
+    // key also paid the one-signature fee as fee payer.
+    assert_eq!(env.balance(&old.pubkey()), old_before);
+    assert_eq!(env.balance(&squads.pubkey()), new_before + rent - 5_000);
 
     // The new key governs; the old key (still the upgrade authority) does not.
     env.set_holder_cap(&squads, 9)
@@ -250,7 +250,7 @@ fn only_the_proposed_key_can_accept() {
         env.accept(&old, old.pubkey()),
         Err(gate(GateError::NotProposedAuthority))
     );
-    // Rent refund target is pinned to the proposer.
+    // The proposer named in the accept is pinned to the real one.
     assert_eq!(
         env.accept(&squads, attacker.pubkey()),
         Err(CONSTRAINT_HAS_ONE)
