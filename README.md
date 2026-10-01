@@ -4,7 +4,7 @@
 > Not a venue. Not an AMM. The mechanism that tells a quarterly-marked, gated credit position what it's worth — and turns a denied redemption request into a priceable, financeable claim.
 
 [![Status](https://img.shields.io/badge/status-building_P1-blue)](preresearch/)
-[![Phase](https://img.shields.io/badge/P0-scaffold_complete-success)](#repo-structure)
+[![Phase](https://img.shields.io/badge/P0-partial-yellow)](#p0-exit-criteria)
 [![Token](https://img.shields.io/badge/NPCS-live_on_devnet-8A2BE2)](token/)
 [![Docs](https://img.shields.io/badge/docs-10_files_~200KB-success)](preresearch/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -30,9 +30,25 @@ today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 | **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** · manifest verified. Not yet gated or backed on-chain; one bootstrap key holds every authority | [`token/`](token/) · `DEPLOYMENTS.md` |
 | Off-chain services | 🔨 crank + evidence exporter only. No indexer, database or NAV publisher (#58) | `payment-rails/crank/` |
 | Next.js 16 app | shell only (one static page; no wallet, no routes) | `app/` |
-| CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app build) | ✅ green | `.github/workflows/ci.yml` |
+| CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ✅ green | `.github/workflows/ci.yml` |
 | CG-P1..P6 gate logic + Token ACL wiring | 🔨 P1, in progress | SRS 08 §4.1 |
 | mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
+
+### P0 exit criteria
+
+P0 (#4) was closed with three criteria unmet. Re-baselined in #100: each row
+says what is true, and the unmet ones are deferred to P1 explicitly rather
+than badged complete.
+
+| # | Criterion (#4) | State | Evidence / deferral |
+|---|---|---|---|
+| 1 | `services/` (nav-publisher, crank-runner, indexer, evidence-exporter) | ⏭ **deferred to P1** | [`services/README.md`](services/README.md): none built; only `payment-rails/crank` exists (#58) |
+| 2 | `credit-math` skeleton with property tests running | ✅ | CI `credit-math — coverage` gates 100% lines + branches |
+| 3 | CI: anchor build + test; fmt/clippy; app lint | ✅ | `.github/workflows/ci.yml`: every job is a required check on `main`; `app — lint · typecheck · build` |
+| 4 | Squads 2-of-2 authority created; key ceremony + storage runbook | ⚠️ runbook ✅ · **Squads deferred to P1** | `token/runbook.md` § Keys, `payment-rails/README.md` § Keys; every authority is a single key today (#57) |
+| 5 | Verifiable builds; program-ID registry | ⚠️ registry ✅ · `anchor build --verifiable` **deferred to P1** | `DEPLOYMENTS.md` + keyless `verify.sh`; pinned toolchains, SHA-256-verified CLI installs and a lockfile-drift check on every SBF build (#98); deployed `.so` files published as release assets (#99). No deterministic (docker) build yet |
+| 6 | Helius (dev) + Supabase (dev) provisioned | ⏭ **deferred to P1** | not provisioned; nothing in the repo references them ([`services/README.md`](services/README.md)) |
+| 7 | Dependabot `npm` entries | ✅ | `.github/dependabot.yml`: npm ×3, cargo ×4, github-actions |
 
 ## Repo structure
 
@@ -56,6 +72,7 @@ nundina/
 │   ├── crank/                ← settlement/refund crank, reconciliation ledger, evidence export (TS)
 │   └── DEPLOYMENTS.md        ← payment-rails deployment registry
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
+├── services/                 ← off-chain services: deferral record only (none built, #58)
 ├── preresearch/              ← the research corpus that justifies every design decision
 │   ├── architecture/         ← 00 index · 05 problem register · 06 solution · 07 legal · 08 SRS · 09 asset spec
 │   └── research/             ← 12 · dated market evidence (2026 reality check)

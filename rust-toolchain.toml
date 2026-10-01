@@ -1,0 +1,8 @@
+# Pinned host toolchain (#98): fmt/clippy gates must not move with whatever
+# "stable" is on the day CI runs. Bump deliberately, together with the
+# `toolchain:` inputs in .github/workflows/ci.yml (check-anchor-pins.sh
+# asserts they agree). SBF builds use platform-tools, not this.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -19,7 +19,7 @@ jobs:
     name: Problem & legal ID anchors intact
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Check kill-list anchors (doc 05)
         run: |
           f="preresearch/architecture/05-Problem-Register.md"
@@ -45,7 +45,7 @@ jobs:
     name: Requirement IDs resolve to SRS 08
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: python3 .github/scripts/check-req-ids.py
 
   # Mermaid blocks must render on GitHub: every ```mermaid fence needs a
@@ -54,7 +54,7 @@ jobs:
     name: Mermaid blocks are renderable
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Lint mermaid fences
         run: |
           fail=0
@@ -69,8 +69,8 @@ jobs:
     name: Internal links resolve
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: lycheeverse/lychee-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2
         with:
           args: >-
             --offline --no-progress
@@ -84,7 +84,7 @@ jobs:
     name: README repo map matches disk
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify every mapped path and relative link exists
         # Derived from README.md itself (tree block + links), so the check
         # can't fall behind the map.
