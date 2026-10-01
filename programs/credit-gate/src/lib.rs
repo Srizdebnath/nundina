@@ -27,16 +27,52 @@ declare_id!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
 /// single provider outage cannot halt onboarding).
 pub const MAX_ATTESTERS: usize = 4;
 
-/// Hard ceiling on `holder_cap` (#53). 2 000 is the Exchange Act §12(g)
-/// holders-of-record registration threshold. A gated private-credit market
-/// must never be configurable past it. Governance sets the cap below this
-/// (pilot: 8). **Counsel to confirm (Q-gates).**
-pub const MAX_HOLDER_CAP: u32 = 2_000;
+/// Hard ceiling on `holder_cap` (#53, #95). doc 07 L7 (C4) requires the
+/// per-asset cap to sit **below** the statutory numbers: 2 000 holders of
+/// record is the Exchange Act §12(g) trigger, so the ceiling is one under
+/// it and a market can never be configured *at* the trigger. Governance
+/// sets the cap below this (pilot: 8). Any other number is a dated decision
+/// against Q5 (doc 07), not a constant edit.
+pub const MAX_HOLDER_CAP: u32 = 1_999;
+
+/// Floor on `seasoning_seconds` (#95): one day. Zero seasoning makes
+/// `acquired + seasoning ≤ now` true at the instant of acquisition, so
+/// CG-1 (the compressed Rule-144 analog, doc 09 §2) would be an absent
+/// control rather than a compressed one. Pilot value: 7 days.
+pub const MIN_SEASONING_SECONDS: i64 = 86_400;
+
+/// Floor on `settlement_horizon_seconds` (#95): one day. **Placeholder.**
+/// H4 (doc 06 §7) requires attestation validity to span the whole
+/// commit→settle window, so the true floor is the market session length,
+/// which has no plan-of-record value until auction-engine lands. One day
+/// is the pilot value; raise this to the session length then.
+pub const MIN_SETTLEMENT_HORIZON_SECONDS: i64 = 86_400;
 
 /// Hard ceiling on `seasoning_seconds` and `settlement_horizon_seconds`:
 /// 5 years. This is a sanity bound against typos and against
 /// `timestamp + duration` overflow in later checks, not a policy number.
 pub const MAX_DURATION_SECONDS: i64 = 5 * 365 * 86_400;
+
+/// Bits of [`ConfigUpdated::field_group`] (#96): which governed fields an
+/// instruction wrote. Wire-stable; append only.
+pub mod field_group {
+    /// `policy_class`.
+    pub const POLICY_CLASS: u8 = 1 << 0;
+    /// `holder_cap`.
+    pub const HOLDER_CAP: u8 = 1 << 1;
+    /// `seasoning_seconds`.
+    pub const SEASONING: u8 = 1 << 2;
+    /// `settlement_horizon_seconds`.
+    pub const SETTLEMENT_HORIZON: u8 = 1 << 3;
+    /// `attesters` / `attester_count`.
+    pub const ATTESTERS: u8 = 1 << 4;
+    /// `blocklist`.
+    pub const BLOCKLIST: u8 = 1 << 5;
+    /// `identity_schema` / `accreditation_schema` (set at init only).
+    pub const SCHEMAS: u8 = 1 << 6;
+    /// The config was created by this instruction (`initialize_config`).
+    pub const INIT: u8 = 1 << 7;
+}
 
 /// One immutable-per-market policy configuration (CG-P2).
 ///
@@ -49,8 +85,8 @@ pub const MAX_DURATION_SECONDS: i64 = 5 * 365 * 86_400;
 pub struct MarketConfig {
     /// The gated mint this config governs.
     pub mint: Pubkey,
-    /// Sole authority for this PDA. Starts as the program upgrade authority
-    /// that initialized it (a single bootstrap key on devnet today, see
+    /// Sole authority for this PDA. Starts as the gate root authority that
+    /// initialized it (#93; a single bootstrap key on devnet today, see
     /// DEPLOYMENTS.md). Moves to the Squads 2-of-2 vault (SRS 08 §8) only
     /// through `propose_gate_authority` + `accept_gate_authority`.
     pub gate_config_authority: Pubkey,
@@ -88,18 +124,21 @@ impl MarketConfig {
     /// init and on every update, so governance cannot move a config out of
     /// them:
     /// - `1 ≤ holder_cap ≤ MAX_HOLDER_CAP`. A zero cap would reject every
-    ///   investor.
-    /// - `0 ≤ seasoning_seconds ≤ MAX_DURATION_SECONDS`. Negative seasoning
-    ///   would make `acquired + seasoning ≤ now` pass vacuously.
-    /// - `1 ≤ settlement_horizon_seconds ≤ MAX_DURATION_SECONDS`. A zero or
-    ///   negative horizon would make `expiry ≥ now + horizon` vacuous.
+    ///   investor; the ceiling sits below the §12(g) trigger.
+    /// - `MIN_SEASONING_SECONDS ≤ seasoning_seconds ≤ MAX_DURATION_SECONDS`.
+    ///   Zero or negative seasoning would make `acquired + seasoning ≤ now`
+    ///   pass vacuously, at the instant of acquisition (#95).
+    /// - `MIN_SETTLEMENT_HORIZON_SECONDS ≤ settlement_horizon_seconds ≤
+    ///   MAX_DURATION_SECONDS`. A horizon shorter than the commit→settle
+    ///   window would make `expiry ≥ now + horizon` satisfy nothing (H4).
     /// - `blocklist`, when set, is not the default key, the mint or the
     ///   config itself.
     pub fn check_bounds(&self, config_key: &Pubkey) -> Result<()> {
         require!(
             (1..=MAX_HOLDER_CAP).contains(&self.holder_cap)
-                && (0..=MAX_DURATION_SECONDS).contains(&self.seasoning_seconds)
-                && (1..=MAX_DURATION_SECONDS).contains(&self.settlement_horizon_seconds),
+                && (MIN_SEASONING_SECONDS..=MAX_DURATION_SECONDS).contains(&self.seasoning_seconds)
+                && (MIN_SETTLEMENT_HORIZON_SECONDS..=MAX_DURATION_SECONDS)
+                    .contains(&self.settlement_horizon_seconds),
             GateError::ConfigOutOfBounds
         );
         if let Some(bl) = self.blocklist {
@@ -110,6 +149,32 @@ impl MarketConfig {
         }
         Ok(())
     }
+}
+
+/// Who may create `MarketConfig`s (#93). One per program, seeded once by
+/// the upgrade authority while the program is still upgradeable.
+///
+/// `initialize_config` authorizes against `authority` here, not against
+/// `ProgramData`, so market onboarding (CG-P2 per mint, G14) survives
+/// `solana program finalize`: doc 06 §11 U1 stages the program to immutable,
+/// and an initializer pinned to the upgrade authority would die with it.
+/// Seed this **before** finalizing — a finalized program with no root can
+/// never onboard a market (fail-closed, nobody else can seed it).
+#[account]
+#[derive(InitSpace)]
+pub struct GateRoot {
+    /// Signs `initialize_config`; pays its rent and becomes each new
+    /// config's first `gate_config_authority`.
+    pub authority: Pubkey,
+    /// Successor named by `propose_root_authority`; default = none pending.
+    pub pending_authority: Pubkey,
+    /// PDA bump.
+    pub bump: u8,
+}
+
+impl GateRoot {
+    /// PDA seed: `["gate_root"]` (singleton).
+    pub const SEED: &'static [u8] = b"gate_root";
 }
 
 /// A pending hand-over of one market's `gate_config_authority` (#50).
@@ -136,13 +201,33 @@ impl PendingGateAuthority {
 #[event]
 #[derive(Debug)]
 pub struct ConfigUpdated {
-    /// Which field group changed (off-chain schema maps the code).
+    /// The gated mint whose config this is (#96): the market key, so an
+    /// indexer can file the event per market without the config address.
+    pub mint: Pubkey,
+    /// Bitmask of the fields this instruction wrote ([`field_group`]).
+    /// `INIT` plus every field set on creation; on update, one bit per
+    /// supplied argument. Never 0: an update that writes nothing is rejected.
     pub field_group: u8,
     /// SHA-256 of the post-update config (`MarketConfig::fingerprint`):
     /// every governed field, domain-separated. No PII.
     pub new_config_hash: [u8; 32],
     /// Authority that performed the update.
     pub authority: Pubkey,
+}
+
+/// Emitted by the gate-root instructions (#93). Exactly one per
+/// instruction. `kind`: 0 = seeded, 1 = proposed, 2 = cancelled,
+/// 3 = accepted.
+#[event]
+#[derive(Debug)]
+pub struct GateRootAuthority {
+    /// 0 = seeded, 1 = proposed, 2 = cancelled, 3 = accepted.
+    pub kind: u8,
+    /// `GateRoot.authority` before this instruction (default when seeded).
+    pub old_authority: Pubkey,
+    /// The proposed key (proposed / cancelled) or the authority after this
+    /// instruction (seeded / accepted).
+    pub new_authority: Pubkey,
 }
 
 /// Emitted by the gate-authority hand-over instructions (#50). Exactly one
@@ -227,7 +312,7 @@ pub enum GateError {
     /// Config blocklist was expected to be set but is not.
     #[msg("Config field required by this operation is not set")]
     ConfigFieldMissing,
-    /// `initialize_config` signer is not this program's upgrade authority.
+    /// `initialize_root` signer is not this program's upgrade authority.
     /// Appended (never renumber): codes above are wire-stable.
     #[msg("Signer is not the program upgrade authority")]
     NotUpgradeAuthority,
@@ -249,16 +334,98 @@ pub enum GateError {
     /// `attester_remove` names a key that is not an attester.
     #[msg("Attester not found")]
     AttesterNotFound,
+    /// `initialize_config` / root rotation signer is not the gate root
+    /// authority (#93).
+    #[msg("Signer is not the gate root authority")]
+    NotRootAuthority,
+    /// `update_config` with every argument `None` (#96): nothing to write,
+    /// so nothing to event.
+    #[msg("Update writes no field")]
+    EmptyUpdate,
+    /// `accept_root_authority` with no successor proposed.
+    #[msg("No gate root hand-over is pending")]
+    NoPendingRootAuthority,
 }
 
 #[program]
 pub mod credit_gate {
     use super::*;
 
+    /// Seeds the [`GateRoot`] (#93). One-shot (`init`), and only this
+    /// program's upgrade authority may call it, so it cannot be front-run
+    /// (#26). It names the root authority directly, so the upgrade key can
+    /// seed it straight to a Squads vault it does not control.
+    pub fn initialize_root(ctx: Context<InitializeRoot>, authority: Pubkey) -> Result<()> {
+        require!(
+            authority != Pubkey::default(),
+            GateError::InvalidNewAuthority
+        );
+        ctx.accounts.root.set_inner(GateRoot {
+            authority,
+            pending_authority: Pubkey::default(),
+            bump: ctx.bumps.root,
+        });
+        emit!(GateRootAuthority {
+            kind: 0,
+            old_authority: Pubkey::default(),
+            new_authority: authority,
+        });
+        Ok(())
+    }
+
+    /// Step 1 of 2 of a root hand-over: the root authority names its
+    /// successor. Re-proposing replaces the pending successor.
+    pub fn propose_root_authority(ctx: Context<GovernRoot>, new_authority: Pubkey) -> Result<()> {
+        let root = &mut ctx.accounts.root;
+        require!(
+            new_authority != Pubkey::default() && new_authority != root.authority,
+            GateError::InvalidNewAuthority
+        );
+        root.pending_authority = new_authority;
+        emit!(GateRootAuthority {
+            kind: 1,
+            old_authority: root.authority,
+            new_authority,
+        });
+        Ok(())
+    }
+
+    /// Withdraws a pending root hand-over. Only the root authority.
+    pub fn cancel_root_authority(ctx: Context<GovernRoot>) -> Result<()> {
+        let root = &mut ctx.accounts.root;
+        let withdrawn = root.pending_authority;
+        require!(
+            withdrawn != Pubkey::default(),
+            GateError::NoPendingRootAuthority
+        );
+        root.pending_authority = Pubkey::default();
+        emit!(GateRootAuthority {
+            kind: 2,
+            old_authority: root.authority,
+            new_authority: withdrawn,
+        });
+        Ok(())
+    }
+
+    /// Step 2 of 2: the proposed key signs to take over the root.
+    pub fn accept_root_authority(ctx: Context<AcceptRootAuthority>) -> Result<()> {
+        let root = &mut ctx.accounts.root;
+        let old_authority = root.authority;
+        root.authority = ctx.accounts.new_authority.key();
+        root.pending_authority = Pubkey::default();
+        emit!(GateRootAuthority {
+            kind: 3,
+            old_authority,
+            new_authority: root.authority,
+        });
+        Ok(())
+    }
+
     /// CG-P2: initialize the per-mint market config. Called once per gated
-    /// mint. The signer must be this program's upgrade authority, so the
+    /// mint. The signer must be the [`GateRoot`] authority, so the
     /// first-caller-wins `init` cannot be front-run by anyone watching for a
-    /// new mint (#26).
+    /// new mint (#26), and onboarding keeps working after the program is
+    /// finalized (#93).
     #[allow(clippy::too_many_arguments)]
     pub fn initialize_config(
         ctx: Context<InitializeConfig>,
@@ -300,7 +467,14 @@ pub mod credit_gate {
         });
         cfg.check_bounds(&cfg.key())?;
         emit!(ConfigUpdated {
-            field_group: 0,
+            mint: mint_key,
+            field_group: field_group::INIT
+                | field_group::POLICY_CLASS
+                | field_group::HOLDER_CAP
+                | field_group::SEASONING
+                | field_group::SETTLEMENT_HORIZON
+                | field_group::ATTESTERS
+                | field_group::SCHEMAS,
             new_config_hash: cfg.fingerprint(),
             authority: authority_key,
         });
@@ -322,6 +496,15 @@ pub mod credit_gate {
         blocklist_set: Option<Pubkey>,
     ) -> Result<()> {
         let authority_key = ctx.accounts.gate_config_authority.key();
+        let mask = update_mask(
+            policy_class.is_some(),
+            holder_cap.is_some(),
+            seasoning_seconds.is_some(),
+            settlement_horizon_seconds.is_some(),
+            attester_add.is_some() || attester_remove.is_some(),
+            blocklist_set.is_some(),
+        );
+        require!(mask != 0, GateError::EmptyUpdate);
         let cfg = &mut ctx.accounts.config;
         if let Some(v) = policy_class {
             cfg.policy_class = v;
@@ -364,7 +547,8 @@ pub mod credit_gate {
         }
         cfg.check_bounds(&cfg.key())?;
         emit!(ConfigUpdated {
-            field_group: 1,
+            mint: cfg.mint,
+            field_group: mask,
             new_config_hash: cfg.fingerprint(),
             authority: authority_key,
         });
@@ -432,6 +616,29 @@ pub mod credit_gate {
     }
 }
 
+/// [`ConfigUpdated::field_group`] for an `update_config` call: one bit per
+/// field group the call supplies (#96).
+pub fn update_mask(
+    policy_class: bool,
+    holder_cap: bool,
+    seasoning: bool,
+    settlement_horizon: bool,
+    attesters: bool,
+    blocklist: bool,
+) -> u8 {
+    [
+        (policy_class, field_group::POLICY_CLASS),
+        (holder_cap, field_group::HOLDER_CAP),
+        (seasoning, field_group::SEASONING),
+        (settlement_horizon, field_group::SETTLEMENT_HORIZON),
+        (attesters, field_group::ATTESTERS),
+        (blocklist, field_group::BLOCKLIST),
+    ]
+    .iter()
+    .filter(|(set, _)| *set)
+    .fold(0, |m, (_, bit)| m | bit)
+}
+
 /// Domain separator for [`MarketConfig::fingerprint`]. Bump the version if
 /// the field encoding below ever changes.
 pub const CONFIG_HASH_DOMAIN: &[u8] = b"nundina.credit-gate.MarketConfig.v1";
@@ -477,6 +684,62 @@ impl MarketConfig {
 }
 
 #[derive(Accounts)]
+pub struct InitializeRoot<'info> {
+    /// The singleton root (#93); `init` makes this one-shot.
+    #[account(
+        init,
+        payer = upgrade_authority,
+        space = 8 + GateRoot::INIT_SPACE,
+        seeds = [GateRoot::SEED],
+        bump
+    )]
+    pub root: Account<'info, GateRoot>,
+    /// Program upgrade authority; pays rent. Only it may seed the root.
+    #[account(mut)]
+    pub upgrade_authority: Signer<'info>,
+    /// This program — used only to locate its ProgramData account.
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()))]
+    pub program: Program<'info, program::CreditGate>,
+    /// Holds the upgrade authority the signer must match. `None` once the
+    /// program is finalized, so a finalized program can never be re-rooted.
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(upgrade_authority.key())
+            @ GateError::NotUpgradeAuthority
+    )]
+    pub program_data: Account<'info, ProgramData>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct GovernRoot<'info> {
+    #[account(
+        mut,
+        seeds = [GateRoot::SEED],
+        bump = root.bump,
+        has_one = authority @ GateError::NotRootAuthority
+    )]
+    pub root: Account<'info, GateRoot>,
+    /// Current root authority.
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptRootAuthority<'info> {
+    #[account(
+        mut,
+        seeds = [GateRoot::SEED],
+        bump = root.bump,
+        constraint = root.pending_authority != Pubkey::default()
+            @ GateError::NoPendingRootAuthority,
+        constraint = root.pending_authority == new_authority.key()
+            @ GateError::NotProposedAuthority
+    )]
+    pub root: Account<'info, GateRoot>,
+    /// The proposed key; must sign.
+    pub new_authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct InitializeConfig<'info> {
     /// Per-mint policy PDA (CG-P2).
     #[account(
@@ -487,24 +750,22 @@ pub struct InitializeConfig<'info> {
         bump
     )]
     pub config: Account<'info, MarketConfig>,
+    /// The gate root (#93); its authority is the only allowed signer.
+    #[account(
+        seeds = [GateRoot::SEED],
+        bump = root.bump,
+        has_one = authority @ GateError::NotRootAuthority
+    )]
+    pub root: Account<'info, GateRoot>,
     /// CHECK: mint key is used for PDA seeding; token-type validation of
     /// this mint happens at ACL wiring in P1 (CG-P1).
     pub mint: UncheckedAccount<'info>,
-    /// Program upgrade authority (a single bootstrap key on devnet today,
-    /// Squads 2-of-2 is the SRS 08 §8 target); becomes the gate-config
-    /// authority and pays rent. Rotate it later with
-    /// `propose_gate_authority` + `accept_gate_authority`.
+    /// Gate root authority (a single bootstrap key on devnet today, Squads
+    /// 2-of-2 is the SRS 08 §8 target); becomes the gate-config authority
+    /// and pays rent. Rotate it later with `propose_gate_authority` +
+    /// `accept_gate_authority`.
     #[account(mut)]
     pub authority: Signer<'info>,
-    /// This program — used only to locate its ProgramData account.
-    #[account(constraint = program.programdata_address()? == Some(program_data.key()))]
-    pub program: Program<'info, program::CreditGate>,
-    /// Holds the upgrade authority the signer must match.
-    #[account(
-        constraint = program_data.upgrade_authority_address == Some(authority.key())
-            @ GateError::NotUpgradeAuthority
-    )]
-    pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
 }
 
@@ -565,9 +826,12 @@ pub struct AcceptGateAuthority<'info> {
         bump = config.bump
     )]
     pub config: Account<'info, MarketConfig>,
+    /// Rent goes to the incoming authority (#96): the outgoing one is
+    /// typically the bootstrap key being retired at hand-over, whose
+    /// lamports would otherwise be stranded with it.
     #[account(
         mut,
-        close = proposed_by,
+        close = new_authority,
         seeds = [PendingGateAuthority::SEED, mint.key().as_ref()],
         bump = pending.bump,
         has_one = proposed_by,
@@ -576,10 +840,11 @@ pub struct AcceptGateAuthority<'info> {
     pub pending: Account<'info, PendingGateAuthority>,
     /// CHECK: mint key must derive both PDAs above.
     pub mint: UncheckedAccount<'info>,
-    /// The proposed key; must sign.
-    pub new_authority: Signer<'info>,
-    /// CHECK: rent refund target, pinned by `has_one` on `pending`.
+    /// The proposed key; must sign. Receives the pending rent.
     #[account(mut)]
+    pub new_authority: Signer<'info>,
+    /// CHECK: the proposer, pinned by `has_one` on `pending`, so a caller
+    /// cannot accept against a proposal it misidentifies.
     pub proposed_by: UncheckedAccount<'info>,
 }
 
@@ -682,6 +947,34 @@ mod tests {
         }
         // The bump is derivation metadata, not governed state.
         assert_eq!(MarketConfig { bump: 1, ..cfg() }.fingerprint(), base);
+    }
+
+    #[test]
+    fn update_mask_sets_one_bit_per_supplied_group() {
+        use field_group::*;
+        assert_eq!(update_mask(false, false, false, false, false, false), 0);
+        assert_eq!(
+            update_mask(false, true, false, false, false, false),
+            HOLDER_CAP
+        );
+        assert_eq!(
+            update_mask(true, false, true, true, false, true),
+            POLICY_CLASS | SEASONING | SETTLEMENT_HORIZON | BLOCKLIST
+        );
+        assert_eq!(update_mask(true, true, true, true, true, true), 0b0011_1111);
+        // Every bit is distinct, and INIT/SCHEMAS are never update bits.
+        let all = [
+            POLICY_CLASS,
+            HOLDER_CAP,
+            SEASONING,
+            SETTLEMENT_HORIZON,
+            ATTESTERS,
+            BLOCKLIST,
+            SCHEMAS,
+            INIT,
+        ];
+        assert_eq!(all.iter().fold(0u8, |m, b| m | b), u8::MAX);
+        assert_eq!(all.iter().map(|b| b.count_ones()).sum::<u32>(), 8);
     }
 
     #[test]
