@@ -151,9 +151,23 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
         .collect::<Result<Vec<_>, MathError>>()?;
 
     let allocated: u128 = out.iter().map(|&(_, a)| a).sum();
-    let mut residue = total.checked_sub(allocated).ok_or(MathError::Underflow)?;
+    let residue = total.checked_sub(allocated).ok_or(MathError::Underflow)?;
+    hand_out_residue(&mut out, bids, residue)?;
+    Ok(out)
+}
 
-    // Residue order: larger qty first, then lower bidder_id.
+/// Hand `residue` out one unit per bidder, larger committed qty first, then
+/// lower bidder_id. `out` and `bids` are index-aligned.
+///
+/// Flooring loses < 1 unit per bidder, so from [`allocate_pro_rata`] the
+/// residue is always < n and drains. A residue that does not drain is
+/// rejected rather than dropped (crate rule 4: exact conservation), in
+/// release builds too. Split out so that guard is tested directly (#87).
+fn hand_out_residue(
+    out: &mut [(u64, u128)],
+    bids: &[(u64, u128)],
+    mut residue: u128,
+) -> Result<(), MathError> {
     let mut order: Vec<usize> = (0..bids.len()).collect();
     order.sort_by(|&i, &j| bids[j].1.cmp(&bids[i].1).then(bids[i].0.cmp(&bids[j].0)));
     for &i in &order {
@@ -163,13 +177,10 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
         out[i].1 += 1;
         residue -= 1;
     }
-    // Flooring loses < 1 unit per bidder, so residue < n and the loop above
-    // always drains it. Checked in release too: a residue left here would be
-    // silently dropped, breaking exact conservation (crate rule 4).
     if residue != 0 {
         return Err(MathError::InvalidInput);
     }
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -219,6 +230,37 @@ mod tests {
             .unwrap();
         assert_eq!(r.clear_price, 990_000);
         assert_eq!(r.executed_qty, 1_000);
+    }
+
+    #[test]
+    fn tie_break_equidistant_from_reference_takes_lowest_price() {
+        // 99 and 101 both execute 10 with zero imbalance and sit 1 either
+        // side of the reference 100: the final rule picks the lower price.
+        // 105 is a candidate that crosses nothing (no buyer at 105).
+        let orders = [
+            O(1, 99, 10, false),
+            O(2, 101, 10, true),
+            O(3, 105, 5, false),
+        ];
+        let r = find_uniform_clear_price(&orders, 0, 100).unwrap().unwrap();
+        assert_eq!(r.clear_price, 99);
+        assert_eq!(r.executed_qty, 10);
+    }
+
+    #[test]
+    fn tie_break_prefers_lower_imbalance() {
+        // p=100: sell 10, buy 25 → exec 10, imb 15.
+        // p=103: sell 30, buy 10 → exec 10, imb 20. Reference favours 103,
+        // but imbalance is compared first.
+        let orders = [
+            O(1, 100, 10, false),
+            O(2, 103, 20, false),
+            O(3, 103, 10, true),
+            O(4, 100, 15, true),
+        ];
+        let r = find_uniform_clear_price(&orders, 0, 103).unwrap().unwrap();
+        assert_eq!(r.clear_price, 100);
+        assert_eq!(r.executed_qty, 10);
     }
 
     #[test]
@@ -277,5 +319,28 @@ mod tests {
     fn pro_rata_total_equal_to_committed_passes_through() {
         let bids = [(3, 7), (1, 250), (2, 1)];
         assert_eq!(allocate_pro_rata(258, &bids).unwrap(), bids.to_vec());
+    }
+
+    #[test]
+    fn pro_rata_product_overflow_is_typed() {
+        // total × qty_i = 2²⁵⁴ does not fit u128: Overflow, never a wrap.
+        assert_eq!(
+            allocate_pro_rata(1 << 127, &[(1, 1 << 127), (2, 1 << 126)]).unwrap_err(),
+            MathError::Overflow
+        );
+    }
+
+    #[test]
+    fn residue_that_cannot_drain_is_rejected_not_dropped() {
+        // Two bidders absorb at most 2 units; a residue of 3 must fail.
+        let bids = [(1, 5), (2, 5)];
+        let mut out = vec![(1, 0), (2, 0)];
+        assert_eq!(
+            hand_out_residue(&mut out, &bids, 3).unwrap_err(),
+            MathError::InvalidInput
+        );
+        let mut out = vec![(1, 0), (2, 0)];
+        hand_out_residue(&mut out, &bids, 2).unwrap();
+        assert_eq!(out, vec![(1, 1), (2, 1)]);
     }
 }
