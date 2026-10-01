@@ -11,18 +11,25 @@
 # whether the live build equals a local `anchor build` of this checkout.
 # If it doesn't, the source on this branch is not what's deployed, which is
 # the #45 redeploy gap.
+#
+# Takes no arguments. Output is redacted with the same filter as the
+# payment-rails scripts (an RPC_URL may carry an API key, #97), and the
+# script refuses to run under `bash -x` while RPC_URL is set.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."   # → repo root
+. payment-rails/crank/scripts/devnet/common.sh
+refuse_xtrace_with_rpc_url
+[ "$#" = 0 ] || { echo "✗ verify.sh takes no arguments (configure with CLUSTER / RPC_URL / REGISTRY) — nothing was done" >&2; exit 1; }
 
 CLUSTER=${CLUSTER:-devnet}
 RPC=${RPC_URL:-$CLUSTER}
-RPC_SHOWN=${RPC%%\?*}
+RPC_SHOWN=$(rpc_shown "$RPC")
 F=${REGISTRY:-DEPLOYMENTS.md}
 SRC=programs/credit-gate/src/lib.rs
 LOCAL_SO=target/deploy/credit_gate.so
 
 die() { echo "✗ $*" >&2; exit 1; }
-sol() { solana -u "$RPC" --commitment confirmed "$@" 2> >(sed "s|${RPC//|/\\|}|$RPC_SHOWN|g" >&2); }
+sol() { solana -u "$RPC" --commitment confirmed "$@" 2> >(redact >&2); }
 retry() {
   local what=$1 delay; shift
   for delay in 2 4 8 16 0; do
