@@ -87,3 +87,17 @@ updates:
     open-pull-requests-limit: 5
     allow:
       - dependency-type: "direct"
+
+  # credit-gate's LiteSVM tests: their own [workspace] and lockfile, like
+  # payment-rails/tests-svm above, so they need their own entry (#98).
+  # Same anchor-* rule as the root entry.
+  - package-ecosystem: "cargo"
+    directory: "/programs/credit-gate/tests-svm"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "anchor-*"

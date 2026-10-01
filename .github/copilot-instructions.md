@@ -4,7 +4,7 @@ Context for AI agents (Copilot coding agent, Codebuff, or humans pairing with ei
 
 ## What this repo is
 
-NUNDINA is a private-credit secondary-market protocol on Solana: a pricing, queue and risk-transfer engine for gated, NAV-priced credit. Right now it is a **design-stage repository** — the corpus under `preresearch/` is the source of truth. Program code (Anchor/Rust) and the app (Next.js 16) arrive with the pilot build specified in `preresearch/architecture/08-SRS-Pilot-Rails.md`.
+NUNDINA is a private-credit secondary-market protocol on Solana: a pricing, queue and risk-transfer engine for gated, NAV-priced credit. It is in the **pilot build**: the corpus under `preresearch/` is the design source of truth, and code is landing against `preresearch/architecture/08-SRS-Pilot-Rails.md`. **Live on devnet:** `payment-rails/` (the USDC cash layer — escrow, refunds, DvP cash leg, facility, waterfall; ~4k lines of Anchor Rust, its own Cargo/Anchor workspace, plus a TypeScript crank under `payment-rails/crank/`), the `programs/credit-gate` skeleton (config anchor only) and the NPCS mint (`token/`). `programs/credit-math` is the shared math crate. The engines (auction, mark, queue-claim, facility, tranche) and the off-chain services are not built yet; `app/` is a shell. Check `README.md` § Build status and `DEPLOYMENTS.md` before stating what exists.
 
 ## Repo map
 
@@ -12,7 +12,10 @@ NUNDINA is a private-credit secondary-market protocol on Solana: a pricing, queu
 |---|---|---|
 | `preresearch/architecture/00-README.md` | Doc index + design pillars | Current |
 | `preresearch/architecture/05-Problem-Register.md` | ~100 failure modes (IDs A1…M8), ranked kill-list | Current |
-| `preresearch/architecture/06-Solution-Architecture-v2.md` | Six-program design, §1–§15, traceability matrix | Current — **the architecture reference** |
+| `preresearch/architecture/06-Solution-Architecture-v2.md` | Seven-program design (six engines + `payment-rails`), §1–§15, traceability matrix | Current — **the architecture reference** |
+| `payment-rails/` | USDC cash layer: program, LiteSVM tests, crank, deploy/verify scripts | Built — **live on devnet**, audit-scope-critical |
+| `programs/` | `credit-gate` (Gate Program skeleton) + `credit-math` (shared crate) | Built (skeleton / crate) |
+| `token/` | NPCS pilot mint: docs, scripts, runbook | Mint live on devnet |
 | `preresearch/architecture/07-Legal-Topology-and-Compliance.md` | Legal register L1–L27, counsel gates Q1–Q20, program requirements CG-*/AE-*/QC-*/LF-*/TE-*/ME-* | Current |
 | `preresearch/architecture/08-SRS-Pilot-Rails.md` | Pilot build spec: 12 acceptance scenarios (AC-1…AC-12), phase plan P0–P8 | Current — **the build contract** |
 | `preresearch/research/12-Validation-2026-Reality-Check.md` | Dated market evidence + source-confidence labels | Current |

@@ -5,23 +5,40 @@ on:
     branches: [main]
   pull_request:
 
+# Every job only reads the repo (#98). Declared, so the token can't inherit a
+# wider repo default.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Supply chain (#98):
+# - every `uses:` is pinned to a commit SHA (the tag it was taken from is in
+#   the trailing comment; dependabot's github-actions entry bumps both);
+# - the host Rust toolchain is pinned (rust-toolchain.toml; the `toolchain:`
+#   inputs below must equal it, checked by check-anchor-pins.sh), so the fmt
+#   and clippy gates can't turn red because "stable" moved;
+# - solana-cli and anchor are downloaded and checked against pinned SHA-256s
+#   (.github/scripts/install-solana-anchor.sh), never piped from a URL to sh.
+#
+# Every job name below is a required status check on `main` (#98). Renaming a
+# job means updating the `main-protection` ruleset in the same change.
 jobs:
   rust:
     name: rust — fmt · clippy · test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
+          toolchain: 1.98.1
           components: clippy, rustfmt
-      - name: Anchor pins agree (Anchor.toml · Cargo.toml · Cargo.lock · ci.yml)
+      - name: Pins agree (anchor everywhere · rust-toolchain.toml vs ci.yml)
         run: bash .github/scripts/check-anchor-pins.sh
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (deny warnings)
@@ -35,22 +52,28 @@ jobs:
   #   swallow llvm-cov's exit status (the default `bash -e` has no pipefail);
   # - cargo-llvm-cov has no --fail-under-branches, so the branch gate reads
   #   the totals from its JSON report.
+  # The nightly is a dated pin, like the stable toolchain (#98).
   credit-math-coverage:
     name: credit-math — coverage (lines + branches)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      NIGHTLY: nightly-2026-09-30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
+          toolchain: ${{ env.NIGHTLY }}
           components: llvm-tools-preview
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2
+        with:
+          tool: cargo-llvm-cov@0.9.1
       - name: Coverage (gate — 100% lines, 100% branches)
         shell: bash
         run: |
-          cargo +nightly llvm-cov --locked -p credit-math --branch --summary-only \
+          cargo "+$NIGHTLY" llvm-cov --locked -p credit-math --branch --summary-only \
             --fail-under-lines 100 | tee coverage.txt
-          cargo +nightly llvm-cov report -p credit-math --branch --json --summary-only > coverage.json
+          cargo "+$NIGHTLY" llvm-cov report -p credit-math --branch --json --summary-only > coverage.json
           jq -e '.data[0].totals.branches | .count > 0 and .notcovered == 0' coverage.json > /dev/null \
             || { echo "::error::credit-math branch coverage is below 100% (SRS 08 §13 / D8)"; jq '.data[0].totals.branches' coverage.json; exit 1; }
       - name: Publish coverage
@@ -70,26 +93,26 @@ jobs:
       SOLANA_VERSION: 2.3.0
       ANCHOR_VERSION: 1.1.2
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
+          toolchain: 1.98.1
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: |
             . -> target
             programs/credit-gate/tests-svm -> target
-      - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }}
-        run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-          mkdir -p "$HOME/.local/bin"
-          curl -sSfL -o "$HOME/.local/bin/anchor" \
-            "https://github.com/solana-foundation/anchor/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu"
-          chmod +x "$HOME/.local/bin/anchor"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }} (SHA-256 verified)
+        run: bash .github/scripts/install-solana-anchor.sh
       - name: anchor build
         run: anchor build
+      # cargo-build-sbf has no --locked/--frozen, so the SBF build — the
+      # binary that ships — could silently re-resolve the lockfile (#98).
+      - name: Lockfiles unchanged by anchor build
+        run: |
+          git diff --exit-code -- '**/Cargo.lock' 'Cargo.lock' \
+            || { echo "::error::anchor build changed a Cargo.lock — the SBF build re-resolved dependencies"; exit 1; }
       - name: Format + clippy (test crate)
         working-directory: programs/credit-gate/tests-svm
         run: |
@@ -99,20 +122,21 @@ jobs:
         run: cargo test --locked --manifest-path programs/credit-gate/tests-svm/Cargo.toml
 
   app:
-    name: app — typecheck + build
+    name: app — lint · typecheck · build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: npm run build
 
   # payment-rails is its own Cargo/Anchor workspace (payment-rails/README.md
@@ -129,11 +153,12 @@ jobs:
       run:
         working-directory: payment-rails
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
+          toolchain: 1.98.1
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: |
             payment-rails -> target
@@ -151,20 +176,19 @@ jobs:
         run: |
           cargo fmt --all -- --check
           cargo clippy --locked --all-targets -- -D warnings
-      - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }}
-        run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-          mkdir -p "$HOME/.local/bin"
-          curl -sSfL -o "$HOME/.local/bin/anchor" \
-            "https://github.com/solana-foundation/anchor/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu"
-          chmod +x "$HOME/.local/bin/anchor"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }} (SHA-256 verified)
+        working-directory: .
+        run: bash .github/scripts/install-solana-anchor.sh
       - name: anchor build
         run: anchor build
+      # cargo-build-sbf has no --locked/--frozen (#98); see credit-gate-svm.
+      - name: Lockfiles unchanged by anchor build
+        run: |
+          git diff --exit-code -- '**/Cargo.lock' \
+            || { echo "::error::anchor build changed a Cargo.lock — the SBF build re-resolved dependencies"; exit 1; }
       - name: Tests (LiteSVM, against the built .so)
         run: cargo test --locked --manifest-path tests-svm/Cargo.toml
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -181,7 +205,7 @@ jobs:
           # --porcelain also catches a deleted-then-recreated (untracked)
           # file, which `git diff` alone ignores.
           test -z "$(git status --porcelain -- idl/)" \
-            || { echo "::error::crank/idl/payment_rails.json is stale — run 'npm run sync-idl' after 'anchor build' and commit it"; exit 1; }
+            || { echo "::error::crank/idl/payment_rails.json is stale — run 'npm run sync-idl' after 'anchor build' and commit it"; git diff -- idl/ | head -200; exit 1; }
       - name: Kill-the-crank drill (local validator)
         working-directory: payment-rails/crank
         run: npm run drill
@@ -194,8 +218,8 @@ jobs:
       run:
         working-directory: payment-rails/crank
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -214,8 +238,8 @@ jobs:
       run:
         working-directory: token
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm

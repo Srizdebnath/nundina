@@ -20,6 +20,7 @@ paths = set()
 m = re.search(r"^## Repo structure\s*\n+```[^\n]*\n(.*?)^```", readme, re.S | re.M)
 if not m:
     sys.exit("README.md: no '## Repo structure' code block found")
+tree_paths = 0
 stack = []  # dir paths, one per depth
 for line in m.group(1).splitlines():
     t = re.match(r"^((?:│   |    )*)(?:├── |└── )(\S+)", line)
@@ -30,8 +31,17 @@ for line in m.group(1).splitlines():
     stack = stack[:depth]
     path = (stack[-1] if stack else "") + name
     paths.add(path.rstrip("/"))
+    tree_paths += 1
     if name.endswith("/"):
         stack.append(path)
+
+# A reformatted tree (different box-drawing, tabs) would match nothing and
+# leave only the link check below, silently (#98). The map has 20+ entries;
+# fewer parsed means the parser, not the repo, changed.
+MIN_TREE_PATHS = 20
+if tree_paths < MIN_TREE_PATHS:
+    sys.exit(f"::error file=README.md::parsed only {tree_paths} repo-map tree entries "
+             f"(want >= {MIN_TREE_PATHS}): the tree format changed; fix the regex in {__file__}")
 
 # 2. Relative Markdown links anywhere in README.md.
 for link in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", readme):
@@ -51,5 +61,5 @@ for p in sorted(paths):
 
 for p in missing:
     print(f"::error file=README.md::README maps a missing path: {p}")
-print(f"checked {len(paths)} README paths, {len(missing)} missing")
+print(f"checked {len(paths)} README paths ({tree_paths} from the tree), {len(missing)} missing")
 sys.exit(1 if missing else 0)

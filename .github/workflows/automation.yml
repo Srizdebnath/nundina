@@ -15,7 +15,7 @@ jobs:
     name: Close stale issues & PRs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v9
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
         with:
           days-before-stale: 30
           days-before-close: 14
@@ -32,12 +32,3 @@ jobs:
           exempt-pr-labels: "pinned,blocked-on-counsel"
           exempt-all-milestones: true
           operations-per-run: 60
-
-  label:
-    name: Label PRs by path
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/labeler@v5
-        with:
-          configuration-path: .github/labeler.yml
-          sync-labels: true
