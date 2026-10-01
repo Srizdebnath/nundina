@@ -183,6 +183,15 @@ pub struct CashSession {
     pub volume_settled: u64,
     /// Cash (gross) paid across settled fills.
     pub gross_settled: u64,
+    /// Micro-USDC that refunds recorded but did not find in a vault (#89):
+    /// the sum of every `CashShortfall`. A refund still completes and stops
+    /// tracking the recorded amount, so without this the loss would leave
+    /// the books. Non-zero means escrowed cash was taken (e.g. by a
+    /// settlement-mint clawback) and reconciliation must not report clean.
+    pub total_cash_shortfall: u64,
+    /// Asset base units that `refund_ask` recorded but did not find (#89):
+    /// the sum of every `AssetShortfall` (e.g. a permanent-delegate pull).
+    pub total_asset_shortfall: u64,
     /// PDA bump.
     pub bump: u8,
 }
@@ -448,6 +457,14 @@ pub struct Advance {
     pub borrower: Pubkey,
     /// Hash of the pledged collateral reference (claim / lot id).
     pub collateral_ref_hash: [u8; 32],
+    /// Collateral mark the advance was sized against (micro-USDC), as
+    /// supplied by the curator (#94). There is no mark engine yet, so the
+    /// rails cannot verify it; they bound the advance by it.
+    pub collateral_value: u64,
+    /// Advance rate the curator applied, in bps; at most the H1 ceiling
+    /// `credit_math::MAX_ADVANCE_RATE_BPS` (#94). Original principal ≤
+    /// `collateral_value × advance_rate_bps / 10⁴`.
+    pub advance_rate_bps: u64,
     /// Principal still owed.
     pub principal: u64,
     /// Interest accrued and not yet paid.
@@ -477,6 +494,24 @@ impl Repayment {
 impl Advance {
     /// PDA seed prefix: `["advance", facility, borrower]`.
     pub const SEED: &'static [u8] = b"advance";
+
+    /// H1 (doc 06 §11, SRS 08 LF-P1, #94): the most that may be advanced
+    /// against `collateral_value` at `advance_rate_bps`, i.e.
+    /// `floor(collateral_value × advance_rate_bps / 10⁴)` (floored against
+    /// the borrower). Rejects a rate above `credit_math::MAX_ADVANCE_RATE_BPS`
+    /// — the hard ceiling no curator parameter can exceed.
+    pub fn max_advance(collateral_value: u64, advance_rate_bps: u64) -> Result<u64> {
+        credit_math::check_advance_rate(advance_rate_bps)
+            .map_err(|_| error!(RailsError::AdvanceRateTooHigh))?;
+        let cap = credit_math::mul_div(
+            u128::from(collateral_value),
+            u128::from(advance_rate_bps),
+            u128::from(credit_math::BPS_DENOMINATOR),
+        )
+        .map_err(RailsError::from)?;
+        // rate ≤ 50%, so cap ≤ collateral_value/2 always fits.
+        Ok(u64::try_from(cap).map_err(|_| RailsError::MathOverflow)?)
+    }
 
     /// Accrue simple interest on outstanding principal up to `now`
     /// (`credit_math::accrue_interest`, floored). Time never runs backwards.
@@ -734,6 +769,8 @@ mod tests {
             fills_settled: 0,
             volume_settled: 0,
             gross_settled: 0,
+            total_cash_shortfall: 0,
+            total_asset_shortfall: 0,
             bump: 255,
         }
     }
@@ -921,10 +958,34 @@ mod tests {
             facility: Pubkey::new_from_array([1; 32]),
             borrower: Pubkey::new_from_array([2; 32]),
             collateral_ref_hash: [0; 32],
+            collateral_value: 0,
+            advance_rate_bps: 0,
             principal,
             interest: 0,
             last_accrual: 0,
             bump: 255,
+        }
+    }
+
+    #[test]
+    fn max_advance_enforces_the_h1_ceiling() {
+        // 50% of 1 000 USDC; floor against the borrower.
+        assert_eq!(
+            Advance::max_advance(1_000_000_000, 5_000).unwrap(),
+            500_000_000
+        );
+        assert_eq!(Advance::max_advance(3, 5_000).unwrap(), 1);
+        assert_eq!(
+            Advance::max_advance(1_000_000_000, 2_500).unwrap(),
+            250_000_000
+        );
+        assert_eq!(Advance::max_advance(u64::MAX, 5_000).unwrap(), u64::MAX / 2);
+        assert_eq!(Advance::max_advance(1_000, 0).unwrap(), 0);
+        for over in [5_001, 10_000, u64::MAX] {
+            assert_eq!(
+                Advance::max_advance(1_000_000_000, over).unwrap_err(),
+                error!(RailsError::AdvanceRateTooHigh)
+            );
         }
     }
 

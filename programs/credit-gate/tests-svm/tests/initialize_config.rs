@@ -1,13 +1,20 @@
-//! #26 regression: `initialize_config` is gated on the program's upgrade
-//! authority, so the first-caller-wins `init` of a mint's `MarketConfig`
+//! #26 regression: the first-caller-wins `init` of a mint's `MarketConfig`
 //! cannot be front-run into a permanent gate-authority takeover.
+//! #93: configs are authorized by the gate root, not by `ProgramData`, so
+//! market onboarding keeps working after the program is finalized (doc 06
+//! §11 U1), while only the upgrade authority can seed the root.
 //!
 //! Loads the real `anchor build` artifact as an upgradeable program.
+
+mod common;
 
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
-use credit_gate::{accounts as acc, instruction as ix, GateError, MarketConfig};
+use common::{
+    deploy, init_root_ix, programdata_pda, root_pda, seed_root, set_upgrade_authority, PROGRAM_ID,
+};
+use credit_gate::{accounts as acc, instruction as ix, GateError, GateRoot, MarketConfig};
 use litesvm::LiteSVM;
 use solana_instruction_error::InstructionError;
 use solana_keypair::Keypair;
@@ -15,10 +22,10 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-const PROGRAM_ID: Pubkey = credit_gate::ID;
-const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 /// anchor `ConstraintRaw` — a `constraint = …` without a custom error.
 const CONSTRAINT_RAW: u32 = 2003;
+/// anchor `AccountNotInitialized`.
+const ACCOUNT_NOT_INITIALIZED: u32 = 3012;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Fail {
@@ -32,43 +39,23 @@ fn gate(e: GateError) -> Fail {
 
 struct Env {
     svm: LiteSVM,
+    /// Upgrade authority, and (after `Env::new`) the gate root authority.
     authority: Keypair,
-    programdata: Pubkey,
 }
 
 impl Env {
-    /// Fresh VM with the program deployed; `authority` is installed as its
-    /// upgrade authority when `upgradeable`, otherwise the program is final.
-    fn with(upgradeable: bool) -> Env {
-        let so = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../target/deploy/credit_gate.so"
-        );
-        let bytes = std::fs::read(so)
-            .unwrap_or_else(|e| panic!("{so}: {e} — run `anchor build` at the repo root first"));
-        let mut svm = LiteSVM::new();
-        svm.add_program(PROGRAM_ID, &bytes).expect("load program");
-
-        // LiteSVM deploys with no upgrade authority; install one as a real
-        // deploy would. ProgramData header: u32 tag | u64 slot | Option<Pubkey>.
+    /// Program deployed with `authority` as upgrade authority; root NOT seeded.
+    fn bare() -> Env {
         let authority = Keypair::new();
-        let (programdata, _) = Pubkey::find_program_address(&[PROGRAM_ID.as_ref()], &LOADER_V3);
-        if upgradeable {
-            let mut pd = svm.get_account(&programdata).expect("programdata");
-            pd.data[12] = 1;
-            pd.data[13..45].copy_from_slice(authority.pubkey().as_ref());
-            svm.set_account(programdata, pd).unwrap();
-        }
-        svm.airdrop(&authority.pubkey(), 10_000_000_000).unwrap();
-        Env {
-            svm,
-            authority,
-            programdata,
-        }
+        let svm = deploy(&authority);
+        Env { svm, authority }
     }
 
+    /// Program deployed, root seeded with the upgrade authority as root.
     fn new() -> Env {
-        Env::with(true)
+        let mut env = Env::bare();
+        seed_root(&mut env.svm, &env.authority);
+        env
     }
 
     fn funded(&mut self) -> Keypair {
@@ -92,15 +79,14 @@ impl Env {
         })
     }
 
-    fn init_ix(&self, signer: &Pubkey, mint: &Pubkey, program_data: Pubkey) -> Instruction {
+    fn init_ix(&self, signer: &Pubkey, mint: &Pubkey) -> Instruction {
         Instruction {
             program_id: PROGRAM_ID,
             accounts: acc::InitializeConfig {
                 config: config_pda(mint),
+                root: root_pda(),
                 mint: *mint,
                 authority: *signer,
-                program: PROGRAM_ID,
-                program_data,
                 system_program: anchor_lang::system_program::ID,
             }
             .to_account_metas(None),
@@ -118,7 +104,46 @@ impl Env {
     }
 
     fn init_as(&mut self, signer: &Keypair, mint: &Pubkey) -> Result<(), Fail> {
-        let ix = self.init_ix(&signer.pubkey(), mint, self.programdata);
+        let ix = self.init_ix(&signer.pubkey(), mint);
+        self.send(&[ix], &[signer])
+    }
+
+    fn seed_root_as(&mut self, signer: &Keypair, root_authority: Pubkey) -> Result<(), Fail> {
+        let ix = init_root_ix(&signer.pubkey(), root_authority, programdata_pda());
+        self.send(&[ix], &[signer])
+    }
+
+    fn govern_root(&mut self, signer: &Keypair, data: impl InstructionData) -> Result<(), Fail> {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::GovernRoot {
+                root: root_pda(),
+                authority: signer.pubkey(),
+            }
+            .to_account_metas(None),
+            data: data.data(),
+        };
+        self.send(&[ix], &[signer])
+    }
+
+    fn propose_root(&mut self, signer: &Keypair, new_authority: Pubkey) -> Result<(), Fail> {
+        self.govern_root(signer, ix::ProposeRootAuthority { new_authority })
+    }
+
+    fn cancel_root(&mut self, signer: &Keypair) -> Result<(), Fail> {
+        self.govern_root(signer, ix::CancelRootAuthority {})
+    }
+
+    fn accept_root(&mut self, signer: &Keypair) -> Result<(), Fail> {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::AcceptRootAuthority {
+                root: root_pda(),
+                new_authority: signer.pubkey(),
+            }
+            .to_account_metas(None),
+            data: ix::AcceptRootAuthority {}.data(),
+        };
         self.send(&[ix], &[signer])
     }
 
@@ -157,6 +182,14 @@ impl Env {
         }
         Some(MarketConfig::try_deserialize(&mut a.data.as_slice()).expect("decode config"))
     }
+
+    fn root(&self) -> Option<GateRoot> {
+        let a = self.svm.get_account(&root_pda())?;
+        if a.data.is_empty() {
+            return None;
+        }
+        Some(GateRoot::try_deserialize(&mut a.data.as_slice()).expect("decode root"))
+    }
 }
 
 fn config_pda(mint: &Pubkey) -> Pubkey {
@@ -164,12 +197,12 @@ fn config_pda(mint: &Pubkey) -> Pubkey {
 }
 
 #[test]
-fn upgrade_authority_initializes_and_governs() {
+fn root_authority_initializes_and_governs() {
     let mut env = Env::new();
     let mint = Pubkey::new_unique();
     let auth = env.authority.insecure_clone();
     env.init_as(&auth, &mint)
-        .expect("upgrade authority initializes");
+        .expect("root authority initializes");
 
     let cfg = env.config(&mint).expect("config exists");
     assert_eq!(cfg.mint, mint);
@@ -189,7 +222,7 @@ fn front_runner_cannot_initialize() {
 
     assert_eq!(
         env.init_as(&attacker, &mint),
-        Err(gate(GateError::NotUpgradeAuthority))
+        Err(gate(GateError::NotRootAuthority))
     );
     assert!(
         env.config(&mint).is_none(),
@@ -199,7 +232,7 @@ fn front_runner_cannot_initialize() {
     // The legitimate call still lands after the failed front-run.
     let auth = env.authority.insecure_clone();
     env.init_as(&auth, &mint)
-        .expect("upgrade authority initializes");
+        .expect("root authority initializes");
     assert_eq!(
         env.config(&mint).unwrap().gate_config_authority,
         auth.pubkey()
@@ -214,40 +247,162 @@ fn front_runner_cannot_initialize() {
 }
 
 #[test]
-fn spoofed_program_data_is_rejected() {
-    let mut env = Env::new();
+fn no_config_before_the_root_is_seeded() {
+    let mut env = Env::bare();
+    let auth = env.authority.insecure_clone();
     let mint = Pubkey::new_unique();
+    assert_eq!(
+        env.init_as(&auth, &mint),
+        Err(Fail::Code(ACCOUNT_NOT_INITIALIZED)),
+        "not even the upgrade authority creates configs without a root"
+    );
+}
+
+#[test]
+fn only_the_upgrade_authority_seeds_the_root_once() {
+    let mut env = Env::bare();
     let attacker = env.funded();
+    assert_eq!(
+        env.seed_root_as(&attacker, attacker.pubkey()),
+        Err(gate(GateError::NotUpgradeAuthority))
+    );
+    assert!(env.root().is_none());
 
     // A loader-owned ProgramData-shaped account naming the attacker as
     // upgrade authority, at an address that is not this program's.
-    let mut fake = env.svm.get_account(&env.programdata).unwrap();
+    let mut fake = env.svm.get_account(&programdata_pda()).unwrap();
     fake.data[12] = 1;
     fake.data[13..45].copy_from_slice(attacker.pubkey().as_ref());
     let fake_key = Pubkey::new_unique();
     env.svm.set_account(fake_key, fake).unwrap();
-
-    let ix = env.init_ix(&attacker.pubkey(), &mint, fake_key);
+    let ix = init_root_ix(&attacker.pubkey(), attacker.pubkey(), fake_key);
     assert_eq!(
         env.send(&[ix], &[&attacker]),
         Err(Fail::Code(CONSTRAINT_RAW))
     );
-    assert!(env.config(&mint).is_none());
+    assert!(env.root().is_none());
+
+    let auth = env.authority.insecure_clone();
+    assert_eq!(
+        env.seed_root_as(&auth, Pubkey::default()),
+        Err(gate(GateError::InvalidNewAuthority))
+    );
+    env.seed_root_as(&auth, auth.pubkey()).expect("seed");
+    // One-shot: `init` refuses a second root (system code 0).
+    assert_eq!(
+        env.seed_root_as(&auth, attacker.pubkey()),
+        Err(Fail::Code(0))
+    );
+    assert_eq!(env.root().unwrap().authority, auth.pubkey());
 }
 
 #[test]
-fn immutable_program_admits_no_initializer() {
-    let mut env = Env::with(false);
+fn finalized_program_still_onboards_markets() {
+    let mut env = Env::new();
+    let auth = env.authority.insecure_clone();
+    env.init_as(&auth, &Pubkey::new_unique())
+        .expect("before finalize");
+
+    // `solana program finalize`: the upgrade authority becomes None.
+    set_upgrade_authority(&mut env.svm, None);
+
     let mint = Pubkey::new_unique();
+    env.init_as(&auth, &mint)
+        .expect("a finalized program still creates per-mint configs (#93)");
+    assert_eq!(
+        env.config(&mint).unwrap().gate_config_authority,
+        auth.pubkey()
+    );
+    // …and the root's own governance does not depend on ProgramData either.
+    let next = env.funded();
+    env.propose_root(&auth, next.pubkey()).expect("propose");
+    env.accept_root(&next).expect("accept");
+    env.init_as(&next, &Pubkey::new_unique())
+        .expect("rotated root onboards after finalize");
+}
+
+#[test]
+fn finalized_program_without_a_root_fails_closed() {
+    let mut env = Env::bare();
+    set_upgrade_authority(&mut env.svm, None);
     let auth = env.authority.insecure_clone();
     let other = env.funded();
     for signer in [&auth, &other] {
         assert_eq!(
-            env.init_as(signer, &mint),
+            env.seed_root_as(signer, signer.pubkey()),
             Err(gate(GateError::NotUpgradeAuthority))
         );
     }
-    assert!(env.config(&mint).is_none());
+    assert!(env.root().is_none());
+}
+
+#[test]
+fn root_can_be_seeded_straight_to_a_vault() {
+    let mut env = Env::bare();
+    let auth = env.authority.insecure_clone();
+    let vault = env.funded();
+    env.seed_root_as(&auth, vault.pubkey())
+        .expect("upgrade key seeds the root to a key it does not control");
+    let mint = Pubkey::new_unique();
+    assert_eq!(
+        env.init_as(&auth, &mint),
+        Err(gate(GateError::NotRootAuthority)),
+        "the upgrade key has no onboarding power once the root names a vault"
+    );
+    env.init_as(&vault, &mint).expect("vault onboards");
+}
+
+#[test]
+fn root_hand_over_is_two_step() {
+    let mut env = Env::new();
+    let old = env.authority.insecure_clone();
+    let (next, attacker) = (env.funded(), env.funded());
+
+    assert_eq!(
+        env.accept_root(&next),
+        Err(gate(GateError::NoPendingRootAuthority))
+    );
+    assert_eq!(
+        env.cancel_root(&old),
+        Err(gate(GateError::NoPendingRootAuthority))
+    );
+    assert_eq!(
+        env.propose_root(&attacker, attacker.pubkey()),
+        Err(gate(GateError::NotRootAuthority))
+    );
+    for bad in [Pubkey::default(), old.pubkey()] {
+        assert_eq!(
+            env.propose_root(&old, bad),
+            Err(gate(GateError::InvalidNewAuthority))
+        );
+    }
+
+    env.propose_root(&old, next.pubkey()).expect("propose");
+    assert_eq!(env.root().unwrap().authority, old.pubkey(), "not yet");
+    assert_eq!(
+        env.accept_root(&attacker),
+        Err(gate(GateError::NotProposedAuthority))
+    );
+    env.cancel_root(&old).expect("cancel");
+    assert_eq!(
+        env.accept_root(&next),
+        Err(gate(GateError::NoPendingRootAuthority)),
+        "a cancelled proposal cannot be accepted"
+    );
+
+    env.propose_root(&old, next.pubkey()).expect("re-propose");
+    env.accept_root(&next).expect("accept");
+    let root = env.root().unwrap();
+    assert_eq!(root.authority, next.pubkey());
+    assert_eq!(root.pending_authority, Pubkey::default());
+
+    let mint = Pubkey::new_unique();
+    assert_eq!(
+        env.init_as(&old, &mint),
+        Err(gate(GateError::NotRootAuthority)),
+        "the old root no longer onboards"
+    );
+    env.init_as(&next, &mint).expect("the new root onboards");
 }
 
 #[test]

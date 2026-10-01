@@ -604,6 +604,48 @@ fn short_cash_vault_still_refunds_and_closes() {
             (sess.open_escrows, sess.total_cash, sess.total_bonds),
             (0, 0, 0)
         );
+        // #89: recorded 100 + bond, held 60 ⇒ the gap is booked, not lost.
+        assert_eq!(sess.total_cash_shortfall, 40_000_000 + BOND, "{tp:?}");
+        assert_eq!(sess.total_asset_shortfall, 0);
+    });
+}
+
+/// Base `Account` layout (SPL Token and Token-2022): state byte at 108;
+/// 2 = Frozen (e.g. the settlement mint's freeze authority acting).
+fn freeze_raw(env: &mut Env, account: &anchor_lang::prelude::Pubkey) {
+    let mut a = env.svm.get_account(account).expect("token account");
+    a.data[108] = 2;
+    env.svm.set_account(*account, a).unwrap();
+}
+
+/// #90, cash side: a frozen refund destination fails typed before anything
+/// moves; another thawed USDC account of the same owner receives it.
+#[test]
+fn frozen_usdc_destination_is_typed_and_an_alternate_account_refunds() {
+    each(|tp| {
+        let mut env = Env::new(tp);
+        let s = env.open_session(1);
+        let (a, ta) = env.bidder(500_000_000);
+        env.deposit(&s, &a, &ta, 100_000_000).unwrap();
+        let op = env.authority.insecure_clone();
+        env.fail_session_as(&op, &s).unwrap();
+        freeze_raw(&mut env, &ta);
+
+        let e = escrow_pda(&s, &a.pubkey());
+        let crank = env.funded();
+        assert_eq!(
+            env.refund(&crank, &s, &a.pubkey(), &ta),
+            Err(Fail::rails(RailsError::RefundUsdcDestinationFrozen)),
+            "{tp:?}"
+        );
+        assert!(env.exists(&e), "{tp:?} escrow intact");
+
+        let mint = env.mint;
+        let alt = env.token_account(&mint, &a.pubkey(), 0);
+        env.refund(&crank, &s, &a.pubkey(), &alt)
+            .expect("a thawed account of the same owner receives the refund");
+        assert_eq!(env.bal(&alt), 100_000_000 + BOND, "{tp:?}");
+        assert!(!env.exists(&e));
     });
 }
 

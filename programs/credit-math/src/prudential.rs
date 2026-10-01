@@ -7,9 +7,9 @@
 //!
 //! | Item | Plan of record | Status in this crate |
 //! |---|---|---|
-//! | H1 max advance rate | 50% (SRS 08 LF-P1, doc 07 LF-3) | [`MAX_ADVANCE_RATE_BPS`] + [`check_advance_rate`]. No program has an advance-rate field yet |
+//! | H1 max advance rate | 50% (SRS 08 LF-P1, doc 07 LF-3) | [`MAX_ADVANCE_RATE_BPS`] + [`check_advance_rate`], **enforced** by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ the curator-stated collateral mark × rate. The mark itself is unverified (no mark engine) |
 //! | H2 min subordination floor | no value set | **not enforced**: no tranche program exists |
-//! | H3 max discount / reserve-price bound | no value set | **not enforced** beyond the structural `≤ 100%` in [`crate::nav::haircut_bps`] |
+//! | H3 max discount / reserve-price bound | no value set | **not enforced** beyond the structural `≤ 100%` in [`crate::nav::haircut_bps`], whose ceiling is caller-supplied: `ceiling_bps = 0` binds nothing |
 //! | H4 no liquidation on a stale mark | rule, not a number | **not enforced**: no mark engine, no liquidation instruction |
 //! | H5 timeout refund path | rule, not a number | enforced by `payment-rails` refunds (see its PHASES.md for the ask-vault caveat) |
 //!

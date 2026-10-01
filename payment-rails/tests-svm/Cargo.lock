@@ -1968,6 +1968,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "credit-math",
  "litesvm",
  "payment-rails",
  "solana-account",

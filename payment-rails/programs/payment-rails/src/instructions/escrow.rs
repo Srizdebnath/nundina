@@ -43,17 +43,37 @@ fn emit_escrow(
         escrow,
         owner,
         amount,
+        unit: action.unit(),
         caller,
     });
 }
 
-/// Remove a closed escrow's holdings from the session totals.
-fn untrack(session: &mut CashSession, cash: u64, bond: u64, asset: u64) -> Result<()> {
+/// Remove a closed escrow's holdings from the session totals, and book
+/// what the refund found missing (#89). The recorded amounts leave the
+/// live totals in full because the escrow is gone; the gap moves to the
+/// session's shortfall counters, so the loss stays on the books.
+fn untrack(
+    session: &mut CashSession,
+    cash: u64,
+    bond: u64,
+    asset: u64,
+    cash_shortfall: u64,
+    asset_shortfall: u64,
+) -> Result<()> {
     let under = || error!(RailsError::MathUnderflow);
+    let over = || error!(RailsError::MathOverflow);
     session.open_escrows = session.open_escrows.checked_sub(1).ok_or_else(under)?;
     session.total_cash = session.total_cash.checked_sub(cash).ok_or_else(under)?;
     session.total_bonds = session.total_bonds.checked_sub(bond).ok_or_else(under)?;
     session.total_asset = session.total_asset.checked_sub(asset).ok_or_else(under)?;
+    session.total_cash_shortfall = session
+        .total_cash_shortfall
+        .checked_add(cash_shortfall)
+        .ok_or_else(over)?;
+    session.total_asset_shortfall = session
+        .total_asset_shortfall
+        .checked_add(asset_shortfall)
+        .ok_or_else(over)?;
     Ok(())
 }
 
@@ -272,8 +292,12 @@ pub fn process_forfeit_bond(ctx: Context<ForfeitBond>) -> Result<()> {
 /// A vault holding less than `recorded` (a settlement mint with a permanent
 /// delegate or clawback) still drains and closes. The forfeit is paid first,
 /// up to what is held, and the owner gets the rest. The caller reports
-/// `shortfall` as `CashShortfall`. A refund must never be blocked (AE-P10,
-/// doc 06 §11 H5, #62).
+/// `shortfall` as `CashShortfall` and books it on the session (#89). A
+/// refund must never be blocked (AE-P10, doc 06 §11 H5, #62).
+///
+/// A frozen `owner_usdc` that would receive cash is rejected up front with
+/// a typed error instead of failing inside the token program (#90); the
+/// caller can retry with another thawed USDC account of the same owner.
 #[allow(clippy::too_many_arguments)]
 fn drain_usdc_vault<'info>(
     token_program: &Interface<'info, TokenInterface>,
@@ -281,7 +305,7 @@ fn drain_usdc_vault<'info>(
     vault: &InterfaceAccount<'info, TokenAccount>,
     escrow: AccountInfo<'info>,
     owner: AccountInfo<'info>,
-    owner_usdc: AccountInfo<'info>,
+    owner_usdc: &InterfaceAccount<'info, TokenAccount>,
     reserve: AccountInfo<'info>,
     seeds: &[&[u8]],
     recorded: u64,
@@ -294,6 +318,10 @@ fn drain_usdc_vault<'info>(
     let shortfall = recorded.saturating_sub(held);
     let forfeit = forfeit.min(held);
     let to_owner = held - forfeit;
+    require!(
+        to_owner == 0 || !owner_usdc.is_frozen(),
+        RailsError::RefundUsdcDestinationFrozen
+    );
     let vault_info = vault.to_account_info();
     token::transfer(
         token_program,
@@ -308,7 +336,7 @@ fn drain_usdc_vault<'info>(
         token_program,
         usdc_mint,
         vault_info.clone(),
-        owner_usdc,
+        owner_usdc.to_account_info(),
         escrow.clone(),
         &[seeds],
         to_owner,
@@ -353,13 +381,13 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
         &ctx.accounts.vault,
         ctx.accounts.escrow.to_account_info(),
         ctx.accounts.owner.to_account_info(),
-        ctx.accounts.owner_token.to_account_info(),
+        &ctx.accounts.owner_token,
         ctx.accounts.reserve.to_account_info(),
         seeds,
         recorded,
         forfeit,
     )?;
-    untrack(&mut ctx.accounts.session, cash, bond, 0)?;
+    untrack(&mut ctx.accounts.session, cash, bond, 0, cash_shortfall, 0)?;
 
     let caller = ctx.accounts.caller.key();
     if to_reserve > 0 {
@@ -398,6 +426,14 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
 /// the bond is forfeit) to the seller. Same permissionless, never-pausable
 /// rules as `refund`; closes both vaults and the escrow. Completes even if
 /// the asset vault was drained below the recorded amount (#62).
+///
+/// The asset can only go to a **thawed** account of the seller (#90). NPCS
+/// re-freezes a holder whose attestation lapses, so the seller's usual
+/// account may be frozen: the call then fails with
+/// `RefundAssetDestinationFrozen` before anything moves, and succeeds when
+/// re-sent with any other thawed NPCS account of the same owner (or after
+/// the issuer thaws this one). With a vault drained to zero, no asset moves
+/// and a frozen destination does not block the bond.
 pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let escrow = &ctx.accounts.escrow;
@@ -419,6 +455,19 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         owner_key.as_ref(),
         &[escrow.bump],
     ];
+    // Asset: everything held (incl. any donated dust) back to the seller.
+    // The vault can hold *less* than recorded: an asset with a permanent
+    // delegate (NPCS, SRS 08 §3.1) can pull from it at any time. That must
+    // not block the refund, or the seller's bond is stranded forever
+    // (AE-P10 / doc 06 §11 H5, #62). Return what is there and record the
+    // gap as `AssetShortfall`. Checked before any cash moves (#90).
+    let held = ctx.accounts.asset_vault.amount;
+    let shortfall = asset.saturating_sub(held);
+    require!(
+        held == 0 || !ctx.accounts.owner_asset.is_frozen(),
+        RailsError::RefundAssetDestinationFrozen
+    );
+
     let escrow_info = ctx.accounts.escrow.to_account_info();
     let owner_info = ctx.accounts.owner.to_account_info();
     let (to_reserve, to_owner, cash_shortfall) = drain_usdc_vault(
@@ -427,21 +476,13 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         &ctx.accounts.vault,
         escrow_info.clone(),
         owner_info.clone(),
-        ctx.accounts.owner_usdc.to_account_info(),
+        &ctx.accounts.owner_usdc,
         ctx.accounts.reserve.to_account_info(),
         seeds,
         bond,
         forfeit,
     )?;
 
-    // Asset: everything held (incl. any donated dust) back to the seller.
-    // The vault can hold *less* than recorded: an asset with a permanent
-    // delegate (NPCS, SRS 08 §3.1) can pull from it at any time. That must
-    // not block the refund, or the seller's bond is stranded forever
-    // (AE-P10 / doc 06 §11 H5, #62). Return what is there and record the
-    // gap as `AssetShortfall`.
-    let held = ctx.accounts.asset_vault.amount;
-    let shortfall = asset.saturating_sub(held);
     let asset_vault_info = ctx.accounts.asset_vault.to_account_info();
     if held > 0 {
         token::transfer(
@@ -461,7 +502,14 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         escrow_info,
         &[seeds],
     )?;
-    untrack(&mut ctx.accounts.session, 0, bond, asset)?;
+    untrack(
+        &mut ctx.accounts.session,
+        0,
+        bond,
+        asset,
+        cash_shortfall,
+        shortfall,
+    )?;
 
     let caller = ctx.accounts.caller.key();
     if to_reserve > 0 {

@@ -55,10 +55,10 @@ cd token && CLUSTER=devnet npm run verify
   CI pipeline; until then hashes are recorded from this machine's build.
 - **Security (#26):** the credit-gate v0.1.0 build above lets *any* signer
   run `initialize_config` for a mint and become its permanent gate-config
-  authority. The fix, which gates it on the program's upgrade authority, is
-  on `main` but is **not deployed** until the upgrade authority redeploys.
-  Nothing consumes this skeleton yet, but configs created on devnet before
-  that upgrade aren't trustworthy.
+  authority. The fix on `main` gates it on the gate root (#93; seeded only
+  by the program's upgrade authority) and is **not deployed** until the
+  upgrade authority redeploys. Nothing consumes this skeleton yet, but
+  configs created on devnet before that upgrade aren't trustworthy.
 - **Checking and closing the #45 gap.** Anyone can run
   `bash programs/credit-gate/scripts/verify.sh`. It verifies the row above
   keylessly (source id, genesis, dump SHA-256, authority, slot) and reports
@@ -69,17 +69,36 @@ cd token && CLUSTER=devnet npm run verify
      target/deploy/credit_gate.so --program-id 7yREa5V3…Qa9c
      --upgrade-authority <Bprm….json> -u devnet` (bare id: the program
      keypair is not needed);
-  2. update this row's Slot, signature and Build SHA-256, then re-run
+  2. call `initialize_root(<root authority>)`, signed by the upgrade
+     authority, **in the same session** — until the root exists no market
+     can be onboarded, and it must exist before the program is ever
+     finalized (a finalized program with no root can never seed one);
+  3. update this row's Slot, signature and Build SHA-256, then re-run
      `verify.sh` (it must now print `local anchor build == live build`);
-  3. discard any `MarketConfig` created against the old build (none are
+  4. discard any `MarketConfig` created against the old build (none are
      consumed today), and follow the #50 hand-over note below before the
      bootstrap key is retired.
+- **Gate root (#93):** `initialize_config` is authorized by the singleton
+  `GateRoot` PDA (`["gate_root"]`), not by `ProgramData`, so per-mint
+  onboarding (CG-P2, G14) keeps working after doc 06 §11 U1 stages the
+  program to immutable. The root is seeded once by the upgrade authority
+  and can name a Squads vault directly; it moves only by
+  `propose_root_authority` + `accept_root_authority`. Moving the program
+  upgrade authority does **not** move the root.
+- **What the upgrade authority can still do (#93).** Whoever can replace
+  the program binary can rewrite any `MarketConfig` (or the root) with a
+  build that ignores these checks: no on-chain guard survives an upgrade
+  that removes it. Until the program is finalized, the only control is the
+  upgrade authority itself — SRS 08 §8's Squads 2-of-2 **with its 48h
+  timelock** — which is not in place today (single bootstrap key, #57).
 - **Gate authority hand-over (#50):** a `MarketConfig`'s
-  `gate_config_authority` starts as the upgrade authority that initialized
-  it, which on devnet today is the single bootstrap key above, not a Squads
-  vault. Moving the *program* upgrade authority to Squads does **not** move
-  any existing config's authority. Each config moves with its own two-step
-  hand-over: the current authority calls `propose_gate_authority(<squads
-  vault>)`, then the vault calls `accept_gate_authority`. Do this for every
-  config when the bootstrap key is retired, and before the key is
-  destroyed. A config whose authority key is lost cannot be governed again.
+  `gate_config_authority` starts as the gate root authority that
+  initialized it, which on devnet will be the single bootstrap key above,
+  not a Squads vault. Moving the *program* upgrade authority or the root to
+  Squads does **not** move any existing config's authority. Each config
+  moves with its own two-step hand-over: the current authority calls
+  `propose_gate_authority(<squads vault>)`, then the vault calls
+  `accept_gate_authority` (which refunds the proposal's rent to the vault,
+  #96). Do this for every config when the bootstrap key is retired, and
+  before the key is destroyed. A config whose authority key is lost cannot
+  be governed again.

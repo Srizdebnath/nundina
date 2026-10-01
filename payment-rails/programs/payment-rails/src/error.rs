@@ -150,6 +150,30 @@ pub enum RailsError {
     /// the gate must thaw it between `open_asset_vault` and `deposit_ask`.
     #[msg("Asset vault is frozen; the gate must thaw it before deposit_ask")]
     AssetVaultFrozen,
+    /// Refund destination (`owner_asset`) is frozen by the asset's freeze
+    /// authority (#90). Pass another thawed asset account of the same
+    /// owner, or have the issuer thaw this one; nothing has moved.
+    #[msg("Refund asset destination is frozen; pass a thawed account of the owner")]
+    RefundAssetDestinationFrozen,
+    /// Refund destination (`owner_token` / `owner_usdc`) is frozen by the
+    /// settlement mint's freeze authority (#90). Nothing has moved.
+    #[msg("Refund USDC destination is frozen; pass a thawed account of the owner")]
+    RefundUsdcDestinationFrozen,
+    /// The seller's asset vault holds less than the fill's `qty`: it was
+    /// drained (e.g. by the asset's permanent delegate) after deposit_ask
+    /// (#90). The fill cannot deliver; refund_ask returns what is held.
+    #[msg("Seller asset vault holds less than the fill quantity")]
+    EscrowDrained,
+    /// `advance_rate_bps` above the H1 hard ceiling,
+    /// `credit_math::MAX_ADVANCE_RATE_BPS` (50%, #94).
+    #[msg("Advance rate above the hard ceiling")]
+    AdvanceRateTooHigh,
+    /// `amount` above `collateral_value × advance_rate_bps / 10⁴` (#94).
+    #[msg("Advance exceeds collateral value × advance rate")]
+    AdvanceExceedsRate,
+    /// A fill's lot list is longer than `MAX_LOTS_PER_FILL` (#88).
+    #[msg("Too many lots in one fill")]
+    TooManyLots,
 }
 
 impl From<MathError> for RailsError {
@@ -196,5 +220,7 @@ mod tests {
         assert_eq!(u32::from(RailsError::FeeReceiverMismatch), 6033);
         assert_eq!(u32::from(RailsError::DestinationRevoked), 6034);
         assert_eq!(u32::from(RailsError::AssetVaultFrozen), 6041);
+        assert_eq!(u32::from(RailsError::RefundAssetDestinationFrozen), 6042);
+        assert_eq!(u32::from(RailsError::TooManyLots), 6047);
     }
 }

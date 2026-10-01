@@ -114,20 +114,22 @@ fn record_fill(
         rofr,
         disclosure_hash,
     });
-    // AE-P8 transfer record. No lot ledger and no gate re-check exist yet,
-    // so this states that honestly instead of omitting the fields (#61, #53).
-    emit!(TransferInstruction {
-        session: session_key,
+    // AE-P8 transfer record. No lot ledger and no gate re-check exist yet
+    // (#53), so no lots, no exemption basis and no gate check are claimed:
+    // the record states their absence instead of omitting the fields (#61,
+    // #88). It cannot prove a fill lawful (doc 07 L4/L21) until they exist.
+    emit!(TransferInstruction::checked(
+        session_key,
         fill_index,
-        from: seller,
-        to: buyer,
+        seller,
+        buyer,
         qty,
         price,
-        lot_ids: Vec::new(),
-        exemption_path: ExemptionPath::NotRecorded,
-        gate_check: GateCheck::NotPerformed,
+        Vec::new(),
+        ExemptionPath::NotRecorded,
+        GateCheck::NotPerformed,
         disclosure_hash,
-    });
+    )?);
     Ok(())
 }
 
@@ -164,6 +166,13 @@ pub fn process_settle_fill(
     require!(
         split.gross <= buyer.cash && qty <= seller.asset,
         RailsError::InsufficientEscrow
+    );
+    // The recorded escrow amount is not the vault balance: the asset's
+    // permanent delegate can drain the vault after deposit_ask. Fail with a
+    // typed reason the crank can attribute, not a raw token error (#90).
+    require!(
+        ctx.accounts.seller_asset_vault.amount >= qty,
+        RailsError::EscrowDrained
     );
 
     // Cash leg: buyer vault → seller / fee / reserve.
@@ -256,6 +265,10 @@ pub fn process_settle_rofr_fill(
         session.reserve_bps,
     )?;
     require!(qty <= seller.asset, RailsError::InsufficientEscrow);
+    require!(
+        ctx.accounts.seller_asset_vault.amount >= qty,
+        RailsError::EscrowDrained
+    );
 
     // Cash leg: issuer's own account → seller / fee / reserve.
     let issuer_info = ctx.accounts.issuer.to_account_info();
