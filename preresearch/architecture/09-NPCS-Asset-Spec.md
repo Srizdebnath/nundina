@@ -53,7 +53,9 @@ The pilot replicates the *shape* of real permissioned credit tokens (OnRe ONyc, 
 | `ConfidentialTransfer` | **no** | Incompatible with the permissioned book (`06` D2). Sealed-bid commit/reveal is the privacy mechanism, at the auction layer. |
 | `NonTransferable` | **no** | Trading the asset *is the product* (auctions, claims, facility collateral). |
 
-**Authority model** (matches `08` §8): mint authority, permanent delegate, and freeze-all = **Squads 2-of-2 (founder + ops)**. Minting only against a confirmed treasury deposit. Token ACL `MintConfig` PDA delegates thaw decisions to **`credit-gate`**.
+**Authority model — target** (matches `08` §8): mint authority, permanent delegate, and freeze-all = **Squads 2-of-2 (founder + ops)**. Minting only against a confirmed treasury deposit. Token ACL `MintConfig` PDA delegates thaw decisions to **`credit-gate`**.
+
+> **As built (2026-09, #92):** none of the authority model above is in place. One bootstrap key (`2xhjfAdr…6sRXMh`) holds mint, freeze, permanent-delegate and metadata authority; the mint has no Token ACL extension and no `MintConfig`; `credit-gate` has no `validate` entrypoint; supply is 0. Statements in §2–§4 written in the present tense describe the **target**, not the live mint. This section should not go to counsel as a description of live controls before P1 (#5) lands; `08` §3's as-built block and `token/TOKENOMICS.md` §0 are the current-state record.
 
 ### 2.1 Provenance & the honeypot collision (OAK 2026-03 finding)
 
@@ -61,7 +63,7 @@ Since Token ACL's first mainnet transaction (2026-03-06), **a regulated fund and
 
 NPCS adopts the consequences explicitly:
 
-1. **Structure over claims.** NPCS's freeze authority *is* the Token ACL `MintConfig` PDA — verifiable by one account read (owner of the freeze authority == Token ACL program `TACLkU6…`). The demo authority-map slide includes this live check.
+1. **Structure over claims (target).** NPCS's freeze authority *will be* the Token ACL `MintConfig` PDA — verifiable by one account read (owner of the freeze authority == Token ACL program `TACLkU6…`). The demo authority-map slide includes this live check. **Today that check fails:** the freeze authority is the bootstrap wallet, i.e. NPCS currently has the honeypot shape described above (#92).
 2. **Metadata is labeled, never load-bearing.** The `PILOT-DEMO-ASSET — NOT AN OFFER` string is hygiene, not proof. No eligibility claim rests on metadata.
 3. **Permanent delegate is the residual risk surface and we say so.** OAK's 2026-Q1 continuation entry documents operators revoking checkable authorities while keeping the delegate. NPCS *keeps* the delegate by design (AC-9) — the honest position is full disclosure of what the delegate can do, not pretense that conformance makes it safe.
 4. **Gate provenance published.** The `MintConfig` names `credit-gate`; its program ID and verifiable build are published from day one (G14). A reader can enumerate: who thaws (gate rules), who freezes (ACL PDA), who seizes (delegate, multisig).
@@ -78,7 +80,7 @@ supply_base_units  ==  total_confirmed_deposits_usdc × 10⁶        (at all tim
 
 - **Mint** occurs only on a deposit-confirmed event: treasury-agent verifies the sleeve balance, ops proposes the mint in Squads, 2-of-2 approves, mint executes. The (deposit → mint) event pair is indexed so the invariant is auditable from the event stream alone (AC-12 evidence).
 - **Burn** occurs only on a confirmed redemption execution (pilot: team wallets, issuer = us, redemption at published NAV; `queue-claim` records the fill). Burn amount × published NAV is paid out of the sleeve.
-- Net effect: NPCS is never a promise — every base unit maps 1:1 to a USDC that entered the sleeve, and redemptions exit at the published mark.
+- Net effect (target): NPCS is never a promise — every base unit maps 1:1 to a USDC that entered the sleeve, and redemptions exit at the published mark. **As built:** supply is 0 and I1 is enforced by process only; no instruction ties a mint to a deposit (#92).
 
 ### I2 — NAV invariant (the weekly mark)
 
@@ -96,7 +98,7 @@ nav_published_pico = nav_gross_pico − fee_pico
 
 ### I3 — Eligibility invariant (what holding NPCS means)
 
-No NPCS base unit can sit in a token account whose owner has not passed `credit-gate`:
+Target — no NPCS base unit can sit in a token account whose owner has not passed `credit-gate`. **As built, I3 is not enforced:** there is no `validate`, and thaws are manual by the bootstrap key (#92):
 
 1. thaw requires a valid SAS attestation set {accredited, jurisdiction, investor_id, expiry} per the `PILOT_506C_TEST` policy class;
 2. every acquisition appends a **lot** with `restriction_expiry = acquired_ts + 7 days` (compressed Rule-144 analog; real constants are per-market config, CG-1);
@@ -105,7 +107,7 @@ No NPCS base unit can sit in a token account whose owner has not passed `credit-
 
 ## 4 · Movement topology — every path a NPCS unit can take on Solana
 
-All movement is **mediated**: the frozen-by-default base layer means no wallet can initiate custody movement except through an ACL-thawed account, and thaw is gate-gated. Eight paths exist; anything else is impossible at the base layer.
+Target: all movement is **mediated**: the frozen-by-default base layer means no wallet can initiate custody movement except through an ACL-thawed account, and thaw is gate-gated. Eight paths exist; anything else is impossible at the base layer. **As built:** accounts are frozen by default, but thaw is a manual action of the bootstrap key, not gate-gated (#92).
 
 ```mermaid
 flowchart TB
@@ -126,7 +128,7 @@ flowchart TB
     end
 
     subgraph P3["PATH 3 · AUCTION ESCROW"]
-        THAWED -->|"commit: transferChecked<br/>+ lot escrow"| ESCROW["session escrow PDA<br/>(thawed, engine-owned)"]
+        THAWED -->|"commit: open_asset_vault → gate thaw<br/>→ deposit_ask (transferChecked)"| ESCROW["ask asset vault ['asset_vault', escrow]<br/>(owned by the payment-rails Escrow PDA)"]
         ESCROW -->|"settle: DvP to buyer<br/>+ lot append + re-thaw check"| BUYER["buyer ATA"]
         ESCROW -->|"refund_all (permissionless)"| SELLER["seller ATA"]
     end
@@ -161,7 +163,7 @@ flowchart TB
 |---|---|---|---|---|
 | **1** | Primary mint | `mint_to` to a *thawed* ATA; mint authority = Squads vault transaction; event `{deposit_ref, qty, sleeve_balance_before/after}` | Holder must already be gate-thawed | None (mint is unconditional once proposed) |
 | **2** | P2P transfer | Plain `transfer_checked` between thawed ATAs; **zero extra CU** (the sRFC37 payoff) | Indirect: seller lots must be seasoned (lot ledger checked at acquisition, not at transfer — pilot policy records the check at thaw + acquisition) | None |
-| **3** | Auction escrow | Seller `transfer_checked` → session escrow PDA at commit (pre-funded, F2); settle does per-fill DvP: escrow → buyer ATA, cash → seller; buyer's thaw re-validated at settle (AE-P8) | Commit pre-check + per-fill re-check | None — every terminal path refunds (AC-11) |
+| **3** | Auction escrow | Seller `transfer_checked` → a per-escrow asset vault `["asset_vault", escrow]` owned by the **`payment-rails`** `Escrow` PDA (`["escrow", session, owner]`) at commit (pre-funded, F2); settle does per-fill DvP: vault → buyer, cash → seller. **As built, the AE-P8 gate re-check at settle does not exist yet (#53, #88)** | Commit pre-check (gate thaw); per-fill re-check *planned* | Refunds are always callable and return what the vault holds (a drained vault's gap is booked, #62/#89). Not unconditional: a **frozen** vault blocks the refund until thawed, and a frozen destination needs another thawed account of the owner (#90) |
 | **4** | Facility pledge | `transfer_checked` → collateral PDA; maintenance via `MARK_PROTECTIVE`; ladder per `06` §5 | Pledge = acquisition for facility PDA (lot append, affiliate=false) | None — workout assignment is a state, not a stuck transfer |
 | **5** | Claim wrap | **NPCS does not move.** The claim is a separate non-transferable position minted against a TA-attested redemption request; the NPCS leaves at the actual gated window | Claim transferability is a flag set by issuer consent (QC-P2) | None — claim is a state machine, not custody |
 | **6** | Tranche deposit | `transfer_checked` → pool collateral PDA; tranche mints are separate Token-2022 assets with their own gate class | Subordination invariant pre-check (TE-P5) | None — wind-down via auction session |
@@ -180,7 +182,7 @@ flowchart TB
 | `MarketConfig` PDA | `credit-gate` — seeds `[b"config", mint]` | ~200B fixed | gate-config authority | CG-P2; snapshot-read by sessions |
 | `HolderLots` PDA | `credit-gate` — seeds `[b"lots", mint, owner]` | **≈ 3.5KB ≈ 0.0186 SOL**: 128 lots × 27B (`{qty u64, acquired_ts i64, source u8, affiliate_flag u8, restriction_expiry i64, exemption_path u8}` per CG-P3) + ~75B header (D4 cap). The earlier 1,088B figure allowed only 8.5B per lot, which cannot hold the CG-P3 record. The bounded-ring argument (D4/D15) still holds, at ~3.2× the rent | gate (append/split/merge) | Compaction keeps ≤ 128; ring-buffer overwrite if full (D15) |
 | Governor ledger PDA | `credit-gate` — seeds `[b"gov", mint]` | ~96B — 8 investor_id slots × 12B | gate (project_and_check) | Cap 8 ⇒ bounded forever |
-| Session escrow PDA | `auction-engine` — seeds `[b"escrow", session, bidder]` | ~120B, **rent-exempt, closed at settle/refund** | engine | Closed ⇒ rent returned; no dust |
+| Escrow PDA + vaults | `payment-rails` — `Escrow` seeds `[b"escrow", session, owner]`; USDC vault `[b"vault", escrow]`, asset vault `[b"asset_vault", escrow]` | ~120B each, **rent-exempt, closed at refund** | rails | Closed ⇒ rent returned; no dust |
 | Collateral PDA | `liquidity-facility` — seeds `[b"collat", advance_id]` | ~140B | facility | Closed at ladder completion |
 | Pool collateral PDA | `tranche-engine` — seeds `[b"pool", pool_id]` | ~160B | tranche-engine | Lives for pool lifetime |
 | Claim position PDA | `queue-claim` — seeds `[b"claim", asset, holder, request_ts]` | ~130B | queue-claim | Retired ⇒ closed |
@@ -212,7 +214,7 @@ Pilot scale: **$3,000 USDC sleeve**. All functions integer, u128 intermediates, 
 |---|---|---|
 | **Double-pledge** | Holder pledges same lot to facility AND commits it to an auction | Lot ledger is the single source of truth: `append_lot`/escrow marks the lot `encumbered`; both paths CPI-check lot state at commit (CG-P3 + LF-P1 + AE-P3). Second mover reverts. |
 | **Free-transfer gap** | Two thawed wallets move tokens *outside* the lot ledger via plain `transfer_checked`, defeating seasoning | Accepted pilot residue, by design: sRFC37 has no transfer-time hook (that's its point, D1). Seasoning is enforced **where units are acquired in the protocol** (mint, auction settle, pledge) and re-checked at every protocol exit (auction commit, pledge, burn). Raw P2P between thawed team wallets can bypass — contained pre-Q3 because all thawed wallets are team wallets, and disclosed as the known v1 boundary (production issuers add transfer-class config or keep books via TA). |
-| **Thaw-expiry race** | Attestation expires between commit and settlement; settlement would complete to an ineligible holder | AE-P8 re-runs the full gate check per fill; fail ⇒ fill skipped, escrow refunded to the failed side (state `PartialSettled`), print flagged (AC-3/AC-5 paths). |
+| **Thaw-expiry race** | Attestation expires between commit and settlement; settlement would complete to an ineligible holder | AE-P8 re-runs the full gate check per fill; fail ⇒ fill skipped, the failed side's escrow is refunded once the session is finished or failed (`SessionStatus` is `Open | Settled | Failed`; there is no `PartialSettled`), print flagged (AC-3/AC-5 paths). **As built, this re-check is not implemented** (#53). |
 | **Governor run-around** | Use many wallets (same investor_id) to fake holder-count headroom | Governor maps **wallet → investor_id from attestation** (CG-P4), not wallet count; one id = one slot regardless of wallets. |
 | **Lot-ring exhaustion** | Spam tiny acquisitions to overflow the 128-lot ring | Ring compaction merges seasoned lots into FREE bucket (permissionless crank, fee-paid); worst case ring-overwrite refuses *newest* unmerged lots rather than corrupting old ones (D15). |
 | **Delegate abuse** | Permanent delegate used outside break-glass | Multisig-only + reason-hash event mandatory + authority-map disclosure; pilot holders are team wallets; production posture documented for issuers (§2.1 point 3). |

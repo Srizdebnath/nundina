@@ -5,11 +5,35 @@ Parameters: `params.toml`. Status: **mint live on devnet, verify ALL CHECKS PASS
 
 ## Keys (gitignored — `token/keys/`)
 
+**Custody status (2026-09, #57, #99): ⚠️ single key, no recorded backup.**
+`freeze-authority.json` (`2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh`)
+is the highest-privilege key in the repo: confirmed on-chain
+(`spl-token display <mint> -u devnet`) as mint, freeze, permanent-delegate
+and metadata-update authority. No offline backup of it is recorded, and it
+is not under Squads. The backup policy below is the plan, not a record that
+it was executed. Loss: no minting, no thaw of new holders, no seizure path,
+no metadata fix. Theft: unlimited mint, arbitrary freeze and seizure.
+Recovery: none on this mint, only a fresh mint with a new key ceremony
+(doc 09 §10). Custodian: recorded in the team's private ops notes, never in
+this repo (same rule as [`payment-rails/README.md` § Keys](../payment-rails/README.md#keys)).
+
 | File | Role | Notes |
 |---|---|---|
 | `mint.json` | mint account keypair | Only needed at init; may be discarded after (authorities are what matter). **Back up before `cargo clean`** if you ever want to re-init at this address. |
 | `freeze-authority.json` | admin authority | Holds mint authority + freeze authority + permanent delegate + metadata update authority until Squads 2-of-2 takes over at P1 (08 §8). **Back this up — it is irreplaceable.** |
 | `deployment-<cluster>.json` | audit record | Mint address, extensions, sizes, timestamp. |
+
+### Backup and verification
+
+- Keep **at least two offline copies** of `freeze-authority.json` in different
+  places (for example an encrypted USB drive and a password manager's secure
+  file store).
+- After every backup or restore, check the copy:
+  `solana-keygen pubkey <copy>` must print
+  `2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh`.
+- Record **who** holds each copy (not where) in the team's private ops notes.
+- Move all four authorities to the Squads 2-of-2 at P1 (08 §8); until then
+  this section's status line stays ⚠️.
 
 ## Operating procedures
 

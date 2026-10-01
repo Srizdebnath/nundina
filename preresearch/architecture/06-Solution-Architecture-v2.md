@@ -41,7 +41,7 @@ flowchart TB
         O3["Issuer-signed NAV attestation<br/>fallback path"]
     end
 
-    subgraph OURS["WHAT WE BUILD — six programs, one crate"]
+    subgraph OURS["WHAT WE BUILD — seven programs, one crate"]
         P1["auction-engine<br/>sealed-bid uniform-price<br/>periodic batch auction"]
         P2["mark-engine<br/>NAV to usable mark<br/>discount curve · haircuts · states"]
         P3["queue-claim<br/>tokenized redemption-queue position<br/>THE NOVEL PRIMITIVE"]
@@ -49,6 +49,7 @@ flowchart TB
         P5["tranche-engine<br/>credit-loss waterfall<br/>three-book accounting"]
         P6["credit-gate<br/>Gate Program for Token ACL<br/>lot seasoning · holder cap · jurisdiction"]
         P7["credit-math<br/>shared crate · round against initiator"]
+        P8["payment-rails<br/>USDC cash layer · escrow · DvP cash leg<br/>refunds · payouts · holds all client cash"]
     end
 
     subgraph L3["DEMAND / DISTRIBUTION — INTEGRATE"]
@@ -74,6 +75,11 @@ flowchart TB
     P2 --> P5
     P1 --> P3
     P3 --> P4
+    P1 -->|"escrow · DvP cash leg"| P8
+    P3 -->|"proceeds sweep"| P8
+    P4 -->|"advances · repayments"| P8
+    P5 -->|"coupon waterfall"| P8
+    P8 --> P7
     OURS --> L3
     OURS --> L4
 ```
@@ -91,6 +97,7 @@ flowchart LR
     LF["liquidity-facility"]
     TR["tranche-engine"]
     MATH["credit-math crate"]
+    RAILS["payment-rails<br/>cash layer (built)"]
 
     ACL -->|"CPI on thaw"| GATE
     GATE -->|"reads"| SAS
@@ -106,6 +113,11 @@ flowchart LR
     MATH --- TR
     MATH --- LF
     MATH --- QC
+    AUC -->|"CPI: escrow · settle"| RAILS
+    QC -->|"CPI: sweep"| RAILS
+    LF -->|"CPI: advance · repay"| RAILS
+    TR -->|"CPI: coupon"| RAILS
+    RAILS -->|"uses"| MATH
 ```
 
 **Deliberate omissions.** No AMM (Orca has it, and it's the wrong primitive for the raw asset — A1). No credential registry (SAS + Token ACL — D1, K6). No NAV oracle (NAVLink / RedStone — B4). No issuance platform (Securitize). No protocol token (K5). No custody (C10).

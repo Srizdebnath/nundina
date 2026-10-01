@@ -11,7 +11,7 @@
 
 - **Problem:** tokenized private-credit funds (ACRED, STAC, ONyc, SCOPE…) are locked, gated at about 5% of NAV per quarter, and the manager marks them only once a quarter. In 2026 the gates became the story: Apollo got redemption requests of 17% of NAV against a 5% cap, and $5B+ is trapped.
 - **Gap:** Securitize+Jump+Jupiter, Orca permissioned pools, Exponent tranching and Uniswap permissioned pools all shipped *venues* in May–July 2026. **Nobody built the mechanism** to price a stale-NAV gated asset, tokenize the redemption queue, or liquidate permissioned collateral.
-- **Six Anchor programs + one shared crate:**
+- **Seven Anchor programs + one shared crate** (six engines plus the `payment-rails` cash layer, SRS 08 §4.7):
 
 | Program | What it does |
 |---|---|
@@ -21,6 +21,7 @@
 | `queue-claim` | **The novel primitive.** A tokenized, pro-rated redemption request that can be sold in an auction or pledged for a loan |
 | `liquidity-facility` | NAV-collateralized advance with a liquidation ladder: issuer ROFR → backstop bidder → forced-sale auction → workout |
 | `tranche-engine` | Senior/junior credit-loss waterfall with three-book accounting |
+| `payment-rails` | **Built, live on devnet.** The USDC cash layer under the engines: per-escrow vaults and bonds, permissionless never-pausable refunds, atomic one-fill DvP cash leg, issuer ROFR, facility cash, coupon waterfall. It **holds all client cash**, so it is audit-scope-critical alongside `credit-gate` |
 | `credit-math` | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
 
 - **v1 go-to-market:** an issuer-sponsored liquidity window, meaning the issuer runs the auction on its own securities as a buyback tool.
@@ -63,7 +64,7 @@ Submit to each of these on Superteam Earn **in addition to** the Colosseum porta
 | Sidetrack | Prize | Fit | What it needs from us |
 |---|---|---|---|
 | **Superteam India** | $5K USDG (🥇 2.5K / 🥈 1.5K / 🥉 1K) + Superteam India Member role | 🟢 **Must enter** | Colosseum country = India. Judged on ecosystem impact, PMF (clear problem, defined user, early traction) and growth potential. Stack it on top of anything we win globally |
-| **CertiK Security Audit Credits** | $100K in audit credits (10 × $10K) | 🟢 **Strong fit** | They want DeFi/RWA projects handling funds and planning mainnet + a raise. Our SRS already requires a full external audit before mainnet (§11), so this could pay for it. Submission: Colosseum link, repo, **programs to audit + approx LOC**, mainnet date, **6–12 month roadmap**, team (full-time?), **fundraising plan**, contact for a scoping call |
+| **CertiK Security Audit Credits** | $100K in audit credits (10 × $10K) | 🟢 **Strong fit** | They want DeFi/RWA projects handling funds and planning mainnet + a raise. Our SRS already requires a full external audit before mainnet (§11), so this could pay for it. Submission: Colosseum link, repo, **programs to audit + approx LOC** (as built, 2026-10: `payment-rails` ~4.2k lines of Rust, the program holding client cash, plus its ~1.2k-line TS crank; `credit-gate` ~0.7k; `credit-math` ~1.3k), mainnet date, **6–12 month roadmap**, team (full-time?), **fundraising plan**, contact for a scoping call |
 | **Adevar Labs Pre-Audit** | $20K (5 × $4K pre-audits) | 🟢 **Strong fit** | Solana/Rust submissions only. Judged on codebase complexity, architectural clarity, repo completeness and launch readiness. Requires a short form, a **tweet**, and following @AdevarLabs |
 | **RPC Fast Infrastructure** | ~$10.5K in RPC credits (~$500 per team × 21) | 🟡 Easy add-on | Claim the free Focus plan (mainnet only, Frankfurt), use it, and **post 2–3 times a month about RPC Fast for 2 months**. Low value but low effort |
 | **Solami — live Solana data** | $3K USDG (1.2K / 1K / 500 / 300) | 🟡 Conditional | Solami has to be the actual data path for the indexer (Yellowstone gRPC / webhooks instead of Helius). The app must **run live on mainnet**, with a public repo and a 2–3 min live-mainnet demo. Only worth it if we deploy a mainnet slice |
@@ -100,6 +101,7 @@ The SRS (`08`) is a ~24-week plan that includes a 10-week audit. For the hackath
 
 | Priority | Build | Proves (SRS AC) |
 |---|---|---|
+| **✅ built** | `payment-rails`: escrow + bonds, permissionless refunds, atomic DvP cash leg, ROFR, facility cash, coupon waterfall, crank + reconciliation + evidence export — live on devnet (R5) | AC-11 (refund liveness), cash legs of AC-3/AC-8 |
 | **P0 — must** | NPCS Token-2022 mint (DefaultAccountState=frozen) + Token ACL + `credit-gate` + SAS attestation. An eligible wallet thaws; an ineligible one gets a typed rejection | AC-1: compliance at activation |
 | **P0 — must** | `auction-engine` + `credit-math`: commit → reveal → uniform-price clear → pro-rata → settle → print, with 3+ bidders | AC-3 / AC-4: price discovery at a discount to NAV |
 | **P0 — must** | `queue-claim`: mint a claim from a redemption request and **sell it in an auction session** | AC-8 (sell path): **the headline demo** |
