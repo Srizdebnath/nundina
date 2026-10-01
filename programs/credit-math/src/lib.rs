@@ -129,6 +129,11 @@ mod tests {
     }
 
     #[test]
+    fn mul_div_rejects_zero_divisor() {
+        assert_eq!(mul_div(1, 1, 0).unwrap_err(), MathError::DivisionByZero);
+    }
+
+    #[test]
     fn mul_div_large_no_overflow() {
         // (2^100) * 3 / 2 == 3 * 2^99 — fits u128, would overflow naive mul.
         let a: u128 = 1 << 100;
