@@ -1,9 +1,14 @@
 //! Liquidity-facility cash leg (R3; LF-P1/P2/P6, QC-P4).
 //!
-//! The rails hold the facility's USDC and move it; underwriting (advance
-//! rate vs `MARK_PROTECTIVE`, the 50% hard ceiling, health checks, the
+//! The rails hold the facility's USDC and move it; underwriting (the mark
+//! itself vs `MARK_PROTECTIVE`, the maintenance ratio, health checks, the
 //! liquidation ladder) belongs to the liquidity-facility engine, which
-//! signs here as the curator. What the rails guarantee:
+//! signs here as the curator and is not built. What the rails guarantee:
+//! - every advance is bounded by the H1 hard ceiling (#94): the curator
+//!   states the collateral mark and rate, the rate may not exceed
+//!   `credit_math::MAX_ADVANCE_RATE_BPS` (50%), and the amount may not
+//!   exceed mark × rate. The rails cannot verify the mark (no mark engine);
+//!   they record it on the `Advance` so the bound is auditable;
 //! - advances go only to the borrower's registered payout destination;
 //! - repayment is interest-first, accrued with `credit-math`, never above
 //!   what is owed;
@@ -116,13 +121,21 @@ pub fn process_fund_facility(ctx: Context<FundFacility>, amount: u64) -> Result<
 /// LF-P1: pay an advance of `amount` to `borrower`'s **registered** payout
 /// destination. One live advance per (facility, borrower). Blocked while
 /// paused or depegged (no new lending in a broken settlement asset).
+/// `amount ≤ collateral_value × advance_rate_bps / 10⁴`, with the rate at
+/// most the H1 ceiling (#94).
 pub fn process_advance(
     ctx: Context<AdvanceFunds>,
     amount: u64,
     collateral_ref_hash: [u8; 32],
+    collateral_value: u64,
+    advance_rate_bps: u64,
 ) -> Result<()> {
     ctx.accounts.config.ensure_accepting()?;
     require!(amount > 0, RailsError::ZeroAmount);
+    require!(
+        amount <= Advance::max_advance(collateral_value, advance_rate_bps)?,
+        RailsError::AdvanceExceedsRate
+    );
     let now = Clock::get()?.unix_timestamp;
     let borrower = ctx.accounts.borrower.key();
     let dest = load_destination(&ctx.accounts.destination, Some(&borrower))?;
@@ -155,6 +168,8 @@ pub fn process_advance(
         facility: facility_key,
         borrower,
         collateral_ref_hash,
+        collateral_value,
+        advance_rate_bps,
         principal: amount,
         interest: 0,
         last_accrual: now,

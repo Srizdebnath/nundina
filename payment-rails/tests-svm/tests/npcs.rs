@@ -397,7 +397,149 @@ fn delegate_seizure_cannot_strand_the_ask_bond() {
             (sess.open_escrows, sess.total_asset, sess.total_bonds),
             (0, 0, 0)
         );
+        // #89: the loss stays on the books after the escrow is gone.
+        assert_eq!(sess.total_asset_shortfall, seized);
+        assert_eq!(sess.total_cash_shortfall, 0);
     }
+}
+
+impl Npcs {
+    /// The gate re-freezes a holder (attestation lapse, doc 09 §7).
+    fn freeze(&mut self, account: &Pubkey) {
+        let ix = spl_token_2022::instruction::freeze_account(
+            &T22,
+            account,
+            &self.env.asset_mint,
+            &self.gate.pubkey(),
+            &[],
+        )
+        .unwrap();
+        let g = self.gate.insecure_clone();
+        self.env.send(&[ix], &[&g]).expect("gate freeze");
+    }
+
+    /// Seller with an ask of `qty` escrowed in a session that then failed.
+    fn failed_ask(&mut self, session_id: u64, qty: u64) -> (Pubkey, Party) {
+        let s = self.env.open_session(session_id);
+        let seller = self.party(BOND, qty);
+        self.env.open_asset_vault(&s, &seller).unwrap();
+        self.thaw(&asset_vault_pda(&escrow_pda(&s, &seller.key.pubkey())));
+        self.env.deposit_ask_only(&s, &seller, qty).unwrap();
+        self.env
+            .fail_session_as(&self.env.authority.insecure_clone(), &s)
+            .unwrap();
+        (s, seller)
+    }
+}
+
+/// #90: the seller's only NPCS account was re-frozen (attestation lapse).
+/// `refund_ask` fails with a typed reason before anything moves — not a raw
+/// `AccountFrozen` from inside the token program — and the escrow stays
+/// intact. The same refund lands when pointed at another thawed account of
+/// the same owner, which the rails already accept as a destination.
+#[test]
+fn frozen_asset_destination_is_typed_and_an_alternate_account_refunds() {
+    for tp in Tp::ALL {
+        let mut n = Npcs::new(tp);
+        let (s, seller) = n.failed_ask(1, UNIT);
+        let se = escrow_pda(&s, &seller.key.pubkey());
+        n.freeze(&seller.asset);
+        let usdc_before = n.env.bal(&seller.usdc);
+
+        let crank = n.env.funded();
+        assert_eq!(
+            n.env.refund_ask(&crank, &s, &seller),
+            Err(Fail::rails(
+                payment_rails::RailsError::RefundAssetDestinationFrozen
+            ))
+        );
+        assert!(n.env.exists(&se), "escrow intact: nothing moved");
+        assert_eq!(n.env.bal(&seller.usdc), usdc_before);
+
+        let alt = n.holder_account(&seller.key.pubkey(), 0);
+        let via_alt = Party {
+            key: seller.key.insecure_clone(),
+            usdc: seller.usdc,
+            asset: alt,
+        };
+        n.env
+            .refund_ask(&crank, &s, &via_alt)
+            .expect("a thawed account of the same owner receives the refund");
+        assert_eq!(n.env.bal(&alt), UNIT);
+        assert_eq!(n.env.bal(&seller.usdc), usdc_before + BOND);
+        assert!(!n.env.exists(&se));
+
+        // A thawed account of someone else is still refused (no redirect).
+        let (s2, seller2) = n.failed_ask(2, UNIT);
+        let stranger = n.holder_account(&Pubkey::new_unique(), 0);
+        let redirect = Party {
+            key: seller2.key.insecure_clone(),
+            usdc: seller2.usdc,
+            asset: stranger,
+        };
+        assert_eq!(
+            n.env.refund_ask(&crank, &s2, &redirect),
+            Err(Fail::rails(payment_rails::RailsError::NotEscrowOwner))
+        );
+    }
+}
+
+/// #90: a vault drained to zero moves no asset, so a frozen destination
+/// must not block the bond.
+#[test]
+fn fully_drained_ask_refunds_the_bond_into_a_frozen_seller() {
+    let mut n = Npcs::new(Tp::Spl);
+    let (s, seller) = n.failed_ask(1, UNIT);
+    let vault = asset_vault_pda(&escrow_pda(&s, &seller.key.pubkey()));
+    let g = n.gate.insecure_clone();
+    let sink = n.holder_account(&g.pubkey(), 0);
+    n.env.raw_asset_transfer(&vault, &sink, &g, UNIT).unwrap();
+    n.freeze(&seller.asset);
+    let usdc_before = n.env.bal(&seller.usdc);
+
+    let crank = n.env.funded();
+    n.env
+        .refund_ask(&crank, &s, &seller)
+        .expect("nothing to deliver, so the frozen destination is irrelevant");
+    assert_eq!(n.env.bal(&seller.usdc), usdc_before + BOND);
+    assert_eq!(n.env.session(&s).total_asset_shortfall, UNIT);
+}
+
+/// #90: a seizure between deposit_ask and settle is caught by the rails'
+/// own check on the live vault balance, with a typed error the crank can
+/// attribute, instead of failing inside the token program.
+#[test]
+fn settle_against_a_drained_ask_vault_is_typed() {
+    let mut n = Npcs::new(Tp::Spl);
+    let s = n.env.open_session(1);
+    let seller = n.party(BOND, 2 * UNIT);
+    let buyer = n.party(300_000_000 + BOND, 0);
+    n.env.open_asset_vault(&s, &seller).unwrap();
+    let vault = asset_vault_pda(&escrow_pda(&s, &seller.key.pubkey()));
+    n.thaw(&vault);
+    n.env.deposit_ask_only(&s, &seller, 2 * UNIT).unwrap();
+    n.env
+        .deposit(&s, &buyer.key, &buyer.usdc, 300_000_000)
+        .unwrap();
+    let g = n.gate.insecure_clone();
+    let sink = n.holder_account(&g.pubkey(), 0);
+    n.env
+        .raw_asset_transfer(&vault, &sink, &g, UNIT + 1)
+        .unwrap();
+
+    n.env.set_time(COMMIT_END);
+    n.env.mark_revealed(&s, &seller.key.pubkey()).unwrap();
+    n.env.mark_revealed(&s, &buyer.key.pubkey()).unwrap();
+    n.env.set_time(REVEAL_END);
+    let f = n.env.fill(&s, &buyer, &seller);
+    assert_eq!(
+        n.env.settle(&f, 0, UNIT, PRICE),
+        Err(Fail::rails(payment_rails::RailsError::EscrowDrained))
+    );
+    n.env
+        .settle(&f, 0, UNIT - 1, PRICE)
+        .expect("what is still held can settle");
+    assert_eq!(n.env.bal(&buyer.asset), UNIT - 1);
 }
 
 /// The happy path is unchanged: no seizure ⇒ everything returned, no
@@ -416,4 +558,9 @@ fn refund_ask_without_seizure_returns_everything() {
     let crank = n.env.funded();
     n.env.refund_ask(&crank, &s, &seller).unwrap();
     assert_eq!(n.env.bal(&seller.asset), UNIT);
+    let sess = n.env.session(&s);
+    assert_eq!(
+        (sess.total_asset_shortfall, sess.total_cash_shortfall),
+        (0, 0)
+    );
 }

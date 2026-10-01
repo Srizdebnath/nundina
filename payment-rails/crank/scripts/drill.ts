@@ -242,7 +242,7 @@ async function main(): Promise<void> {
     ix("advance_funds", {
       config, facility, advance: await advancePda(facility, X.key.address), vault: facilityVault, borrower: X.key.address,
       destination: dest, destination_token: X.usdc, usdc_mint: usdc, curator: authority, token_program: TOKEN_PROGRAM_ADDRESS,
-    }, { amount: 1_000n * USDC, collateral_ref_hash: new Uint8Array(32).fill(0xc1) }),
+    }, { amount: 1_000n * USDC, collateral_ref_hash: new Uint8Array(32).fill(0xc1), collateral_value: 2_000n * USDC, advance_rate_bps: 5_000n }),
   ]);
   const fr = await reconcileFacility(ops.rpc, facility);
   console.log(formatReport(fr));
@@ -257,6 +257,12 @@ async function main(): Promise<void> {
   check(
     manifest.byEvent.TransferInstruction === manifest.byEvent.FillSettled,
     `evidence: one TransferInstruction per fill (got ${manifest.byEvent.TransferInstruction})`,
+  );
+  // #88: no lot ledger or gate re-check exists yet, so no fill is provable.
+  // The manifest must say that, not imply compliance by the event count.
+  check(
+    manifest.transferProof.fills === 2 && manifest.transferProof.proven === 0 && manifest.transferProof.unproven === 2,
+    `evidence: 2 fills, 0 provably lawful (got ${JSON.stringify(manifest.transferProof)})`,
   );
   const lines = body.toString().trim().split("\n").map((l) => JSON.parse(l));
   const refunded = lines.filter((l) => l.event === "EscrowEvent" && l.data.action === "Refunded").length;
