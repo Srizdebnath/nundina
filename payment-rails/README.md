@@ -151,6 +151,7 @@ payment-rails/
 │   ├── events.rs            event families
 │   └── instructions/        initialize_config · admin · session · escrow · settle · payout · facility · coupon · token
 ├── tests-svm/               LiteSVM integration tests (own workspace + lockfile)
+├── fuzz/                    fuzz targets: settle · clearing · pro-rata · waterfall · refund/bond · facility (own workspace + lockfile, #125)
 └── crank/                   R4: crank, ledger, evidence export, kill-the-crank drill (TypeScript)
 ```
 
@@ -188,6 +189,34 @@ anchor build        # → target/deploy/payment_rails.so + target/idl/payment_ra
 cargo test --manifest-path tests-svm/Cargo.toml     # LiteSVM, needs the .so above
 (cd crank && npm install && npm run typecheck && npm test && npm run drill)   # R4, needs the .so
 ```
+
+### Fuzzing (SRS 08 §11, #125)
+
+`fuzz/` is a cargo-fuzz crate, again its own workspace and lockfile. Each
+invariant is a plain `check_*` function in `fuzz/src/lib.rs` that runs the
+program's own code (`FillSplit::compute`, `VaultDrain::compute`,
+`CashSession::refund_route`, `Advance`, `CouponSplit`) and `credit-math`
+(`allocate_pro_rata`, `distribute_cash`, `apply_loss`):
+
+| Target | Laws |
+|---|---|
+| `settle_fill` | fill legs sum to gross; gross is the exact ceiling; fee and reserve are exact floors; Ok exactly when the inputs are valid |
+| `clearing` | price ≥ reserve and is a revealed limit; max volume, then min imbalance, nearest reference mark, lowest price (brute-force oracle) |
+| `pro_rata` | sums to total; nobody gets more than committed; within one unit of exact; residue by (qty desc, bidder_id asc); deterministic |
+| `waterfall` | exact sum; strict priority; loss hits junior → reserve → senior, exactly |
+| `refund_bond` | the vault drains exactly, forfeit first; a revealed bond is never forfeit; refunds open by the hard deadline and never re-lock |
+| `facility` | H1 50% ceiling; accrual never runs backwards; repayment is interest first and never above what is owed |
+
+```bash
+cd fuzz
+cargo test --release                                   # stable: 20k seeded cases per target (CI)
+cargo +nightly fuzz run settle_fill -- -max_total_time=60   # libFuzzer (CI job `fuzz`)
+```
+
+The smoke test fails if fewer than a third of a target's cases reach the
+Ok path, so the harness can't silently fuzz only rejections. Each law was
+checked against a planted bug (e.g. forfeiting a revealed bond, residue to
+the smallest bid, principal before interest) before it was committed.
 
 `tests-svm/` is a **separate workspace** with its own `Cargo.lock`. litesvm pulls
 a large solana runtime tree, and keeping it out of the program's lockfile
