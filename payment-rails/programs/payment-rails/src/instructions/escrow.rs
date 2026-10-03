@@ -15,7 +15,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use crate::error::RailsError;
 use crate::events::{EscrowAction, EscrowEvent};
 use crate::instructions::token;
-use crate::state::{BondRoute, CashSession, Escrow, RailsConfig, SessionStatus, Side};
+use crate::state::{BondRoute, CashSession, Escrow, RailsConfig, SessionStatus, Side, VaultDrain};
 
 /// Commit-window checks shared by both deposit sides.
 fn ensure_commit_open(config: &RailsConfig, session: &CashSession) -> Result<()> {
@@ -314,10 +314,11 @@ fn drain_usdc_vault<'info>(
     // Anyone can send tokens to the vault; a donation must not be able to
     // block the close (griefing), so everything above the reserve's share
     // goes to the owner.
-    let held = vault.amount;
-    let shortfall = recorded.saturating_sub(held);
-    let forfeit = forfeit.min(held);
-    let to_owner = held - forfeit;
+    let VaultDrain {
+        to_reserve: forfeit,
+        to_owner,
+        shortfall,
+    } = VaultDrain::compute(vault.amount, recorded, forfeit);
     require!(
         to_owner == 0 || !owner_usdc.is_frozen(),
         RailsError::RefundUsdcDestinationFrozen

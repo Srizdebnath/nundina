@@ -10,7 +10,7 @@ members = [
     "programs/payment-rails",
 ]
 # Own workspace + lockfile so litesvm never re-resolves SBF build deps.
-exclude = ["tests-svm"]
+exclude = ["tests-svm", "fuzz"]
 
 [workspace.package]
 edition = "2021"

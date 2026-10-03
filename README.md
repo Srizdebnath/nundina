@@ -98,6 +98,7 @@ nundina/
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical
 │   ├── tests-svm/            ← LiteSVM integration tests (own workspace + lockfile)
+│   ├── fuzz/                 ← fuzz targets for the cash math (cargo-fuzz; stable smoke in CI)
 │   ├── crank/                ← settlement/refund crank, reconciliation ledger, evidence export (TS)
 │   └── DEPLOYMENTS.md        ← payment-rails deployment registry
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
