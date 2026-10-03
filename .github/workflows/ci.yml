@@ -163,6 +163,7 @@ jobs:
           workspaces: |
             payment-rails -> target
             payment-rails/tests-svm -> target
+            . -> target
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (deny warnings)
@@ -190,8 +191,14 @@ jobs:
         run: bash .github/scripts/install-solana-anchor.sh
       - name: anchor build
         run: anchor build
+      # Every fill CPIs credit-gate (#133): the LiteSVM suite and the drill
+      # load the root workspace's credit_gate.so next to payment_rails.so.
+      - name: anchor build (root workspace — credit-gate)
+        working-directory: .
+        run: anchor build
       # cargo-build-sbf has no --locked/--frozen (#98); see credit-gate-svm.
       - name: Lockfiles unchanged by anchor build
+        working-directory: .
         run: |
           git diff --exit-code -- '**/Cargo.lock' \
             || { echo "::error::anchor build changed a Cargo.lock — the SBF build re-resolved dependencies"; exit 1; }

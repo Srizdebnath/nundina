@@ -19,7 +19,12 @@
  *  6. Reconcile session + facility; export evidence (SHA-256 manifest).
  *
  * Needs: deploy.sh + setup.ts done on the cluster; the authority holding
- * ≥ 9 USDC of the configured settlement mint and ~0.3 SOL.
+ * ≥ 9 USDC of the configured settlement mint and ~0.3 SOL. Since #133
+ * every fill CPIs credit-gate: the demo asset needs a gate market, the
+ * buyers a `validate`, and H a seasoned lot (ops/gate wire.ts, scripts/
+ * drill-gate.ts shows the sequence), and the cluster's credit-gate must
+ * carry `settle_check` (devnet: blocked on the Bprm… redeploy, #146).
+ * Until then settlePlan skips each fill ("buyer not admitted").
  *   RPC_URL=https://api.devnet.solana.com npx tsx scripts/devnet/demo.ts
  */
 import { join } from "node:path";

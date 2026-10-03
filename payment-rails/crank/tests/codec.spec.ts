@@ -8,9 +8,11 @@ const B = address("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
 
 test("settle_fill data = discriminator + u32 + u64 + u64 + [u8;32]", async () => {
   const op = await generateKeyPairSigner();
-  const accounts = Object.fromEntries(
-    idl.instructions.find((i) => i.name === "settle_fill")!.accounts.map((a) => [a.name, a.signer ? op : A]),
-  );
+  type Def = { name: string; signer?: boolean; accounts?: Def[] };
+  // Composite groups (the AE-P8 `gate` accounts, #133) nest.
+  const fill = (defs: Def[]): Record<string, never> =>
+    Object.fromEntries(defs.map((a) => [a.name, a.accounts ? fill(a.accounts) : a.signer ? op : A])) as never;
+  const accounts = fill(idl.instructions.find((i) => i.name === "settle_fill")!.accounts);
   const i = ix("settle_fill", accounts, { fill_index: 7, qty: 1_500_000n, price: 98_123_456n, disclosure_hash: new Uint8Array(32).fill(9) });
   const d = i.data!;
   assert.equal(d.length, 8 + 4 + 8 + 8 + 32);
@@ -24,6 +26,13 @@ test("settle_fill data = discriminator + u32 + u64 + u64 + [u8;32]", async () =>
   assert.equal(role("operator"), AccountRole.WRITABLE_SIGNER);
   assert.equal(role("config"), AccountRole.READONLY);
   assert.equal(role("buyer_vault"), AccountRole.WRITABLE);
+  // The gate group is flattened after the fill's own accounts, in IDL order:
+  // 17 + 11, and the two lot ledgers are writable.
+  assert.equal(i.accounts!.length, 28);
+  assert.deepEqual(
+    i.accounts!.slice(17).map((m) => m.role),
+    [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0].map((w) => (w ? AccountRole.WRITABLE : AccountRole.READONLY)),
+  );
 });
 
 test("fixed-address accounts are filled in; signer slots demand signers", async () => {
@@ -66,16 +75,16 @@ test("TransferInstruction (AE-P8) round-trips, including a Vec<LotRef>", () => {
   const ev = {
     session: A, fill_index: 3, from: B, to: A, qty: 2_000_000n, price: 1_000_411n,
     lot_ids: [
-      { lot_index: 0, acquired_ts: 1_790_000_000n, restriction_expiry: 1_790_604_800n },
-      { lot_index: 5, acquired_ts: -1n, restriction_expiry: 0n },
+      { lot_index: 0, qty: 1_500_000n, acquired_ts: 1_790_000_000n, restriction_expiry: 1_790_604_800n },
+      { lot_index: 0xffff_ffff, qty: 500_000n, acquired_ts: 0n, restriction_expiry: 0n },
     ],
     exemption_path: "Section4a7", gate_check: "Passed", disclosure_hash: new Uint8Array(32).fill(4),
   };
   const body = encode({ defined: { name: "TransferInstruction" } }, ev);
-  // 32+4+32+32+8+8 | 4-byte vec len + 2×(4+8+8) | enum | enum | 32
-  assert.equal(body.length, 116 + 4 + 40 + 1 + 1 + 32);
+  // 32+4+32+32+8+8 | 4-byte vec len + 2×(4+8+8+8) | enum | enum | 32
+  assert.equal(body.length, 116 + 4 + 56 + 1 + 1 + 32);
   assert.deepEqual(decodeEvent(new Uint8Array([...disc, ...body])), { name: "TransferInstruction", data: ev });
-  // What every fill emits today: no lots, nothing recorded, no gate check.
+  // What fills settled before the gate check (#133) carry.
   const today = { ...ev, lot_ids: [], exemption_path: "NotRecorded", gate_check: "NotPerformed" };
   const b2 = encode({ defined: { name: "TransferInstruction" } }, today);
   assert.deepEqual(decodeEvent(new Uint8Array([...disc, ...b2]))!.data, today);

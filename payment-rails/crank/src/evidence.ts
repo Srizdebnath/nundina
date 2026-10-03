@@ -67,10 +67,11 @@ export function toJson(v: unknown): unknown {
 /**
  * What the AE-P8 transfer records in a bundle can prove (#88). A fill is
  * `proven` only if its `TransferInstruction` says the gate re-check passed
- * AND names an exemption basis AND lists the lots it drew from. Until the
- * lot ledger and settle-time gate check exist (#53) every fill is
- * `unproven`, and the manifest says so instead of letting the bare event
- * count read as compliance evidence (doc 07 L4/L21 are not met yet).
+ * AND names an exemption basis AND lists the lots it drew from. Since
+ * #133 every fill runs credit-gate's settle-time check and records all
+ * three; fills settled before it carry `NotRecorded` / `NotPerformed` and
+ * stay `unproven`, so a bare event count never reads as compliance
+ * evidence.
  */
 export interface TransferProof {
   fills: number;

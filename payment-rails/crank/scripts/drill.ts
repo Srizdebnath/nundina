@@ -12,6 +12,11 @@
  *     key — refunds everyone. A second run finds nothing left.
  *  6. Reconciliation is clean, balances are exact and conserved, and the
  *     evidence export's SHA-256 re-verifies.
+ *
+ * Every fill runs credit-gate's settle-time check (#133/#134): the buyers
+ * are attested in SAS and admitted by `validate`, the sellers start with
+ * seasoned lot ledgers (scripts/drill-gate.ts), and the evidence must show
+ * each fill as proven (lots + exemption basis + passed gate check).
  */
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -35,7 +40,7 @@ import {
   getTokenSize,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
-import { clockNow, exists, fetchDecoded, tokenBalance } from "../src/chain.ts";
+import { clockNow, exists, fetchDecoded, rawAccount, tokenBalance } from "../src/chain.ts";
 import { loadSession, refundAll, settlePlan, type FillPlan, type Keeper } from "../src/crank.ts";
 import { assignKeeper, registerKeeper, releaseAssignment, withdrawKeeper } from "../src/keeper.ts";
 import { keeperPda, keeperPolicyPda, keeperVaultPda, sessionKeeperPda } from "../src/pda.ts";
@@ -47,6 +52,8 @@ import {
   advancePda, assetVaultPda, configPda, destinationPda, escrowPda, facilityPda, facilityVaultPda, sessionPda, vaultPda,
 } from "../src/pda.ts";
 import { send, type Ctx } from "../src/send.ts";
+import { holderLotsPda as gateLotsPda } from "../src/gate.ts";
+import { admit, ledgerTotal, loadSigner, setupGateMarket } from "./drill-gate.ts";
 
 const USDC = 1_000_000n;
 const UNIT = 1_000_000n;
@@ -87,8 +94,8 @@ async function main(): Promise<void> {
 
   // ── tokens (SPL Token for both mints; Token-2022 is covered in LiteSVM) ──
   const rent = async (size: number) => ops.rpc.getMinimumBalanceForRentExemption(BigInt(size)).send();
-  async function newMint(): Promise<Address> {
-    const mint = await generateKeyPairSigner();
+  async function newMint(key?: KeyPairSigner): Promise<Address> {
+    const mint = key ?? (await generateKeyPairSigner());
     await must(ops, "create mint", [
       getCreateAccountInstruction({ payer: authority, newAccount: mint, lamports: await rent(getMintSize()), space: getMintSize(), programAddress: TOKEN_PROGRAM_ADDRESS }),
       getInitializeMintInstruction({ mint: mint.address, decimals: 6, mintAuthority: authority.address }),
@@ -104,14 +111,17 @@ async function main(): Promise<void> {
     ]);
     return acct.address;
   }
+  const keys = process.env.DRILL_KEYS!;
   const usdc = await newMint();
-  const asset = await newMint();
+  // The asset mint's address is fixed before the validator starts: the
+  // sellers' seasoned ledgers are PDAs of it (drill-gate.ts fixtures).
+  const asset = await newMint(await loadSigner(join(keys, "asset-mint.json")));
   const fee = await newAccount(usdc, authority.address, 0n);
   const reserve = await newAccount(usdc, authority.address, 0n);
 
   interface Party { key: KeyPairSigner; usdc: Address; asset: Address }
-  async function party(u: bigint, a: bigint): Promise<Party> {
-    const key = await generateKeyPairSigner();
+  async function party(u: bigint, a: bigint, fixed?: KeyPairSigner): Promise<Party> {
+    const key = fixed ?? (await generateKeyPairSigner());
     await fund(key.address);
     return { key, usdc: await newAccount(usdc, key.address, u), asset: await newAccount(asset, key.address, a) };
   }
@@ -139,9 +149,22 @@ async function main(): Promise<void> {
   check((await registerKeeper(keeperCtx, KEEPER_BOND, K.usdc)).result === "sent", "keeper bonded (10 USDC into its PDA vault)");
   const keeperVault = await keeperVaultPda(await keeperPda(K.key.address));
 
-  const [A, B] = [await party(BOND, UNIT), await party(BOND, 2n * UNIT)];
+  const [A, B] = [
+    await party(BOND, UNIT, await loadSigner(join(keys, "seller-0.json"))),
+    await party(BOND, 2n * UNIT, await loadSigner(join(keys, "seller-1.json"))),
+  ];
   const [X, Y, Z] = [await party(300n * USDC + BOND, 0n), await party(150n * USDC + BOND, 0n), await party(50n * USDC + BOND, 0n)];
   const everyone = [A, B, X, Y, Z];
+
+  // ── credit-gate market: SAS attests the buyers, the gate admits them ────
+  const market = await setupGateMarket(ops, authority, asset, await generateKeyPairSigner());
+  for (const p of [X, Y]) await admit(ops, authority, market, p.key.address);
+  const ledger = async (p: Party) => {
+    const raw = await rawAccount(ops.rpc, await gateLotsPda(asset, p.key.address));
+    return raw ? ledgerTotal(raw.data) : -1n;
+  };
+  check((await ledger(A)) === UNIT && (await ledger(B)) === 2n * UNIT, "gate: sellers start with seasoned ledgers (1 + 2 units)");
+  check((await ledger(X)) === 0n && (await ledger(Y)) === 0n, "gate: buyers admitted by validate (empty ledgers opened)");
 
   const t0 = await clockNow(ops.rpc);
   const [commitEnd, revealEnd, deadline] = [t0 + 12n, t0 + 22n, t0 + 50n];
@@ -203,6 +226,10 @@ async function main(): Promise<void> {
   const run2 = await settlePlan(ops, session, authority, plan, { maxSends: 1 });
   check(run2.map((o) => o.result).join() === "already-done,sent,skipped", `restarted crank resumes idempotently: ${run2.map((o) => o.result)}`);
   check((await loadSession(ops.rpc, session)).fills_settled === 2, "exactly 2 fills on-chain (no double settlement)");
+  check(
+    (await ledger(A)) === 0n && (await ledger(B)) === UNIT / 2n && (await ledger(X)) === (5n * UNIT) / 2n,
+    "gate: lots moved with the fills (A 1→0, B 2→0.5, X 0→2.5)",
+  );
   // Mid-session: live escrows, non-zero totals — the ledger must still balance.
   const mid = await reconcileSession(ops.rpc, session);
   const live = mid.checks.find((c) => c.name.startsWith("open escrows"))!;
@@ -290,11 +317,16 @@ async function main(): Promise<void> {
     manifest.byEvent.TransferInstruction === manifest.byEvent.FillSettled,
     `evidence: one TransferInstruction per fill (got ${manifest.byEvent.TransferInstruction})`,
   );
-  // #88: no lot ledger or gate re-check exists yet, so no fill is provable.
-  // The manifest must say that, not imply compliance by the event count.
+  // #133: every fill ran the gate check, so every fill is provable: lots,
+  // exemption basis and gate_check = Passed are all in its record.
   check(
-    manifest.transferProof.fills === 2 && manifest.transferProof.proven === 0 && manifest.transferProof.unproven === 2,
-    `evidence: 2 fills, 0 provably lawful (got ${JSON.stringify(manifest.transferProof)})`,
+    manifest.transferProof.fills === 2 && manifest.transferProof.proven === 2 && manifest.transferProof.unproven === 0,
+    `evidence: 2 fills, both proven (got ${JSON.stringify(manifest.transferProof)})`,
+  );
+  const transfers = body.toString().trim().split("\n").map((l) => JSON.parse(l)).filter((l) => l.event === "TransferInstruction");
+  check(
+    transfers.every((t) => t.data.gate_check === "Passed" && t.data.exemption_path === "Section4a7" && t.data.lot_ids.length > 0),
+    "evidence: each transfer record carries its lots, §4(a)(7) and a passed gate check",
   );
   const lines = body.toString().trim().split("\n").map((l) => JSON.parse(l));
   const refunded = lines.filter((l) => l.event === "EscrowEvent" && l.data.action === "Refunded").length;

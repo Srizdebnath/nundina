@@ -8,12 +8,21 @@
 //! auction's clearing), but cannot move value to anyone outside the
 //! session's participants and the protocol's snapshotted fee/reserve
 //! accounts: every destination is pinned by owner or by snapshot.
+//!
+//! Before any value moves, each fill runs credit-gate's settle-time check
+//! ([`super::gate`], AE-P8, #133/#134): block-list on both wallets, the
+//! buyer's attestations re-read, the seller's seasoned lots debited and the
+//! buyer's lot appended. A refusal fails the whole fill.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::error::RailsError;
-use crate::events::{ExemptionPath, FillSettled, GateCheck, TransferInstruction};
+use crate::events::{FillSettled, GateCheck, TransferInstruction};
+use crate::instructions::gate::{
+    self, GateAccounts, GateApproval, CREDIT_GATE_ID, GATE_SETTLE_SEED, SETTLE_CHECK_DISCRIMINATOR,
+    SETTLE_CHECK_ROFR_DISCRIMINATOR,
+};
 use crate::instructions::token;
 use crate::state::{CashSession, Escrow, FillReceipt, FillSplit, RailsConfig, SessionStatus, Side};
 
@@ -76,6 +85,7 @@ fn record_fill(
     rofr: bool,
     now: i64,
     disclosure_hash: [u8; 32],
+    approval: GateApproval,
 ) -> Result<()> {
     let over = || error!(RailsError::MathOverflow);
     session.fills_settled = session.fills_settled.checked_add(1).ok_or_else(over)?;
@@ -114,10 +124,8 @@ fn record_fill(
         rofr,
         disclosure_hash,
     });
-    // AE-P8 transfer record. No lot ledger and no gate re-check exist yet
-    // (#53), so no lots, no exemption basis and no gate check are claimed:
-    // the record states their absence instead of omitting the fields (#61,
-    // #88). It cannot prove a fill lawful (doc 07 L4/L21) until they exist.
+    // AE-P8 transfer record: what credit-gate's check in this same
+    // instruction returned (#133).
     emit!(TransferInstruction::checked(
         session_key,
         fill_index,
@@ -125,9 +133,9 @@ fn record_fill(
         buyer,
         qty,
         price,
-        Vec::new(),
-        ExemptionPath::NotRecorded,
-        GateCheck::NotPerformed,
+        approval.lots,
+        approval.exemption_path,
+        GateCheck::Passed,
         disclosure_hash,
     )?);
     Ok(())
@@ -175,6 +183,36 @@ pub fn process_settle_fill(
         RailsError::EscrowDrained
     );
 
+    // AE-P8 gate re-check, before any value moves.
+    let (seller_owner, buyer_owner) = (seller.owner, buyer.owner);
+    let mint_info = ctx.accounts.asset_mint.to_account_info();
+    let a = &ctx.accounts.gate;
+    let approval = gate::check(
+        GateAccounts {
+            program: &a.gate_program,
+            authority: &a.gate_authority,
+            authority_bump: ctx.bumps.gate.gate_authority,
+            accounts: vec![
+                (&a.gate_config, false),
+                (&a.gate_policy, false),
+                (&a.seller_block, false),
+                (&a.buyer_block, false),
+                (&a.seller_lots, true),
+                (&a.buyer_lots, true),
+                (&a.buyer_link, false),
+                (&a.buyer_identity, false),
+                (&a.buyer_accreditation, false),
+                (&mint_info, false),
+            ],
+        },
+        SETTLE_CHECK_DISCRIMINATOR,
+        seller_owner,
+        buyer_owner,
+        qty,
+    )?;
+    let (buyer, seller) = (&ctx.accounts.buyer_escrow, &ctx.accounts.seller_escrow);
+    let session = &ctx.accounts.session;
+
     // Cash leg: buyer vault → seller / fee / reserve.
     let session_key = session.key();
     let buyer_seeds: &[&[u8]] = &[
@@ -211,7 +249,6 @@ pub fn process_settle_fill(
         qty,
     )?;
 
-    let (buyer_owner, seller_owner) = (buyer.owner, seller.owner);
     ctx.accounts.buyer_escrow.cash -= split.gross; // ≤ cash, checked above
     ctx.accounts.seller_escrow.asset -= qty; // ≤ asset, checked above
     let session = &mut ctx.accounts.session;
@@ -233,6 +270,7 @@ pub fn process_settle_fill(
         false,
         now,
         disclosure_hash,
+        approval,
     )
 }
 
@@ -269,6 +307,31 @@ pub fn process_settle_rofr_fill(
         ctx.accounts.seller_asset_vault.amount >= qty,
         RailsError::EscrowDrained
     );
+
+    // AE-P8 gate re-check (ROFR form: no buyer admission, no buyer lot).
+    let mint_info = ctx.accounts.asset_mint.to_account_info();
+    let issuer = ctx.accounts.issuer.key();
+    let a = &ctx.accounts.gate;
+    let approval = gate::check(
+        GateAccounts {
+            program: &a.gate_program,
+            authority: &a.gate_authority,
+            authority_bump: ctx.bumps.gate.gate_authority,
+            accounts: vec![
+                (&a.gate_config, false),
+                (&a.seller_block, false),
+                (&a.issuer_block, false),
+                (&a.seller_lots, true),
+                (&mint_info, false),
+            ],
+        },
+        SETTLE_CHECK_ROFR_DISCRIMINATOR,
+        seller.owner,
+        issuer,
+        qty,
+    )?;
+    let session = &ctx.accounts.session;
+    let seller = &ctx.accounts.seller_escrow;
 
     // Cash leg: issuer's own account → seller / fee / reserve.
     let issuer_info = ctx.accounts.issuer.to_account_info();
@@ -315,6 +378,7 @@ pub fn process_settle_rofr_fill(
         true,
         now,
         disclosure_hash,
+        approval,
     )
 }
 
@@ -386,6 +450,8 @@ pub struct SettleFill<'info> {
     pub token_program: Interface<'info, TokenInterface>,
     pub asset_token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+    /// AE-P8: the credit-gate accounts (own struct: own stack frame).
+    pub gate: FillGate<'info>,
 }
 
 #[derive(Accounts)]
@@ -451,4 +517,58 @@ pub struct SettleRofrFill<'info> {
     pub token_program: Interface<'info, TokenInterface>,
     pub asset_token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+    /// AE-P7/P8: the credit-gate accounts.
+    pub gate: RofrGate<'info>,
+}
+
+/// The credit-gate accounts of a `settle_fill`, in `settle_check`'s order.
+#[derive(Accounts)]
+pub struct FillGate<'info> {
+    /// CHECK: credit-gate, address-pinned; re-checked before the CPI.
+    #[account(address = CREDIT_GATE_ID @ RailsError::GateProgramMismatch)]
+    pub gate_program: UncheckedAccount<'info>,
+    /// CHECK: this program's settlement PDA; signs the gate CPI, holds nothing.
+    #[account(seeds = [GATE_SETTLE_SEED], bump)]
+    pub gate_authority: UncheckedAccount<'info>,
+    /// CHECK: credit-gate `MarketConfig` of the asset mint (the gate
+    /// re-derives it, as it does every gate account below).
+    pub gate_config: UncheckedAccount<'info>,
+    /// CHECK: credit-gate `MarketPolicy`.
+    pub gate_policy: UncheckedAccount<'info>,
+    /// CHECK: the seller's block entry (empty unless blocked).
+    pub seller_block: UncheckedAccount<'info>,
+    /// CHECK: the buyer's block entry.
+    pub buyer_block: UncheckedAccount<'info>,
+    /// CHECK: the seller's lot ledger; the gate debits it.
+    #[account(mut)]
+    pub seller_lots: UncheckedAccount<'info>,
+    /// CHECK: the buyer's lot ledger; the gate appends to it.
+    #[account(mut)]
+    pub buyer_lots: UncheckedAccount<'info>,
+    /// CHECK: the buyer's holder link (its admission).
+    pub buyer_link: UncheckedAccount<'info>,
+    /// CHECK: the buyer's SAS identity attestation.
+    pub buyer_identity: UncheckedAccount<'info>,
+    /// CHECK: the buyer's SAS accreditation attestation.
+    pub buyer_accreditation: UncheckedAccount<'info>,
+}
+
+/// The credit-gate accounts of a `settle_rofr_fill` (`settle_check_rofr`).
+#[derive(Accounts)]
+pub struct RofrGate<'info> {
+    /// CHECK: credit-gate, address-pinned.
+    #[account(address = CREDIT_GATE_ID @ RailsError::GateProgramMismatch)]
+    pub gate_program: UncheckedAccount<'info>,
+    /// CHECK: this program's settlement PDA; signs the gate CPI.
+    #[account(seeds = [GATE_SETTLE_SEED], bump)]
+    pub gate_authority: UncheckedAccount<'info>,
+    /// CHECK: credit-gate `MarketConfig` of the asset mint (re-derived by the gate).
+    pub gate_config: UncheckedAccount<'info>,
+    /// CHECK: the seller's block entry.
+    pub seller_block: UncheckedAccount<'info>,
+    /// CHECK: the issuer's block entry.
+    pub issuer_block: UncheckedAccount<'info>,
+    /// CHECK: the seller's lot ledger; the gate debits it.
+    #[account(mut)]
+    pub seller_lots: UncheckedAccount<'info>,
 }

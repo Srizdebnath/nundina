@@ -173,7 +173,7 @@ This is the asset the rails **will** run on. The target is a **real** asset: rea
 | Metadata | name `NUNDINA Pilot Credit Sleeve`, symbol `NPCS`, `PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL` in metadata + on every print | ✅ on the mint (no prints yet) | Dataset pollution guard (research/12 §8.7) |
 | Holder cap (governor) | 8 investor_ids (far below the real-world governor's purpose, but exercises the code path) | ⚠️ stored in `MarketConfig`; no governor enforces it | CG-2 |
 | Eligibility policy | `PILOT_506C_TEST`: accredited-flag SAS attestation (ours), jurisdiction US or non-US test flag, block-list empty but enforced | ❌ no attestation read, no `validate` (#52) | CG-3 config class |
-| Seasoning (lot ledger) | Pilot uses a **compressed Rule-144 analog**: `restriction_expiry = acquired_ts + 7 days` | ❌ no lot ledger (#53) | Exercises identical code paths with pilot-friendly timing; real constants are config, switched per-market (CG-1) |
+| Seasoning (lot ledger) | Pilot uses a **compressed Rule-144 analog**: `restriction_expiry = acquired_ts + 7 days` | ✅ `HolderLots` ledger; enforced at every settle (#133) | Exercises identical code paths with pilot-friendly timing; real constants are config, switched per-market (CG-1) |
 
 ### 3.2 NAV computation (the "no simulation" core)
 
@@ -301,7 +301,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 |---|---|---|
 | AE-P3 / AE-P4 | pre-funded bid escrow + forfeitable bond; ask escrow (asset + bond) | ✅ R1/R2 |
 | AE-P7 | issuer ROFR cash-for-asset fill | ✅ R2 |
-| AE-P8 | one-fill-per-instruction atomic DvP; `TransferInstruction` record **schema only** (#88): no lot ledger, no exemption basis, **gate re-check not performed** (`gate_check = NotPerformed`), so no fill is provably lawful (doc 07 L4/L21 unmet); evidence manifests count such fills as `unproven` | ⚠️ R2, pending gate P1 (#53) |
+| AE-P8 | one-fill-per-instruction atomic DvP; each fill CPIs credit-gate `settle_check` first (block-list both sides, buyer attestations re-read, seller's seasoned lots debited, buyer lot appended); `TransferInstruction` carries lots, exemption basis and `gate_check = Passed`, so evidence manifests count fills as `proven` (#133, #134) | ✅ R2 + gate (#133) |
 | AE-P10 | permissionless, never-pausable refunds; PDA-only escrow; completes even on a delegate-drained vault and books the shortfall (#89); frozen destinations fail typed (#90) | ✅ R1 (+#62, #89, #90) |
 | LF-P1 (H1 only) | `advance_rate_bps ≤ 50%` hard ceiling and `amount ≤ collateral mark × rate`, recorded on the `Advance`; the mark is curator-supplied; maintenance ratio, state and health are not built | ⚠️ R3 + #94 |
 | LF-P2 / LF-P6 | facility fund, advances to registered destinations, simple-interest accrual, repayment | ✅ R3 |

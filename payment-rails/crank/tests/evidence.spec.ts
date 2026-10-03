@@ -46,10 +46,11 @@ function transferLine(ev: Value): string {
   return "Program data: " + Buffer.from([...disc, ...encode({ defined: { name: "TransferInstruction" } }, ev)]).toString("base64");
 }
 
-test("transferProof: today's AE-P8 records prove nothing, and the manifest says so (#88)", () => {
+test("transferProof: only records with lots, a basis and a passed gate check are proven (#88, #133)", () => {
   const base = { session: S, fill_index: 0, from: S, to: S, qty: 1n, price: 1n, disclosure_hash: new Uint8Array(32) };
+  // A fill settled before the gate check existed (#133).
   const today = { ...base, lot_ids: [], exemption_path: "NotRecorded", gate_check: "NotPerformed" };
-  const lot = { lot_index: 0, acquired_ts: 0n, restriction_expiry: 0n };
+  const lot = { lot_index: 0, qty: 1n, acquired_ts: 0n, restriction_expiry: 0n };
   const proven = { ...base, fill_index: 1, lot_ids: [lot], exemption_path: "Section4a7", gate_check: "Passed" };
   // Each missing element alone keeps a fill unproven.
   const noLots = { ...proven, fill_index: 2, lot_ids: [] };

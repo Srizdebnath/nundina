@@ -167,12 +167,13 @@ pub struct FillSettled {
 }
 
 /// Legal basis a fill relies on (doc 07 L3–L5, SRS 08 AE-P8). Wire-stable
-/// by index and append-only. `NotRecorded` means the rails were not given
-/// one, which is the case for every fill until the gate's per-fill checklist
-/// (CG-4) exists.
+/// by index and append-only; the indices are credit-gate's exemption codes.
+/// credit-gate's settle-time check picks it for every fill (#133), so a
+/// settled fill never carries `NotRecorded`; the variant stays for wire
+/// stability and for records made before the check existed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
 pub enum ExemptionPath {
-    /// No exemption basis was supplied to the settlement.
+    /// No exemption basis was supplied (fills settled before #133).
     NotRecorded,
     /// Securities Act §4(a)(7) resale (doc 07 L4).
     Section4a7,
@@ -186,27 +187,31 @@ pub enum ExemptionPath {
 /// seasoning OK, block-list miss) ran inside this settlement. Append-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
 pub enum GateCheck {
-    /// No gate re-check ran. True of every fill today (#53).
+    /// No gate re-check ran (fills settled before #133; never now).
     NotPerformed,
     /// The gate approved the transfer in the same transaction.
     Passed,
 }
 
-/// One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3).
+/// One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3), as
+/// credit-gate's settle-time check debited it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
 pub struct LotRef {
-    /// Index in the seller's `HolderLots` ring.
+    /// The lot's id in the seller's `HolderLots` ledger. `u32::MAX` is the
+    /// FREE bucket (seasoned lots merged together; its times are 0).
     pub lot_index: u32,
+    /// Base units this fill took from the lot.
+    pub qty: u64,
     /// When the lot was acquired (unix seconds).
     pub acquired_ts: i64,
     /// When the lot's seasoning ends (unix seconds).
     pub restriction_expiry: i64,
 }
 
-/// Upper bound on `TransferInstruction.lot_ids`: a fill spanning more lots
-/// must be split into several fills. Enforced by
-/// [`TransferInstruction::checked`], the only constructor settle uses
-/// (#88), so it binds as soon as the lot ledger supplies lots.
+/// Upper bound on `TransferInstruction.lot_ids`, equal to credit-gate's
+/// `MAX_DRAWS` (the gate folds anything past it into one FREE draw).
+/// Enforced by [`TransferInstruction::checked`], the only constructor
+/// settle uses (#88).
 pub const MAX_LOTS_PER_FILL: usize = 8;
 
 /// The AE-P8 transfer record **schema**, emitted once per settled fill right
@@ -214,12 +219,12 @@ pub const MAX_LOTS_PER_FILL: usize = 8;
 /// event has the fields a transfer agent (doc 07 L21) and a
 /// books-and-records export (L22) need to show the transfer was lawful.
 ///
-/// **It does not prove that today (#88).** Until the gate's lot ledger and
-/// settle-time re-check exist (#53), every fill emits `lot_ids = []`,
-/// `exemption_path = NotRecorded` and `gate_check = NotPerformed`: no lot
-/// is validated, no exemption is derived, no check runs. Those values
-/// state the absence, and the crank's evidence manifest counts every such
-/// fill as `unproven` — doc 07 L4/L21 are **not** satisfiable yet.
+/// Every fill now runs credit-gate's settle-time check first (#133, #134):
+/// block-list on both wallets, the buyer's SAS attestations re-read, the
+/// seller's seasoned lots debited. The record carries what the gate
+/// returned: the lots drawn, the exemption basis, and `gate_check =
+/// Passed`. The crank's evidence manifest counts a fill as `proven` only
+/// when all three are present (#88).
 #[event]
 #[derive(Debug)]
 pub struct TransferInstruction {
@@ -431,6 +436,7 @@ mod tests {
         (0..n)
             .map(|i| LotRef {
                 lot_index: i as u32,
+                qty: 1,
                 acquired_ts: 0,
                 restriction_expiry: 0,
             })

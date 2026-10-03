@@ -71,6 +71,8 @@ impl Npcs {
         ];
         env.send(&ixs, &[&gate]).expect("NPCS mint");
         env.asset_mint = mint;
+        // credit-gate's market for this mint: every fill re-checks it (#133).
+        env.open_gate_market();
         Npcs { env, gate }
     }
 
@@ -133,10 +135,12 @@ impl Npcs {
             .state
     }
 
-    /// Participant with USDC plus a gate-thawed NPCS account.
+    /// Participant with USDC plus a gate-thawed NPCS account, admitted by
+    /// credit-gate with its `npcs` as seasoned inventory.
     fn party(&mut self, usdc: u64, npcs: u64) -> Party {
         let (key, usdc_acct) = self.env.bidder(usdc);
         let asset = self.holder_account(&key.pubkey(), npcs);
+        self.env.admit(&key.pubkey(), npcs);
         Party {
             key,
             usdc: usdc_acct,
@@ -267,8 +271,10 @@ fn npcs_dvp_end_to_end_after_gate_thaw() {
     }
 }
 
-/// Delivery is gated by the gate, not the rails: a buyer whose NPCS account
-/// was never thawed (not admitted) can't receive, and the fill doesn't land.
+/// Delivery is also gated by Token-2022: a buyer the gate admits but whose
+/// NPCS account was never thawed can't receive, and the fill doesn't land.
+/// (A buyer the gate does not admit fails earlier, in `settle_check`:
+/// tests/gate.rs.)
 #[test]
 fn fill_into_unadmitted_buyer_does_not_land() {
     let mut n = Npcs::new(Tp::Spl);
@@ -276,6 +282,7 @@ fn fill_into_unadmitted_buyer_does_not_land() {
     let seller = n.party(BOND, UNIT);
     let (key, usdc) = n.env.bidder(200_000_000 + BOND);
     let frozen = n.new_account(&key.pubkey());
+    n.env.admit(&key.pubkey(), 0);
     let buyer = Party {
         key,
         usdc,

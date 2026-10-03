@@ -5,6 +5,9 @@
 
 #![allow(dead_code)]
 
+mod gate;
+pub use gate::*;
+
 use anchor_lang::prelude::{Clock, Pubkey};
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
@@ -32,7 +35,7 @@ pub const BOND: u64 = 5_000_000; // 5 USDC
 pub const MAX_CASH: u64 = 1_000_000_000; // 1,000 USDC
 pub use credit_math::MAX_ADVANCE_RATE_BPS;
 
-const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
+pub(crate) const LOADER_V3: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 
 /// Which token program owns a mint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +103,8 @@ pub struct Env {
     pub fee: Pubkey,
     pub reserve: Pubkey,
     pub config: Pubkey,
+    /// SAS credential, schemas and attester of the gate market (#133).
+    pub sas: Sas,
 }
 
 pub fn pda(seeds: &[&[u8]]) -> Pubkey {
@@ -186,10 +191,19 @@ impl Env {
             fee: Pubkey::default(),
             reserve: Pubkey::default(),
             config: pda(&[RailsConfig::SEED]),
+            sas: Sas {
+                cred_auth: Keypair::new(),
+                attester: Keypair::new(),
+                credential: Pubkey::default(),
+                id_schema: Pubkey::default(),
+                acc_schema: Pubkey::default(),
+            },
         };
         env.set_time(T0);
+        env.sas = env.load_gate();
         env.mint = env.new_mint(6);
         env.asset_mint = env.new_mint_in(Tp::T22, 6);
+        env.open_gate_market();
         let auth = env.authority.pubkey();
         let mint = env.mint;
         env.fee = env.token_account(&mint, &auth, 0);
@@ -311,6 +325,15 @@ impl Env {
         .pack_into_slice(&mut data);
         self.put(key, data, program);
         key
+    }
+
+    /// Credit `amount` more asset to an existing (fabricated) account.
+    pub fn raw_asset_mint_to(&mut self, account: &Pubkey, amount: u64) {
+        let mut a = self.svm.get_account(account).expect("asset account");
+        let mut t = spl_token_2022::state::Account::unpack_from_slice(&a.data).unwrap();
+        t.amount += amount;
+        t.pack_into_slice(&mut a.data);
+        self.svm.set_account(*account, a).unwrap();
     }
 
     fn put(&mut self, key: Pubkey, data: Vec<u8>, program: Tp) {
@@ -607,10 +630,12 @@ impl Env {
         (k, t)
     }
 
-    /// A participant with USDC and asset accounts.
+    /// A participant with USDC and asset accounts, admitted by the gate,
+    /// its `asset` recorded as seasoned inventory (#133).
     pub fn party(&mut self, usdc: u64, asset: u64) -> Party {
         let (key, usdc_acct) = self.bidder(usdc);
         let asset_acct = self.asset_account(&key.pubkey(), asset);
+        self.admit(&key.pubkey(), asset);
         Party {
             key,
             usdc: usdc_acct,
@@ -818,22 +843,23 @@ impl Env {
         }
     }
 
-    pub fn settle_as(
-        &mut self,
-        operator: &Keypair,
+    /// The `settle_fill` instruction for `f`, gate accounts included.
+    pub fn settle_ix(
+        &self,
+        operator: &Pubkey,
         f: &Fill,
         fill_index: u32,
         qty: u64,
         price: u64,
-    ) -> Res {
+    ) -> Instruction {
         let buyer_escrow = escrow_pda(&f.session, &f.buyer_owner);
         let seller_escrow = escrow_pda(&f.session, &f.seller_owner);
-        let ix = Instruction {
+        Instruction {
             program_id: PROGRAM_ID,
             accounts: acc::SettleFill {
                 config: self.config,
                 session: f.session,
-                operator: operator.pubkey(),
+                operator: *operator,
                 receipt: receipt_pda(&f.session, fill_index),
                 buyer_escrow,
                 buyer_vault: vault_pda(&buyer_escrow),
@@ -848,6 +874,19 @@ impl Env {
                 token_program: self.tp.id(),
                 asset_token_program: self.asset_tp.id(),
                 system_program: anchor_lang::system_program::ID,
+                gate: acc::FillGate {
+                    gate_program: GATE_ID,
+                    gate_authority: gate_settle_pda(),
+                    gate_config: self.gate_config(),
+                    gate_policy: self.gate_policy(),
+                    seller_block: self.block_entry(&f.seller_owner),
+                    buyer_block: self.block_entry(&f.buyer_owner),
+                    seller_lots: self.lots_pda(&f.seller_owner),
+                    buyer_lots: self.lots_pda(&f.buyer_owner),
+                    buyer_link: self.link_pda(&f.buyer_owner),
+                    buyer_identity: self.identity_att(&f.buyer_owner),
+                    buyer_accreditation: self.accreditation_att(&f.buyer_owner),
+                },
             }
             .to_account_metas(None),
             data: ix::SettleFill {
@@ -857,7 +896,18 @@ impl Env {
                 disclosure_hash: [9; 32],
             }
             .data(),
-        };
+        }
+    }
+
+    pub fn settle_as(
+        &mut self,
+        operator: &Keypair,
+        f: &Fill,
+        fill_index: u32,
+        qty: u64,
+        price: u64,
+    ) -> Res {
+        let ix = self.settle_ix(&operator.pubkey(), f, fill_index, qty, price);
         self.send(&[ix], &[operator])
     }
 
@@ -897,6 +947,14 @@ impl Env {
                 token_program: self.tp.id(),
                 asset_token_program: self.asset_tp.id(),
                 system_program: anchor_lang::system_program::ID,
+                gate: acc::RofrGate {
+                    gate_program: GATE_ID,
+                    gate_authority: gate_settle_pda(),
+                    gate_config: self.gate_config(),
+                    seller_block: self.block_entry(&seller.key.pubkey()),
+                    issuer_block: self.block_entry(&issuer.key.pubkey()),
+                    seller_lots: self.lots_pda(&seller.key.pubkey()),
+                },
             }
             .to_account_metas(None),
             data: ix::SettleRofrFill {
