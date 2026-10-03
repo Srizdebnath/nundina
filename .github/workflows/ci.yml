@@ -244,13 +244,18 @@ jobs:
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2
         with:
           tool: cargo-fuzz@0.13.2
+      # The prebuilt cargo-fuzz is a musl binary and defaults --target to its
+      # own triple, where ASan cannot link (static libc). Build for glibc.
+      # Build first, so a build error isn't reported as a fuzz finding.
+      - name: Build every target
+        run: cargo "+$NIGHTLY" fuzz build --target x86_64-unknown-linux-gnu
       - name: Fuzz every target
         shell: bash
         run: |
           for t in $(cargo "+$NIGHTLY" fuzz list); do
             echo "::group::$t"
-            cargo "+$NIGHTLY" fuzz run "$t" -- -max_total_time=60 \
-              || { echo "::error::fuzz target $t found a failing input (see artifacts)"; exit 1; }
+            cargo "+$NIGHTLY" fuzz run --target x86_64-unknown-linux-gnu "$t" -- -max_total_time=60 \
+              || { echo "::error::fuzz target $t found a failing input (reproducer in the fuzz-artifacts upload)"; exit 1; }
             echo "::endgroup::"
           done
       # cargo-fuzz has no --locked; a re-resolved lockfile fails here instead.
