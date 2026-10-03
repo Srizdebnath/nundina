@@ -1,0 +1,75 @@
+# Fuzz targets for the cash paths (SRS 08 §11 audit scope, #125).
+#
+# Own workspace + lockfile, like tests-svm: libfuzzer-sys and arbitrary must
+# never re-resolve a crate the SBF build depends on.
+#
+# Every invariant lives in `src/lib.rs` as a plain function, so it runs two
+# ways:
+#   cargo test --locked                            # stable: seeded smoke (CI)
+#   cargo +nightly fuzz run settle_fill -- -max_total_time=60   # libFuzzer
+[package]
+name = "payment-rails-fuzz"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+payment-rails = { path = "../programs/payment-rails", features = ["no-entrypoint"] }
+# Read-only: the shared math the rails route every amount through.
+credit-math = { path = "../../programs/credit-math" }
+anchor-lang = { version = "=1.1.2" }
+arbitrary = { version = "1.4", features = ["derive"] }
+libfuzzer-sys = "0.4"
+
+[profile.release]
+overflow-checks = true      # D8: a wrap is a finding, not a silent pass
+debug = 1
+
+[[bin]]
+name = "settle_fill"
+path = "fuzz_targets/settle_fill.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "clearing"
+path = "fuzz_targets/clearing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pro_rata"
+path = "fuzz_targets/pro_rata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "waterfall"
+path = "fuzz_targets/waterfall.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "refund_bond"
+path = "fuzz_targets/refund_bond.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "facility"
+path = "fuzz_targets/facility.rs"
+test = false
+doc = false
+bench = false

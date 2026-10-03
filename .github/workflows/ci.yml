@@ -176,6 +176,15 @@ jobs:
         run: |
           cargo fmt --all -- --check
           cargo clippy --locked --all-targets -- -D warnings
+      # Fuzz invariants (#125), seeded smoke on stable: the same check_*
+      # functions the libFuzzer targets run (job `fuzz` below). Own
+      # workspace + lockfile, like tests-svm.
+      - name: Fuzz invariants — fmt · clippy · seeded smoke (stable)
+        working-directory: payment-rails/fuzz
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --release
       - name: Install solana-cli ${{ env.SOLANA_VERSION }} + anchor ${{ env.ANCHOR_VERSION }} (SHA-256 verified)
         working-directory: .
         run: bash .github/scripts/install-solana-anchor.sh
@@ -209,6 +218,51 @@ jobs:
       - name: Kill-the-crank drill (local validator)
         working-directory: payment-rails/crank
         run: npm run drill
+
+  # SRS 08 §11 (#125): fuzz targets for the escrow / settle / waterfall /
+  # refund / facility math ship with the code. libFuzzer needs nightly; the
+  # nightly is the same dated pin as the coverage job. Each target runs for
+  # a fixed budget; a crash fails the job and its reproducer is uploaded.
+  # The stable smoke of the same invariants runs in `payment-rails`.
+  fuzz:
+    name: payment-rails — fuzz (libFuzzer, 60s/target)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NIGHTLY: nightly-2026-09-30
+    defaults:
+      run:
+        working-directory: payment-rails/fuzz
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: payment-rails/fuzz -> target
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2
+        with:
+          tool: cargo-fuzz@0.13.2
+      - name: Fuzz every target
+        shell: bash
+        run: |
+          for t in $(cargo "+$NIGHTLY" fuzz list); do
+            echo "::group::$t"
+            cargo "+$NIGHTLY" fuzz run "$t" -- -max_total_time=60 \
+              || { echo "::error::fuzz target $t found a failing input (see artifacts)"; exit 1; }
+            echo "::endgroup::"
+          done
+      # cargo-fuzz has no --locked; a re-resolved lockfile fails here instead.
+      - name: Lockfile unchanged by cargo fuzz
+        run: git diff --exit-code -- Cargo.lock
+      - name: Upload crash reproducers
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fuzz-artifacts
+          path: payment-rails/fuzz/artifacts/
+          if-no-files-found: ignore
 
   payment-rails-crank:
     name: payment-rails/crank — typecheck + test

@@ -128,8 +128,11 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
         .try_fold(0u128, |acc, &(_, q)| acc.checked_add(q))
         .ok_or(MathError::Overflow)?;
     if sum_qty == 0 {
+        // Every bid committed nothing: each gets nothing, one entry per bid,
+        // so the output stays index-aligned with `bids` (#125: an empty
+        // vector here broke that for a caller zipping the two).
         return if total == 0 {
-            Ok(Vec::new())
+            Ok(bids.iter().map(|&(id, _)| (id, 0)).collect())
         } else {
             Err(MathError::InvalidInput)
         };
@@ -299,7 +302,12 @@ mod tests {
             allocate_pro_rata(100, &[(1, 0)]).unwrap_err(),
             MathError::InvalidInput
         );
-        assert_eq!(allocate_pro_rata(0, &[(1, 0)]).unwrap(), vec![]);
+        assert_eq!(allocate_pro_rata(0, &[]).unwrap(), vec![]);
+        // Zero-qty bids still get an entry each (found by the fuzz target).
+        assert_eq!(
+            allocate_pro_rata(0, &[(1, 0), (2, 0)]).unwrap(),
+            vec![(1, 0), (2, 0)]
+        );
     }
 
     #[test]

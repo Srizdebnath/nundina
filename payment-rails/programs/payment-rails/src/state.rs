@@ -244,6 +244,35 @@ impl CashSession {
     }
 }
 
+/// How a refund drains one escrow's USDC vault (AE-P10, #62, #89).
+///
+/// The forfeit (bond to the reserve) is paid first, up to what is held;
+/// everything else held, donated dust included, goes to the owner. A vault
+/// holding less than `recorded` still drains: the gap is the shortfall the
+/// caller books on the session. `to_reserve + to_owner == held`, always.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VaultDrain {
+    /// → reserve (the forfeited bond, capped at what is held).
+    pub to_reserve: u64,
+    /// → owner (the rest of the vault).
+    pub to_owner: u64,
+    /// `recorded − held` when the vault was drained by someone else.
+    pub shortfall: u64,
+}
+
+impl VaultDrain {
+    /// Split a vault holding `held` that the books say holds `recorded`,
+    /// of which `forfeit` is owed to the reserve.
+    pub fn compute(held: u64, recorded: u64, forfeit: u64) -> VaultDrain {
+        let to_reserve = forfeit.min(held);
+        VaultDrain {
+            to_reserve,
+            to_owner: held - to_reserve,
+            shortfall: recorded.saturating_sub(held),
+        }
+    }
+}
+
 /// One investor's escrow in one session: cash (`qty × limit`, opaque to the
 /// rails so the bid stays sealed) plus the bond. Its tokens sit in a
 /// dedicated vault owned by this PDA — never in a shared pool (AE-P10).
