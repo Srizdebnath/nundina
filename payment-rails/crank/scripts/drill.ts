@@ -35,8 +35,10 @@ import {
   getTokenSize,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
-import { clockNow, exists, tokenBalance } from "../src/chain.ts";
-import { loadSession, refundAll, settlePlan, type FillPlan } from "../src/crank.ts";
+import { clockNow, exists, fetchDecoded, tokenBalance } from "../src/chain.ts";
+import { loadSession, refundAll, settlePlan, type FillPlan, type Keeper } from "../src/crank.ts";
+import { assignKeeper, registerKeeper, releaseAssignment, withdrawKeeper } from "../src/keeper.ts";
+import { keeperPda, keeperPolicyPda, keeperVaultPda, sessionKeeperPda } from "../src/pda.ts";
 import { loadKeypair, makeCtx } from "../src/ctx.ts";
 import { exportEvidence, verifyEvidence } from "../src/evidence.ts";
 import { ix, PROGRAM_ID } from "../src/idl.ts";
@@ -125,6 +127,18 @@ async function main(): Promise<void> {
   ]);
   await must(ops, "set_fees", [ix("set_fees", { config, authority }, { fee_bps: 10, reserve_bps: 5 })]);
 
+  // #127: a bonded keeper (its own wallet, not the operator's).
+  const [KEEPER_BOND, REWARD, SLA] = [10n * USDC, 1n * USDC, 4n];
+  await must(ops, "initialize_keeper_policy", [
+    ix("initialize_keeper_policy", { config, policy: await keeperPolicyPda(), authority }, {
+      min_bond: KEEPER_BOND, sla_seconds: SLA, escalation_reward: REWARD,
+    }),
+  ]);
+  const K = await party(2n * KEEPER_BOND, 0n);
+  const keeperCtx = await makeCtx({ payer: K.key, quiet: !process.env.VERBOSE });
+  check((await registerKeeper(keeperCtx, KEEPER_BOND, K.usdc)).result === "sent", "keeper bonded (10 USDC into its PDA vault)");
+  const keeperVault = await keeperVaultPda(await keeperPda(K.key.address));
+
   const [A, B] = [await party(BOND, UNIT), await party(BOND, 2n * UNIT)];
   const [X, Y, Z] = [await party(300n * USDC + BOND, 0n), await party(150n * USDC + BOND, 0n), await party(50n * USDC + BOND, 0n)];
   const everyone = [A, B, X, Y, Z];
@@ -139,7 +153,7 @@ async function main(): Promise<void> {
     }),
   ]);
 
-  const usdcAccounts = [fee, reserve, ...everyone.map((p) => p.usdc)];
+  const usdcAccounts = [fee, reserve, keeperVault, K.usdc, ...everyone.map((p) => p.usdc)];
   const assetAccounts = everyone.map((p) => p.asset);
   const sum = async (xs: Address[]) => (await Promise.all(xs.map((x) => tokenBalance(ops.rpc, x)))).reduce<bigint>((a, b) => a + (b ?? 0n), 0n);
   const [usdc0, asset0] = [await sum(usdcAccounts), await sum(assetAccounts)];
@@ -169,6 +183,8 @@ async function main(): Promise<void> {
       }, { cash }),
     ]);
   }
+  // Off the commit window's clock: assignment can happen any time before the deadline.
+  check((await assignKeeper(ops, session, authority, K.key.address)).result === "sent", "operator assigned the keeper to the session");
   await waitUntil(ops, commitEnd);
   for (const p of [A, B, X, Y]) {
     await must(ops, "mark_revealed", [ix("mark_revealed", { session, escrow: await escrowPda(session, p.key.address), operator: authority })]);
@@ -200,9 +216,14 @@ async function main(): Promise<void> {
   check(byResult(early, "sent") === 1 && byResult(early, "not-yet") === 4, `before deadline: only non-revealer Z refundable (sent ${byResult(early, "sent")}, locked ${byResult(early, "not-yet")})`);
   check((await tokenBalance(ops.rpc, Z.usdc)) === 50n * USDC && (await tokenBalance(ops.rpc, reserve))! >= BOND, "Z got cash back, bond went to reserve");
 
-  await waitUntil(ops, deadline);
-  const late = await refundAll(participant, session);
-  check(byResult(late, "sent") === 4 && byResult(late, "failed") === 0, `after deadline: participant refunds all 4 remaining escrows (sent ${byResult(late, "sent")})`);
+  // The keeper is dead too: its SLA (deadline + 4s) runs out with 4 escrows
+  // open. The participant refunds them all and is paid from the keeper's bond.
+  await waitUntil(ops, deadline + SLA);
+  const late = await refundAll(participant, session, { escalateTo: Y.usdc });
+  check(byResult(late, "sent") === 4 && byResult(late, "failed") === 0, `after the keeper's SLA: participant refunds all 4 remaining escrows (sent ${byResult(late, "sent")})`);
+  check(late.every((o) => o.detail?.includes("escalated")), "every late refund went through the escalated path");
+  const k = await fetchDecoded<Keeper>(ops.rpc, "Keeper", await keeperPda(K.key.address));
+  check(k?.missed === 4 && (await tokenBalance(ops.rpc, keeperVault)) === KEEPER_BOND - 4n * REWARD, `keeper: 4 misses recorded, bond ${KEEPER_BOND} → ${KEEPER_BOND - 4n * REWARD}`);
   const again = await refundAll(participant, session);
   check(again.length === 0, "second refund run finds nothing left (idempotent)");
   for (const p of everyone) check(!(await exists(ops.rpc, await escrowPda(session, p.key.address))), `escrow of ${p.key.address.slice(0, 6)}… closed`);
@@ -216,12 +237,18 @@ async function main(): Promise<void> {
   const bal = (a: Address) => tokenBalance(ops.rpc, a).then((b) => b ?? 0n);
   check((await bal(X.usdc)) === 300n * USDC + BOND - s0.gross - s1.gross, "X paid exactly the two settled fills, rest + bond refunded");
   check((await bal(X.asset)) === (5n * UNIT) / 2n, "X holds 2.5 asset");
-  check((await bal(Y.usdc)) === 150n * USDC + BOND && (await bal(Y.asset)) === 0n, "Y (fill never settled) fully refunded");
+  check((await bal(Y.usdc)) === 150n * USDC + BOND + 4n * REWARD && (await bal(Y.asset)) === 0n, "Y (fill never settled) fully refunded, + 4 escalation rewards");
   check((await bal(A.usdc)) === BOND + s0.seller && (await bal(A.asset)) === 0n, "A: proceeds + bond");
   check((await bal(B.usdc)) === BOND + s1.seller && (await bal(B.asset)) === UNIT / 2n, "B: proceeds + bond + unsold 0.5 back");
   check((await bal(Z.usdc)) === 50n * USDC, "Z: cash back, bond forfeited");
   check((await bal(fee)) === s0.fee + s1.fee && (await bal(reserve)) === s0.res + s1.res + BOND, "fee and reserve exact");
   check((await sum(usdcAccounts)) === usdc0 && (await sum(assetAccounts)) === asset0, "USDC and asset conserved end to end");
+
+  // Duty over: anyone releases it, then the keeper takes back what is left.
+  check((await releaseAssignment(participant, session)).result === "sent", "assignment released (no open escrow)");
+  check(!(await exists(ops.rpc, await sessionKeeperPda(session))), "session keeper record closed");
+  check((await withdrawKeeper(keeperCtx, K.usdc)).result === "sent", "keeper withdrew its remaining bond");
+  check((await bal(K.usdc)) === 2n * KEEPER_BOND - 4n * REWARD, "keeper lost exactly the 4 rewards it owed");
 
   // ── facility ledger (R3 cash, R4 reconciliation) ─────────────────────────
   const facility = await facilityPda(authority.address, 1n);

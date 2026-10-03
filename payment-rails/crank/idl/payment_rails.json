@@ -180,6 +180,155 @@
       ]
     },
     {
+      "name": "assign_keeper",
+      "docs": [
+        "#127: the session operator assigns a bonded keeper; SLA snapshotted."
+      ],
+      "discriminator": [
+        190,
+        170,
+        212,
+        97,
+        224,
+        198,
+        209,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "keeper.wallet",
+                "account": "Keeper"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "session_keeper",
+          "docs": [
+            "One keeper per session; `init` fails on a second assignment."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "deposit",
       "docs": [
         "AE-P3: lock cash + bond in a per-escrow vault (depositor signs)."
@@ -1055,6 +1204,101 @@
       "args": []
     },
     {
+      "name": "initialize_keeper_policy",
+      "docs": [
+        "#127: keeper terms (min bond, SLA after the hard deadline, reward",
+        "per escalated escrow). Config authority only."
+      ],
+      "discriminator": [
+        177,
+        36,
+        150,
+        80,
+        56,
+        131,
+        136,
+        185
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_bond",
+          "type": "u64"
+        },
+        {
+          "name": "sla_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "escalation_reward",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "mark_revealed",
       "docs": [
         "AE-P4: operator reports a successful reveal."
@@ -1779,6 +2023,441 @@
       "args": []
     },
     {
+      "name": "refund_ask_escalated",
+      "docs": [
+        "#127: as `refund_escalated`, for a sell escrow (`refund_ask`)."
+      ],
+      "discriminator": [
+        21,
+        204,
+        173,
+        170,
+        144,
+        219,
+        180,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "refund",
+          "accounts": [
+            {
+              "name": "caller",
+              "docs": [
+                "Anyone — refunds are permissionless (AE-P10). Pays only the tx fee."
+              ],
+              "signer": true
+            },
+            {
+              "name": "session",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.operator",
+                    "account": "CashSession"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.session_id",
+                    "account": "CashSession"
+                  }
+                ]
+              },
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "escrow",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "escrow.owner",
+                    "account": "Escrow"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "asset_vault",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner_usdc",
+              "docs": [
+                "Bond destination: the seller's own USDC account."
+              ],
+              "writable": true
+            },
+            {
+              "name": "owner_asset",
+              "docs": [
+                "Asset destination: the seller's own asset account."
+              ],
+              "writable": true
+            },
+            {
+              "name": "reserve",
+              "writable": true
+            },
+            {
+              "name": "usdc_mint"
+            },
+            {
+              "name": "asset_mint"
+            },
+            {
+              "name": "token_program"
+            },
+            {
+              "name": "asset_token_program"
+            }
+          ]
+        },
+        {
+          "name": "keeper",
+          "accounts": [
+            {
+              "name": "session_keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110,
+                      95,
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session_keeper.session",
+                    "account": "SessionKeeper"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "keeper.wallet",
+                    "account": "Keeper"
+                  }
+                ]
+              },
+              "relations": [
+                "session_keeper"
+              ]
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "keeper"
+              ]
+            },
+            {
+              "name": "caller_token",
+              "docs": [
+                "The caller's USDC account: where the reward goes. `dup`: the escrow",
+                "owner may escalate its own late refund (it has the strongest reason",
+                "to), and then this is the same account as the refund's",
+                "`owner_token`. Safe: it is only a transfer destination here, its mint",
+                "is checked, and Anchor never writes a token account back."
+              ],
+              "writable": true
+            }
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_escalated",
+      "docs": [
+        "#127: after the keeper's SLA, anyone refunds a buy escrow and is",
+        "paid from the keeper's bond (same refund body as `refund`)."
+      ],
+      "discriminator": [
+        216,
+        174,
+        105,
+        241,
+        131,
+        157,
+        185,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "refund",
+          "accounts": [
+            {
+              "name": "caller",
+              "docs": [
+                "Anyone — refunds are permissionless (AE-P10). Pays only the tx fee."
+              ],
+              "signer": true
+            },
+            {
+              "name": "session",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.operator",
+                    "account": "CashSession"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.session_id",
+                    "account": "CashSession"
+                  }
+                ]
+              },
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "escrow",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "escrow.owner",
+                    "account": "Escrow"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner_token",
+              "docs": [
+                "Refund destination: must belong to the escrow owner — a third-party",
+                "caller can trigger the refund but can never redirect it."
+              ],
+              "writable": true
+            },
+            {
+              "name": "reserve",
+              "docs": [
+                "Session's snapshotted reserve (receives a forfeited bond, if any)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "usdc_mint"
+            },
+            {
+              "name": "token_program"
+            }
+          ]
+        },
+        {
+          "name": "keeper",
+          "accounts": [
+            {
+              "name": "session_keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110,
+                      95,
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session_keeper.session",
+                    "account": "SessionKeeper"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "keeper.wallet",
+                    "account": "Keeper"
+                  }
+                ]
+              },
+              "relations": [
+                "session_keeper"
+              ]
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "keeper"
+              ]
+            },
+            {
+              "name": "caller_token",
+              "docs": [
+                "The caller's USDC account: where the reward goes. `dup`: the escrow",
+                "owner may escalate its own late refund (it has the strongest reason",
+                "to), and then this is the same account as the refund's",
+                "`owner_token`. Safe: it is only a transfer destination here, its mint",
+                "is checked, and Anchor never writes a token account back."
+              ],
+              "writable": true
+            }
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "register_destination",
       "docs": [
         "Admit an attested payout wallet (registrar; hash only, no PII)."
@@ -1881,6 +2560,267 @@
           "type": "i64"
         }
       ]
+    },
+    {
+      "name": "register_keeper",
+      "docs": [
+        "#127: bond a keeper (≥ `min_bond` USDC into a PDA-owned vault)."
+      ],
+      "discriminator": [
+        175,
+        126,
+        140,
+        213,
+        21,
+        174,
+        234,
+        239
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "keeper"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "keeper_token",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "bond",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "release_assignment",
+      "docs": [
+        "#127: close a keeper's duty once the session has no open escrow."
+      ],
+      "discriminator": [
+        195,
+        246,
+        26,
+        74,
+        160,
+        224,
+        23,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "keeper.wallet",
+                "account": "Keeper"
+              }
+            ]
+          },
+          "relations": [
+            "session_keeper"
+          ]
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone."
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "renew_destination",
@@ -2308,6 +3248,95 @@
         {
           "name": "reserve_bps",
           "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_keeper_policy",
+      "docs": [
+        "#127: change keeper terms; live assignments keep their snapshot."
+      ],
+      "discriminator": [
+        113,
+        131,
+        98,
+        244,
+        25,
+        146,
+        140,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "min_bond",
+          "type": "u64"
+        },
+        {
+          "name": "sla_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "escalation_reward",
+          "type": "u64"
         }
       ]
     },
@@ -3023,6 +4052,143 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "top_up_keeper",
+      "docs": [
+        "#127: add to a keeper's bond."
+      ],
+      "discriminator": [
+        45,
+        32,
+        19,
+        218,
+        28,
+        127,
+        164,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "keeper_token",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "signer": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_keeper",
+      "docs": [
+        "#127: a keeper with no live assignment takes its bond back and closes."
+      ],
+      "discriminator": [
+        140,
+        81,
+        19,
+        219,
+        254,
+        144,
+        199,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "keeper_token",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -3105,6 +4271,32 @@
       ]
     },
     {
+      "name": "Keeper",
+      "discriminator": [
+        127,
+        221,
+        194,
+        46,
+        120,
+        73,
+        144,
+        77
+      ]
+    },
+    {
+      "name": "KeeperPolicy",
+      "discriminator": [
+        124,
+        56,
+        216,
+        136,
+        101,
+        123,
+        214,
+        117
+      ]
+    },
+    {
       "name": "PayoutDestination",
       "discriminator": [
         216,
@@ -3128,6 +4320,19 @@
         166,
         91,
         135
+      ]
+    },
+    {
+      "name": "SessionKeeper",
+      "discriminator": [
+        145,
+        197,
+        208,
+        100,
+        119,
+        116,
+        75,
+        199
       ]
     }
   ],
@@ -3195,6 +4400,19 @@
         71,
         20,
         119
+      ]
+    },
+    {
+      "name": "KeeperEvent",
+      "discriminator": [
+        71,
+        103,
+        246,
+        246,
+        205,
+        216,
+        19,
+        63
       ]
     },
     {
@@ -3490,6 +4708,36 @@
       "code": 6047,
       "name": "TooManyLots",
       "msg": "Too many lots in one fill"
+    },
+    {
+      "code": 6048,
+      "name": "KeeperPolicyOutOfBounds",
+      "msg": "Keeper policy out of bounds"
+    },
+    {
+      "code": 6049,
+      "name": "KeeperBondTooLow",
+      "msg": "Keeper bond below the minimum"
+    },
+    {
+      "code": 6050,
+      "name": "KeeperSlaNotDue",
+      "msg": "Keeper SLA has not run out"
+    },
+    {
+      "code": 6051,
+      "name": "KeeperAssigned",
+      "msg": "Keeper has live assignments"
+    },
+    {
+      "code": 6052,
+      "name": "SessionStillOpen",
+      "msg": "Session still has open escrows"
+    },
+    {
+      "code": 6053,
+      "name": "KeeperSessionMismatch",
+      "msg": "Keeper assignment is for another session"
     }
   ],
   "types": [
@@ -4747,6 +5995,159 @@
       }
     },
     {
+      "name": "Keeper",
+      "docs": [
+        "A bonded keeper. Its bond sits in `[\"keeper_vault\", keeper]`, a USDC",
+        "account owned by this PDA, never by the keeper's wallet."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "assignments",
+            "docs": [
+              "Live session assignments; the bond can't leave while > 0."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "missed",
+            "docs": [
+              "Escrows third parties had to refund past this keeper's SLA."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeeperAction",
+      "docs": [
+        "Keeper lifecycle and SLA escalations (doc 06 §8, #127)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Registered"
+          },
+          {
+            "name": "ToppedUp"
+          },
+          {
+            "name": "Assigned"
+          },
+          {
+            "name": "Escalated"
+          },
+          {
+            "name": "Released"
+          },
+          {
+            "name": "Withdrawn"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeeperEvent",
+      "docs": [
+        "Emitted by every keeper instruction (#127)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "action",
+            "type": {
+              "defined": {
+                "name": "KeeperAction"
+              }
+            }
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "The keeper's wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "docs": [
+              "Session (default when not session-scoped)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "micro-USDC, per `action`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "caller",
+            "docs": [
+              "Who signed."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeeperPolicy",
+      "docs": [
+        "Keeper terms, set by the config authority. Snapshotted into every",
+        "assignment, so a later change never moves a live session's SLA (L5)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "min_bond",
+            "docs": [
+              "Minimum bond (micro-USDC) to register and to be assigned."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sla_seconds",
+            "docs": [
+              "Seconds after a session's hard deadline by which the assigned keeper",
+              "must have refunded every escrow."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "escalation_reward",
+            "docs": [
+              "Paid from the keeper's bond to whoever refunds an escrow the keeper",
+              "left open past its SLA (per escrow, capped by what the bond holds)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "LotRef",
       "docs": [
         "One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3)."
@@ -5135,6 +6536,53 @@
               "Cluster time of the step."
             ],
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionKeeper",
+      "docs": [
+        "One keeper's duty for one session: every escrow refunded by `due_at`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "The `Keeper` PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "due_at",
+            "docs": [
+              "`session.settle_deadline + policy.sla_seconds` at assignment."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reward",
+            "docs": [
+              "`policy.escalation_reward` at assignment."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "escalations",
+            "docs": [
+              "Escrows escalated so far."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

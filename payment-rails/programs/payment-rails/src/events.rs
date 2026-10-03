@@ -390,6 +390,39 @@ pub struct FacilityEvent {
     pub actor: Pubkey,
 }
 
+/// Keeper lifecycle and SLA escalations (doc 06 §8, #127).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+pub enum KeeperAction {
+    /// Keeper bonded (amount = bond posted).
+    Registered,
+    /// Bond increased (amount = top-up).
+    ToppedUp,
+    /// Operator assigned the keeper to a session (amount = 0).
+    Assigned,
+    /// SLA missed: a third party refunded an escrow the keeper left open and
+    /// was paid `amount` from the keeper's bond.
+    Escalated,
+    /// Assignment released after every escrow closed (amount = 0).
+    Released,
+    /// Keeper withdrew its whole bond and closed (amount = bond returned).
+    Withdrawn,
+}
+
+/// Emitted by every keeper instruction (#127).
+#[event]
+#[derive(Debug)]
+pub struct KeeperEvent {
+    pub action: KeeperAction,
+    /// The keeper's wallet.
+    pub keeper: Pubkey,
+    /// Session (default when not session-scoped).
+    pub session: Pubkey,
+    /// micro-USDC, per `action`.
+    pub amount: u64,
+    /// Who signed.
+    pub caller: Pubkey,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

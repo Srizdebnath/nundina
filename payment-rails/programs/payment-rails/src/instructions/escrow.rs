@@ -353,12 +353,18 @@ fn drain_usdc_vault<'info>(
 /// buyer's unfilled excess comes back (AE-P8). Forfeits the bond on the way
 /// out when AE-P4 says so, then closes vault + escrow, rent to the owner.
 pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
+    refund_buy(ctx.accounts)
+}
+
+/// Body of [`process_refund`], shared with the keeper escalation path
+/// (`keeper::process_refund_escalated`, #127) so both run one refund.
+pub(crate) fn refund_buy(a: &mut Refund) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    let escrow = &ctx.accounts.escrow;
+    let escrow = &a.escrow;
     // A sell escrow also has an asset vault; closing it here would orphan
     // the asset. Sellers use `refund_ask`.
     require!(escrow.side == Side::Buy, RailsError::WrongSide);
-    let route = ctx.accounts.session.refund_route(escrow.revealed, now)?;
+    let route = a.session.refund_route(escrow.revealed, now)?;
     let (cash, bond) = (escrow.cash, escrow.bond);
     let forfeit = if route == BondRoute::ToReserve {
         bond
@@ -366,7 +372,7 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
         0
     };
 
-    let session_key = ctx.accounts.session.key();
+    let session_key = a.session.key();
     let owner_key = escrow.owner;
     let escrow_key = escrow.key();
     let seeds: &[&[u8]] = &[
@@ -377,20 +383,20 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
     ];
     let recorded = cash.checked_add(bond).ok_or(RailsError::MathOverflow)?;
     let (to_reserve, to_owner, cash_shortfall) = drain_usdc_vault(
-        &ctx.accounts.token_program,
-        &ctx.accounts.usdc_mint,
-        &ctx.accounts.vault,
-        ctx.accounts.escrow.to_account_info(),
-        ctx.accounts.owner.to_account_info(),
-        &ctx.accounts.owner_token,
-        ctx.accounts.reserve.to_account_info(),
+        &a.token_program,
+        &a.usdc_mint,
+        &a.vault,
+        a.escrow.to_account_info(),
+        a.owner.to_account_info(),
+        &a.owner_token,
+        a.reserve.to_account_info(),
         seeds,
         recorded,
         forfeit,
     )?;
-    untrack(&mut ctx.accounts.session, cash, bond, 0, cash_shortfall, 0)?;
+    untrack(&mut a.session, cash, bond, 0, cash_shortfall, 0)?;
 
-    let caller = ctx.accounts.caller.key();
+    let caller = a.caller.key();
     if to_reserve > 0 {
         emit_escrow(
             EscrowAction::BondForfeited,
@@ -436,10 +442,16 @@ pub fn process_refund(ctx: Context<Refund>) -> Result<()> {
 /// the issuer thaws this one). With a vault drained to zero, no asset moves
 /// and a frozen destination does not block the bond.
 pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
+    refund_ask(ctx.accounts)
+}
+
+/// Body of [`process_refund_ask`], shared with the keeper escalation path
+/// (`keeper::process_refund_escalated`, #127) so both run one refund.
+pub(crate) fn refund_ask(a: &mut RefundAsk) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    let escrow = &ctx.accounts.escrow;
+    let escrow = &a.escrow;
     require!(escrow.side == Side::Sell, RailsError::WrongSide);
-    let route = ctx.accounts.session.refund_route(escrow.revealed, now)?;
+    let route = a.session.refund_route(escrow.revealed, now)?;
     let (asset, bond) = (escrow.asset, escrow.bond);
     let forfeit = if route == BondRoute::ToReserve {
         bond
@@ -447,7 +459,7 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
         0
     };
 
-    let session_key = ctx.accounts.session.key();
+    let session_key = a.session.key();
     let owner_key = escrow.owner;
     let escrow_key = escrow.key();
     let seeds: &[&[u8]] = &[
@@ -462,57 +474,50 @@ pub fn process_refund_ask(ctx: Context<RefundAsk>) -> Result<()> {
     // not block the refund, or the seller's bond is stranded forever
     // (AE-P10 / doc 06 §11 H5, #62). Return what is there and record the
     // gap as `AssetShortfall`. Checked before any cash moves (#90).
-    let held = ctx.accounts.asset_vault.amount;
+    let held = a.asset_vault.amount;
     let shortfall = asset.saturating_sub(held);
     require!(
-        held == 0 || !ctx.accounts.owner_asset.is_frozen(),
+        held == 0 || !a.owner_asset.is_frozen(),
         RailsError::RefundAssetDestinationFrozen
     );
 
-    let escrow_info = ctx.accounts.escrow.to_account_info();
-    let owner_info = ctx.accounts.owner.to_account_info();
+    let escrow_info = a.escrow.to_account_info();
+    let owner_info = a.owner.to_account_info();
     let (to_reserve, to_owner, cash_shortfall) = drain_usdc_vault(
-        &ctx.accounts.token_program,
-        &ctx.accounts.usdc_mint,
-        &ctx.accounts.vault,
+        &a.token_program,
+        &a.usdc_mint,
+        &a.vault,
         escrow_info.clone(),
         owner_info.clone(),
-        &ctx.accounts.owner_usdc,
-        ctx.accounts.reserve.to_account_info(),
+        &a.owner_usdc,
+        a.reserve.to_account_info(),
         seeds,
         bond,
         forfeit,
     )?;
 
-    let asset_vault_info = ctx.accounts.asset_vault.to_account_info();
+    let asset_vault_info = a.asset_vault.to_account_info();
     if held > 0 {
         token::transfer(
-            &ctx.accounts.asset_token_program,
-            &ctx.accounts.asset_mint,
+            &a.asset_token_program,
+            &a.asset_mint,
             asset_vault_info.clone(),
-            ctx.accounts.owner_asset.to_account_info(),
+            a.owner_asset.to_account_info(),
             escrow_info.clone(),
             &[seeds],
             held,
         )?;
     }
     token::close(
-        &ctx.accounts.asset_token_program,
+        &a.asset_token_program,
         asset_vault_info,
         owner_info,
         escrow_info,
         &[seeds],
     )?;
-    untrack(
-        &mut ctx.accounts.session,
-        0,
-        bond,
-        asset,
-        cash_shortfall,
-        shortfall,
-    )?;
+    untrack(&mut a.session, 0, bond, asset, cash_shortfall, shortfall)?;
 
-    let caller = ctx.accounts.caller.key();
+    let caller = a.caller.key();
     if to_reserve > 0 {
         emit_escrow(
             EscrowAction::BondForfeited,

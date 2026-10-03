@@ -164,6 +164,73 @@ pub mod payment_rails {
         instructions::escrow::process_refund_ask(ctx)
     }
 
+    /// #127: keeper terms (min bond, SLA after the hard deadline, reward
+    /// per escalated escrow). Config authority only.
+    pub fn initialize_keeper_policy(
+        ctx: Context<InitializeKeeperPolicy>,
+        min_bond: u64,
+        sla_seconds: i64,
+        escalation_reward: u64,
+    ) -> Result<()> {
+        instructions::keeper::process_initialize_keeper_policy(
+            ctx,
+            min_bond,
+            sla_seconds,
+            escalation_reward,
+        )
+    }
+
+    /// #127: change keeper terms; live assignments keep their snapshot.
+    pub fn set_keeper_policy(
+        ctx: Context<SetKeeperPolicy>,
+        min_bond: u64,
+        sla_seconds: i64,
+        escalation_reward: u64,
+    ) -> Result<()> {
+        instructions::keeper::process_set_keeper_policy(
+            ctx,
+            min_bond,
+            sla_seconds,
+            escalation_reward,
+        )
+    }
+
+    /// #127: bond a keeper (≥ `min_bond` USDC into a PDA-owned vault).
+    pub fn register_keeper(ctx: Context<RegisterKeeper>, bond: u64) -> Result<()> {
+        instructions::keeper::process_register_keeper(ctx, bond)
+    }
+
+    /// #127: add to a keeper's bond.
+    pub fn top_up_keeper(ctx: Context<TopUpKeeper>, amount: u64) -> Result<()> {
+        instructions::keeper::process_top_up_keeper(ctx, amount)
+    }
+
+    /// #127: the session operator assigns a bonded keeper; SLA snapshotted.
+    pub fn assign_keeper(ctx: Context<AssignKeeper>) -> Result<()> {
+        instructions::keeper::process_assign_keeper(ctx)
+    }
+
+    /// #127: after the keeper's SLA, anyone refunds a buy escrow and is
+    /// paid from the keeper's bond (same refund body as `refund`).
+    pub fn refund_escalated(ctx: Context<RefundEscalated>) -> Result<()> {
+        instructions::keeper::process_refund_escalated(ctx)
+    }
+
+    /// #127: as `refund_escalated`, for a sell escrow (`refund_ask`).
+    pub fn refund_ask_escalated(ctx: Context<RefundAskEscalated>) -> Result<()> {
+        instructions::keeper::process_refund_ask_escalated(ctx)
+    }
+
+    /// #127: close a keeper's duty once the session has no open escrow.
+    pub fn release_assignment(ctx: Context<ReleaseAssignment>) -> Result<()> {
+        instructions::keeper::process_release_assignment(ctx)
+    }
+
+    /// #127: a keeper with no live assignment takes its bond back and closes.
+    pub fn withdraw_keeper(ctx: Context<WithdrawKeeper>) -> Result<()> {
+        instructions::keeper::process_withdraw_keeper(ctx)
+    }
+
     // ── R3 · payout router ──────────────────────────────────────────────
 
     /// Admit an attested payout wallet (registrar; hash only, no PII).

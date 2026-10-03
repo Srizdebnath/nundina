@@ -13,7 +13,7 @@
 import type { Address, TransactionSigner } from "@solana/kit";
 import { clockNow, exists, fetchDecoded, listByKey, ownerTokenAccount, tokenProgramOf, type R } from "./chain.ts";
 import { ix, type Struct } from "./idl.ts";
-import { assetVaultPda, configPda, escrowPda, receiptPda, vaultPda } from "./pda.ts";
+import { assetVaultPda, configPda, escrowPda, receiptPda, sessionKeeperPda, vaultPda } from "./pda.ts";
 import { refundRoute, type SessionStatus } from "./rules.ts";
 import { send, type Ctx } from "./send.ts";
 
@@ -36,6 +36,22 @@ export interface CashSession extends Struct {
   gross_settled: bigint;
   total_cash_shortfall: bigint;
   total_asset_shortfall: bigint;
+}
+
+/** A keeper's duty for one session (#127). */
+export interface SessionKeeper extends Struct {
+  session: Address;
+  keeper: Address;
+  due_at: bigint;
+  reward: bigint;
+  escalations: number;
+}
+
+export interface Keeper extends Struct {
+  wallet: Address;
+  vault: Address;
+  assignments: number;
+  missed: number;
 }
 
 export interface Escrow extends Struct {
@@ -72,10 +88,22 @@ export interface Outcome {
  * Refund every escrow of `session` that the program would refund now.
  * `ctx.payer` signs as `caller` — refunds are permissionless, so any
  * participant's wallet can run this (the kill-the-crank guarantee).
+ *
+ * Bonded keepers (#127): if the session has an assigned keeper whose SLA
+ * (`due_at`) has passed and `escalateTo` (the caller's USDC account) is
+ * given, each refund goes through `refund_escalated` / `refund_ask_escalated`:
+ * the same refund, plus the escalation reward from the keeper's bond.
  */
-export async function refundAll(ctx: Ctx, session: Address): Promise<Outcome[]> {
+export async function refundAll(ctx: Ctx, session: Address, opts: { escalateTo?: Address } = {}): Promise<Outcome[]> {
   const s = await loadSession(ctx.rpc, session);
   const now = await clockNow(ctx.rpc);
+  const skAddr = await sessionKeeperPda(session);
+  const sk = await fetchDecoded<SessionKeeper>(ctx.rpc, "SessionKeeper", skAddr);
+  const keeper = sk ? await fetchDecoded<Keeper>(ctx.rpc, "Keeper", sk.keeper) : null;
+  const escalate = !!(opts.escalateTo && sk && keeper && now >= sk.due_at);
+  const keeperAccounts = escalate
+    ? { session_keeper: skAddr, keeper: sk!.keeper, vault: keeper!.vault, caller_token: opts.escalateTo! }
+    : undefined;
   const times = { status: s.status, revealEnd: s.reveal_end, settleDeadline: s.settle_deadline, failedAt: s.failed_at };
   const [usdcProgram, assetProgram] = await Promise.all([
     tokenProgramOf(ctx.rpc, s.usdc_mint),
@@ -106,24 +134,31 @@ export async function refundAll(ctx: Ctx, session: Address): Promise<Outcome[]> 
     };
     let instruction;
     if (e.side === "Buy") {
-      instruction = ix("refund", { ...common, owner_token: ownerUsdc });
+      const refund = { ...common, owner_token: ownerUsdc };
+      instruction = keeperAccounts
+        ? ix("refund_escalated", { refund, keeper: keeperAccounts })
+        : ix("refund", refund);
     } else {
       const ownerAsset = await ownerTokenAccount(ctx.rpc, e.owner, s.asset_mint);
       if (!ownerAsset) {
         out.push({ target, result: "skipped", detail: "owner has no asset account to return asset into" });
         continue;
       }
-      instruction = ix("refund_ask", {
+      const refund = {
         ...common,
         asset_vault: e.asset_vault,
         owner_usdc: ownerUsdc,
         owner_asset: ownerAsset,
         asset_mint: s.asset_mint,
         asset_token_program: assetProgram,
-      });
+      };
+      instruction = keeperAccounts
+        ? ix("refund_ask_escalated", { refund, keeper: keeperAccounts })
+        : ix("refund_ask", refund);
     }
-    const r = await send(ctx, `refund ${target.slice(0, 20)}… (bond → ${route === "ToReserve" ? "reserve" : "owner"})`, [instruction], { cuLimit: 120_000 });
-    if (r.status === "sent") out.push({ target, result: "sent", signature: r.signature, detail: `bond → ${route}` });
+    const label = `${escalate ? "escalated " : ""}refund ${target.slice(0, 20)}… (bond → ${route === "ToReserve" ? "reserve" : "owner"})`;
+    const r = await send(ctx, label, [instruction], { cuLimit: escalate ? 160_000 : 120_000 });
+    if (r.status === "sent") out.push({ target, result: "sent", signature: r.signature, detail: `bond → ${route}${escalate ? ", escalated: keeper SLA missed" : ""}` });
     else if (!(await exists(ctx.rpc, escrow))) out.push({ target, result: "already-done", detail: "refunded concurrently" });
     else out.push({ target, result: "failed", detail: r.name ?? r.message });
   }

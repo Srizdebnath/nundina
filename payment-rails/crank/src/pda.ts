@@ -36,3 +36,7 @@ export const facilityPda = (curator: Address, id: bigint) => pda("facility", cur
 export const facilityVaultPda = (facility: Address) => pda("facility_vault", facility);
 export const advancePda = (facility: Address, borrower: Address) => pda("advance", facility, borrower);
 export const couponPda = (distributor: Address, period: bigint) => pda("coupon", distributor, le(period, 8));
+export const keeperPolicyPda = () => pda("keeper_policy");
+export const keeperPda = (wallet: Address) => pda("keeper", wallet);
+export const keeperVaultPda = (keeper: Address) => pda("keeper_vault", keeper);
+export const sessionKeeperPda = (session: Address) => pda("session_keeper", session);
