@@ -38,7 +38,7 @@ import {
 import { clockNow, exists, tokenBalance } from "../src/chain.ts";
 import { loadSession, refundAll, settlePlan, type FillPlan } from "../src/crank.ts";
 import { loadKeypair, makeCtx } from "../src/ctx.ts";
-import { exportEvidence } from "../src/evidence.ts";
+import { exportEvidence, verifyEvidence } from "../src/evidence.ts";
 import { ix, PROGRAM_ID } from "../src/idl.ts";
 import { formatReport, reconcileFacility, reconcileSession } from "../src/ledger.ts";
 import {
@@ -250,8 +250,13 @@ async function main(): Promise<void> {
 
   writeFileSync(process.env.DRILL_OUT ?? "/dev/null", JSON.stringify({ session, facility }) + "\n");
   const dir = process.env.EVIDENCE_DIR!;
-  const manifest = await exportEvidence(ops.rpc, dir);
+  // #127: the bundle is signed by a key of its own, not the authority's.
+  const exporter = await generateKeyPairSigner();
+  const manifest = await exportEvidence(ops.rpc, dir, exporter);
   const body = readFileSync(join(dir, "events.jsonl"));
+  const verdict = await verifyEvidence(dir, exporter.address);
+  check(verdict.ok, `evidence attestation verifies, signer ${exporter.address} (${verdict.problems.join("; ") || "clean"})`);
+  check(!(await verifyEvidence(dir, authority.address)).ok, "evidence signed by another key is rejected");
   check(createHash("sha256").update(body).digest("hex") === manifest.sha256, `evidence manifest SHA-256 re-verifies (${manifest.events} events, ${manifest.transactions} txs)`);
   check(manifest.byEvent.FillSettled === 2, `evidence: 2 FillSettled (got ${manifest.byEvent.FillSettled})`);
   check(

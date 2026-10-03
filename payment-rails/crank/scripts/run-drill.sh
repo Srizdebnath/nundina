@@ -37,4 +37,11 @@ KEYPAIR="$TMP/authority.json" npx tsx src/cli.ts reconcile --facility "$FACILITY
 KEYPAIR="$TMP/authority.json" npx tsx src/cli.ts refunds --session "$SESSION"
 KEYPAIR="$TMP/authority.json" npx tsx src/cli.ts export --out "$TMP/cli-evidence" >/dev/null
 echo "CLI export: $(node -p "require('$TMP/cli-evidence/manifest.json').events") events"
+# #127: the CLI bundle is signed by the exporting key and verifies offline;
+# naming another signer must fail.
+SIGNER=$(node -p "require('$TMP/cli-evidence/manifest.json').attestation.signer")
+npx tsx src/cli.ts verify-export --dir "$TMP/cli-evidence" --signer "$SIGNER"
+if npx tsx src/cli.ts verify-export --dir "$TMP/cli-evidence" --signer 11111111111111111111111111111111 >/dev/null; then
+  echo "verify-export accepted the wrong signer"; exit 1
+fi
 echo "DRILL OK"

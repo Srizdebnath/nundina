@@ -26,7 +26,8 @@ npm run crank -- refunds   --session <addr>                    # any wallet
 npm run crank -- settle    --session <addr> --plan fills.json [--max-sends N]
 npm run crank -- finish    --session <addr>                    # operator
 npm run crank -- reconcile --session <addr>                    # or --facility <addr>
-npm run crank -- export    --out evidence/ [--limit N]
+npm run crank -- export    --out evidence/ [--limit N]       # signed by EVIDENCE_KEYPAIR (or KEYPAIR)
+npm run crank -- verify-export --dir evidence/ [--signer <addr>]   # keyless, offline
 ```
 
 `fills.json` is the auction engine's allocation:
@@ -37,6 +38,7 @@ npm run crank -- export    --out evidence/ [--limit N]
 | `RPC_URL` | `http://127.0.0.1:8899` | JSON-RPC |
 | `WS_URL` | derived (port + 1) | subscriptions, used for confirmation |
 | `KEYPAIR` | `~/.config/solana/id.json` | payer; the caller for refunds, the operator for settle and finish |
+| `EVIDENCE_KEYPAIR` | `KEYPAIR` | signs `export` bundles (#127). Use a key of its own, published to auditors, not the operator's |
 | `PRIORITY_FEE_MIN` / `_MAX` | `0` / `50000` | µlamports per CU; the p75 of recent fees for the program is clamped to these |
 | `MAX_ATTEMPTS` / `RETRY_BASE_MS` | `5` / `500` | retries for **transient** failures, with exponential backoff and a fresh blockhash each time |
 
@@ -65,13 +67,35 @@ The exit code is 1 if any action fails or a reconciliation isn't clean.
   decoded events to `events.jsonl`, plus a `manifest.json` with counts, the
   slot range and a **SHA-256** of the file. An event only counts if it was
   emitted inside the rails program's own call frame, so a program it calls
-  can't inject look-alike events.
+  can't inject look-alike events. The manifest is **signed** (#127): an
+  ed25519 `attestation` by the exporting key over a domain-separated,
+  key-sorted (canonical) JSON of the manifest, which carries the file's
+  SHA-256. `verify-export` re-checks the hash, the event count and the
+  signature, optionally against the signer the auditor was told to trust;
+  it needs no key and no RPC.
+
+## Not built yet (#127)
+
+What SRS 08 §6 asks of the crank-runner beyond this package. None of it
+can be built here before the programs it would drive exist:
+
+| SRS 08 §6 / §8 | State | Waits on |
+|---|---|---|
+| **Bonded** crank wallet | ❌ The crank signs with whatever `KEYPAIR` names (the operator's for settle/finish). No program holds a crank bond, so there is nothing to bond against | a crank-bond account in the engine programs (auction-engine) |
+| Phase-deadline cranks (Commit → Reveal → Clearing …) | ❌ | `auction-engine` (no code, #128). The rails' own deadlines need no crank: refunds open by themselves at `settle_deadline` |
+| Seasoning merges (`merge_expired`) | ❌ | the `credit-gate` lot ledger (CG-P3, #122) |
+| Distribution cranks | ❌ | `tranche-engine` (TE-P4). The rails' `distribute_coupon` is called by the distributor, not cranked |
+| Session-scoped bundles with marks + model versions (AC-12) | ❌ bundles are program-scoped, cash events only | `mark-engine` |
+
+The R5 devnet run settled Circle devnet USDC against a **manifest mint, not
+live NPCS** (`../PHASES.md` R5). R5 is met for the cash leg; the live-NPCS
+DvP stays open until the gate can thaw an escrow vault.
 
 ## Tests
 
 ```bash
 npm run typecheck    # tsc --strict, noUncheckedIndexedAccess
-npm test             # 16 unit tests: codec vs IDL, refund rules, fees, error classes, evidence attribution
+npm test             # unit tests: codec vs IDL, refund rules, fees, error classes, evidence attribution, evidence signing
 npm run drill        # kill-the-crank drill on a fresh solana-test-validator
 ```
 
@@ -84,7 +108,7 @@ on the PATH. It deploys the built program as upgradeable, then:
    → reserve). After it, that participant refunds **everyone** using their
    own wallet, and a second run finds nothing left.
 4. Exact per-party balances hold, and USDC and asset are conserved. The
-   session and facility ledgers are clean, and the evidence SHA-256
-   re-verifies.
-5. Finally, the CLI runs `reconcile`, `refunds` and `export` against the
-   final state.
+   session and facility ledgers are clean, and the evidence SHA-256 and
+   its signature (by a key of its own) re-verify.
+5. Finally, the CLI runs `reconcile`, `refunds`, `export` and
+   `verify-export` against the final state.
