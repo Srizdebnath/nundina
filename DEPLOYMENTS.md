@@ -13,7 +13,7 @@ to match.
 
 | Program | Cluster | Program ID | Slot | Deploy signature | Build SHA-256 | Upgrade authority |
 |---|---|---|---|---|---|---|
-| payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (single key, pilot; Squads 2-of-2 per 08 §8 before mainnet) |
+| payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
 | credit-gate v0.1.0 (P0 skeleton) | devnet | `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` | 503888002 | `2rDLR9z1NDskQsBXMf1jejEKVrCZ5ch7TJRxNTbfL79mZsms5rzigAi6JX4m7PKFLPVYryREVw7Gvz311xKv32dR` | `6e8c50879a0151c313f33c31b79d0ef4f9a945200a08cbbd4985efd75eef0e21` | `BprmmqrzBADdQ2iKARtqcDndWV5k22aUGrkMKeySjKgp` (single key — P0 bootstrap; Squads 2-of-2 takes over at P1 per 08 §8) |
 
 ## NPCS asset (Token-2022 mint)
@@ -102,21 +102,24 @@ cd token && CLUSTER=devnet npm run verify
   #96). Do this for every config when the bootstrap key is retired, and
   before the key is destroyed. A config whose authority key is lost cannot
   be governed again.
-- **Squads 2-of-2 migration: dated schedule (#126).** Not executed. Every
-  authority below is still a single key; this table is the plan, and a row
-  counts as done only when its *Executed* cell holds a devnet signature.
-  The highest-blast-radius key moves first. The two vault members (founder
-  + ops, SRS 08 §8) are named by the key holders; a date that slips gets a
-  new date here, never a blank.
+- **Squads 2-of-2 migration (#126): executed on devnet for every key this
+  machine holds.** Tool: [`ops/squads/`](ops/squads/README.md) (`migrate.ts`,
+  end-to-end tested against the real Squads v4 program on a local validator).
+  Full record with every signature: [`ops/squads/deployment-devnet.json`](ops/squads/deployment-devnet.json);
+  `npx tsx migrate.ts verify` re-checks it keylessly.
 
-  | # | Authority | Held by today | Moves to | How | Target date | Executed |
-  |---|---|---|---|---|---|---|
-  | 0 | — | — | Squads 2-of-2 multisig on devnet, 48h timelock on upgrades | Squads app or CLI, members = founder + ops; record the multisig and vault PDA here | 2026-10-08 | ☐ |
-  | 1 | Offline backups of every key below until its row is done | — | two offline copies each ([`token/runbook.md`](token/runbook.md) § Backup) | record *that* a backup exists, by custodian, in the private ops notes | 2026-10-08 | ☐ |
-  | 2 | NPCS mint, freeze, permanent delegate, metadata update | `2xhjfAdr…6sRXMh` (if stolen: unlimited mint and freeze) | vault PDA (freeze authority moves on to the Token ACL `MintConfig` when the gate wires in) | `spl-token authorize <mint> mint <vault>` and `… freeze <vault>`; the delegate and metadata authorities via Token-2022 `SetAuthority` / `UpdateMetadataAuthority` | 2026-10-09 | ☐ |
-  | 3 | `payment-rails` upgrade authority | `9WH1…2uDZ` | vault PDA | `solana program set-upgrade-authority` ([`payment-rails/README.md`](payment-rails/README.md) § Before mainnet) | 2026-10-09 | ☐ |
-  | 4 | `credit-gate` upgrade authority + gate root + every config | `Bprm…jKgp` | vault PDA | after the #45 redeploy: `set-upgrade-authority`, then `propose_root_authority` → `accept_root_authority`, then each config per #50 above | 2026-10-10 | ☐ |
+  | # | Authority | Was | Now | Executed (devnet) |
+  |---|---|---|---|---|
+  | 0 | Squads v4 multisig, threshold **2-of-2**, timelock **48h**, no config authority (only a 2-of-2 vote changes members) | — | `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7` · vault `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV` | ✅ 2026-10-03 · `5dyaTmrZ…b1aWH` |
+  | 1 | `payment-rails` upgrade authority | `9WH1…2uDZ` | vault | ✅ 2026-10-03 · `519n9Dw2…VstjP9`; `verify.sh` passes against the new row in `payment-rails/DEPLOYMENTS.md` |
+  | 2 | Vault answers to 2-of-2 | — | proposal #1 approved by both members | ✅ approvals 2026-10-03; execute opens 2026-10-05 10:00 UTC (timelock) — `npx tsx migrate.ts prove` |
+  | 3 | NPCS mint, freeze, permanent delegate, metadata pointer, metadata update | `2xhjfAdr…6sRXMh` | vault (freeze moves on to the Token ACL `MintConfig` when the gate wires in) | ☐ **key holder runs** `CLUSTER=devnet npx tsx migrate.ts move-mint Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i --authority <2xhj….json>` (the same command passed on an NPCS-shaped mint in `test-localnet.sh`) |
+  | 4 | `credit-gate` upgrade authority | `Bprm…jKgp` | vault | ☐ **key holder runs**, after the #45 redeploy: `CLUSTER=devnet npx tsx migrate.ts move-program 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c --authority <Bprm….json>`; then the gate root and each config per #50 above (accept signed by the vault through a Squads proposal) |
 
-  After each row: re-run `verify.sh` / `npm run verify`, put the signature
-  and the new authority in the registry rows at the top, and update
-  `token/metadata.json` `authority_model`.
+  **Custody caveat (devnet only):** both member keys were generated on one
+  machine (`~/.config/nundina/squads-devnet/`, mode 600, outside the repo).
+  That proves the mechanism (2 approvals required, 48h timelock, old key
+  powerless) but is not 2-of-2 *custody*. For mainnet the members are two
+  people's own hardware wallets; `create` takes no member key from the repo.
+  The `RailsConfig` roles (`authority`, `operator`, `registrar`) still sit
+  on `9WH1…2uDZ`: they are program-level roles, not the upgrade authority.

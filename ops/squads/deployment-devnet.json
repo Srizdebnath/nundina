@@ -1,0 +1,33 @@
+{
+  "cluster": "devnet",
+  "squadsProgram": "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+  "multisig": "CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7",
+  "vault": "8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV",
+  "createKey": "9tdUiZ51QPzsofYt8NY2BgR9UtswbHqu896VTiCSRqry",
+  "members": [
+    "6wjbrnq2CCXdo2JaxupTYk2YnZNVHUYX2grg7EL4SQ4s",
+    "Fp5eduZv9Zw2phTHVkoGxfUhsb6KLxczsVG2srNfisdS"
+  ],
+  "threshold": 2,
+  "timeLockSeconds": 172800,
+  "createSignature": "5dyaTmrZnnqu4jZVfqG28MENahLgi5uite2BLvYBP5huiC96anQnHc8GfrYaX97kZkAyDoPUxXpDSNax3P6b1aWH",
+  "moves": [
+    {
+      "kind": "program-upgrade-authority",
+      "target": "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn",
+      "from": "9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ",
+      "signature": "519n9Dw2dr3sNMYBz98hVfFzU5mLgchVh3DmrNFUsuDR64sFKNeA3ZeX9iWeFfqWXu8JNHVSTaFi7NbQE9VstjP9",
+      "at": "2026-10-03T10:00:13.553Z"
+    }
+  ],
+  "proofs": [
+    {
+      "transactionIndex": "1",
+      "proposeSignature": "4Pc1nrA3zk2eSWfYDKu7dGeXyDWVBiQkRsSPcEVDVSuJoUNb3RTyBgKNnFA14WpFJ1vtt3S32viDkoJqSDQpJry2",
+      "approvals": [
+        "2NzA7v5XtqrrNKEa5HYxkJPMJjZB8EXfxmNtqHm3Vm2wQfRqAZTWfcHyhDHweEwPwjHsaHvey3cEajXNXnH3TkRS",
+        "3agXhnfVfdC5YERt8xnKdSKXjJNfypTAdojAKRF5azmd3GpA92MMJ6KWtamJoEerzceuu2tdhV5WiTxnVaJ4cMfE"
+      ]
+    }
+  ]
+}
