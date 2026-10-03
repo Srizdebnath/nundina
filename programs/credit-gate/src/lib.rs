@@ -3,12 +3,14 @@
 //! SRS 08 §4.1 (CG-P1..P7) · doc 09. Audit-scope-critical: this program is
 //! the one that enforces law.
 //!
-//! P0 scope (this skeleton): the CG-P2 config anchor — one governed,
-//! evented policy PDA per mint — plus the event families (CG-P7) that every
-//! later instruction must emit. CG-P1/P3–P6 (Token ACL validate, SAS
-//! attestation read, lot ledger, governor, block-list) land in P1 on this
-//! frame. This file carries no `unsafe` and no external program CPIs yet;
-//! the sRFC37 gate interface lands in P1 behind a lint-gated boundary.
+//! Built: the CG-P2 config anchor (one governed, evented policy PDA per
+//! mint), the CG-P5 block-list and its screen ([`blocklist`]), and the
+//! CG-P3 lot ledger ([`lots`]) (#122). Not built: CG-P1 (the Token ACL
+//! `validate` entrypoint), CG-P4 (holder governor) and CG-P6 (SAS
+//! attestation read). CG-P4 and CG-P6 both need the SAS decision (#52):
+//! the governor counts `investor_id`s, which only an attestation supplies.
+//! This crate carries no `unsafe` and no external program CPIs yet; the
+//! sRFC37 gate interface lands with CG-P1 behind a lint-gated boundary.
 
 #![deny(unsafe_code)]
 // missing_docs activates in P1 when the hand-written account surface
@@ -20,6 +22,12 @@
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
+
+pub mod blocklist;
+pub mod lots;
+
+pub use blocklist::*;
+pub use lots::*;
 
 declare_id!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
 
@@ -110,7 +118,10 @@ pub struct MarketConfig {
     pub seasoning_seconds: i64,
     /// Attestation must remain valid at least this long after validation (H4).
     pub settlement_horizon_seconds: i64,
-    /// Block-list PDA (CG-P5). `None` in the pilot; the check path still exists.
+    /// Block-list header (CG-P5, [`BlockList`]). `None` = no list
+    /// configured: the screen passes. Set by `initialize_blocklist`;
+    /// re-pointable but never clearable. Pointing it anywhere but this
+    /// program's header for the mint makes every screen fail closed.
     pub blocklist: Option<Pubkey>,
     /// PDA bump.
     pub bump: u8,
@@ -263,27 +274,11 @@ pub struct ValidateDecision {
     pub attestation_inputs_hash: [u8; 32],
 }
 
-/// Emitted when lots are appended/split/merged (P1: CG-P3).
-#[event]
-#[derive(Debug)]
-pub struct LotEvent {
-    /// 0 = append, 1 = split, 2 = merge-to-free.
-    pub kind: u8,
-    /// Gated mint.
-    pub mint: Pubkey,
-    /// Lot owner.
-    pub owner: Pubkey,
-    /// Quantity affected (base units).
-    pub qty: u64,
-    /// New seasoning expiry for appended/split halves.
-    pub restriction_expiry: i64,
-}
-
 /// Typed rejection reasons (CG-P7). Wire-stable; human-readable mapping
 /// lives off-chain (ME-5/UI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
 pub enum GateReject {
-    /// Owner wallet is on the enforced block-list.
+    /// Owner wallet is on the enforced block-list ([`blocklist::screen`]).
     Blocklisted,
     /// Missing/expired/mismatched-attester attestation for the owner.
     /// Never constructed yet: there is no attestation read (#52).
@@ -296,7 +291,8 @@ pub enum GateReject {
     GovernorCap,
     /// A required market config field is unset/misconfigured.
     ConfigInvalid,
-    /// Lot ledger full and uncompacted (D15 boundary).
+    /// Lot ledger full of unexpired lots (D15 boundary). Raised today as
+    /// [`GateError::LotLedgerFull`].
     LotLedgerFull,
 }
 
@@ -345,6 +341,28 @@ pub enum GateError {
     /// `accept_root_authority` with no successor proposed.
     #[msg("No gate root hand-over is pending")]
     NoPendingRootAuthority,
+    /// The wallet is on the market's block-list (CG-P5).
+    #[msg("Wallet is block-listed")]
+    Blocklisted,
+    /// The config's block-list is not this program's header for the mint,
+    /// so the gate cannot read it and fails closed (CG-P5).
+    #[msg("Block-list is not readable by the gate")]
+    BlocklistUnreadable,
+    /// Every lot slot holds an unexpired lot (CG-P3, D15).
+    #[msg("Lot ledger full")]
+    LotLedgerFull,
+    /// No live lot with that id.
+    #[msg("Lot not found")]
+    LotNotFound,
+    /// Zero quantity, or a split that would leave a half empty.
+    #[msg("Invalid lot quantity")]
+    InvalidLotQty,
+    /// `merge_expired` found nothing to merge.
+    #[msg("No expired lots")]
+    NothingExpired,
+    /// Arithmetic overflow.
+    #[msg("Math overflow")]
+    MathOverflow,
 }
 
 #[program]
@@ -611,6 +629,166 @@ pub mod credit_gate {
             old_authority,
             new_authority,
             new_config_hash: cfg.fingerprint(),
+        });
+        Ok(())
+    }
+
+    /// CG-P5: create the market's block-list header and point the config
+    /// at it. From then on every screen reads it, and `update_config` can
+    /// re-point but never clear it.
+    pub fn initialize_blocklist(ctx: Context<InitializeBlocklist>) -> Result<()> {
+        let list = ctx.accounts.blocklist.key();
+        ctx.accounts.blocklist.set_inner(BlockList {
+            mint: ctx.accounts.config.mint,
+            entries: 0,
+            bump: ctx.bumps.blocklist,
+        });
+        let cfg = &mut ctx.accounts.config;
+        cfg.blocklist = Some(list);
+        cfg.check_bounds(&cfg.key())?;
+        emit!(ConfigUpdated {
+            mint: cfg.mint,
+            field_group: field_group::BLOCKLIST,
+            new_config_hash: cfg.fingerprint(),
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// CG-P5: block `wallet` on this market. Fails if already blocked.
+    pub fn block_wallet(
+        ctx: Context<BlockWallet>,
+        wallet: Pubkey,
+        reason_hash: [u8; 32],
+    ) -> Result<()> {
+        let list = &mut ctx.accounts.blocklist;
+        list.entries = list.entries.checked_add(1).ok_or(GateError::MathOverflow)?;
+        ctx.accounts.entry.set_inner(BlockEntry {
+            mint: list.mint,
+            wallet,
+            reason_hash,
+            blocked_at: Clock::get()?.unix_timestamp,
+            bump: ctx.bumps.entry,
+        });
+        emit!(BlocklistUpdated {
+            mint: list.mint,
+            wallet,
+            blocked: true,
+            reason_hash,
+            entries: list.entries,
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// CG-P5: unblock `wallet` (closes its entry; rent to the authority).
+    pub fn unblock_wallet(ctx: Context<UnblockWallet>, wallet: Pubkey) -> Result<()> {
+        let list = &mut ctx.accounts.blocklist;
+        list.entries = list.entries.saturating_sub(1);
+        emit!(BlocklistUpdated {
+            mint: list.mint,
+            wallet,
+            blocked: false,
+            reason_hash: ctx.accounts.entry.reason_hash,
+            entries: list.entries,
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// CG-P5 screen as an instruction, so a caller (auction-engine's
+    /// settle-time re-check, AE-P8) can CPI it: succeeds iff `wallet` is
+    /// clear on this market, fails [`GateError::Blocklisted`] otherwise,
+    /// and fails closed on an unreadable list.
+    pub fn check_blocklist(ctx: Context<CheckBlocklist>, _wallet: Pubkey) -> Result<()> {
+        blocklist::require_clear(&ctx.accounts.config, &ctx.accounts.entry)
+    }
+
+    /// CG-P3: open the lot ledger for `holder` (anyone may pay). The holder
+    /// is screened first: a block-listed wallet gets no ledger.
+    pub fn open_holder_lots(ctx: Context<OpenHolderLots>, holder: Pubkey) -> Result<()> {
+        blocklist::require_clear(&ctx.accounts.config, &ctx.accounts.block_entry)?;
+        ctx.accounts.lots.set_inner(HolderLots {
+            mint: ctx.accounts.config.mint,
+            holder,
+            free_qty: 0,
+            next_lot_id: 0,
+            lot_count: 0,
+            lots: [Lot::default(); MAX_LOTS],
+            bump: ctx.bumps.lots,
+        });
+        Ok(())
+    }
+
+    /// CG-P3 `append_lot`: record `qty` acquired now, seasoning for the
+    /// config's `seasoning_seconds`. Gate-config authority only (it stands
+    /// in for auction-engine settle and the primary mint). Re-screens the
+    /// holder: block-list precedence on every path (CG-P5).
+    pub fn append_lot(
+        ctx: Context<AppendLot>,
+        qty: u64,
+        source: LotSource,
+        affiliate: bool,
+        exemption_path: u8,
+    ) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        blocklist::require_clear(cfg, &ctx.accounts.block_entry)?;
+        let now = Clock::get()?.unix_timestamp;
+        let lots = &mut ctx.accounts.lots;
+        let lot = lots.append(
+            qty,
+            now,
+            cfg.seasoning_seconds,
+            source,
+            affiliate,
+            exemption_path,
+        )?;
+        emit!(LotEvent {
+            kind: 0,
+            mint: lots.mint,
+            owner: lots.holder,
+            lot_id: lot.lot_id,
+            qty,
+            restriction_expiry: lot.restriction_expiry,
+            free_qty: lots.free_qty,
+        });
+        Ok(())
+    }
+
+    /// CG-P3 `split_lot`: split `qty` off lot `lot_id`, both halves keeping
+    /// the original's seasoning and metadata. Gate-config authority only.
+    pub fn split_lot(ctx: Context<SplitLot>, lot_id: u32, qty: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lots = &mut ctx.accounts.lots;
+        let (_, new) = lots.split(lot_id, qty, now)?;
+        emit!(LotEvent {
+            kind: 1,
+            mint: lots.mint,
+            owner: lots.holder,
+            lot_id: new.lot_id,
+            qty,
+            restriction_expiry: new.restriction_expiry,
+            free_qty: lots.free_qty,
+        });
+        Ok(())
+    }
+
+    /// CG-P3 `merge_expired`: permissionless. Folds every seasoned lot into
+    /// the holder's FREE bucket. Fails [`GateError::NothingExpired`] when
+    /// there is nothing to fold, so every success is a state change.
+    pub fn merge_expired(ctx: Context<MergeExpired>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lots = &mut ctx.accounts.lots;
+        let merged = lots.merge_expired(now)?;
+        require!(merged > 0, GateError::NothingExpired);
+        emit!(LotEvent {
+            kind: 2,
+            mint: lots.mint,
+            owner: lots.holder,
+            lot_id: 0,
+            qty: merged,
+            restriction_expiry: now,
+            free_qty: lots.free_qty,
         });
         Ok(())
     }

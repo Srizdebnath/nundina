@@ -40,13 +40,13 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 
 | AC | Grade | What exists / what blocks it |
 |---|---|---|
-| AC-1 | ❌ | NPCS mint ✅. `credit-gate` is the CG-P2 config PDA only; no Token ACL wiring, no SAS read, no `validate` (#122, #52). The freeze authority is a wallet key, so no thaw goes through the gate |
+| AC-1 | ❌ | NPCS mint ✅. `credit-gate` has the CG-P2 config, the CG-P5 block-list and the CG-P3 lot ledger, but no Token ACL wiring, no SAS read and no `validate` (#122, #52). The freeze authority is a wallet key, so no thaw goes through the gate |
 | AC-2 | 🗺 | `mark-engine` and `nav-publisher` have no code; NAV math is in `credit-math` (`nav.rs`) with no consumer |
 | AC-3 | ⚠️ cash leg only | `payment-rails` escrow + one-fill DvP cash leg (live devnet, R5 on a manifest mint, not live NPCS). `auction-engine` has no code |
 | AC-4 | 🗺 | needs `auction-engine` + `mark-engine` |
 | AC-5 | ⚠️ cash leg only | `payment-rails` ROFR cash path; no session state machine around it |
-| AC-6 | ❌ | no lot ledger (#122). `seasoning_seconds` is stored config nothing reads |
-| AC-7 | ❌ | no holder governor (#122). `holder_cap` is stored config nothing reads |
+| AC-6 | ⚠️ ledger only | `credit-gate` lot ledger (#122): lots season by the config's `seasoning_seconds`, splits keep seasoning, permissionless `merge_expired` into FREE (LiteSVM). No auction session sells against it, and no fee pays the merge crank |
+| AC-7 | ❌ | no holder governor: it counts `investor_id`s, which only a SAS attestation supplies (#52). `holder_cap` is stored config nothing reads |
 | AC-8 | ⚠️ cash leg only | facility advance/repay/sweep in `payment-rails`; `queue-claim` has no code, so neither the sell path nor the pledge path exists. **The headline demo is unshipped** |
 | AC-9 | 🗺 **re-graded (#124)** | No liquidation instruction and no ladder (ROFR → backstop → forced sale → workout) anywhere; no `mark-engine`, so "no liquidation on a stale mark" (H4, LF-P4) has no implementation and no test. What exists: the H1 advance-rate ceiling on `payment-rails` advances |
 | AC-10 | ⚠️ cash leg only | exact-conservation cash waterfall in `payment-rails` + `credit-math`; no `tranche-engine` (no tranches, no subordination check) |
@@ -196,7 +196,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.1 `credit-gate` (Anchor; audit-scope-critical)
 
-> **As built (2026-10, #122):** CG-P2 (config PDA + governance) and the CG-P7 event types only. CG-P1, CG-P3, CG-P4, CG-P5 and CG-P6 have no code; see §1.1.
+> **As built (2026-10, #122):** CG-P2 (config PDA + governance); CG-P5 (block-list: one PDA per blocked wallet, governed, screened first on every lot path, fails closed on an unreadable list); CG-P3 (lot ledger: append / split / permissionless `merge_expired`; no crank fee yet; appends signed by the gate-config authority until auction-engine exists); CG-P7 events for all of them. **Not built:** CG-P1 (`validate` + Token ACL), CG-P4 (governor) and CG-P6 (SAS read): all three need the SAS decision (#52). See §1.1.
 
 | ID | Requirement | Ref |
 |---|---|---|
