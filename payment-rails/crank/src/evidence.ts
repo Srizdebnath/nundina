@@ -1,17 +1,31 @@
 /**
  * Evidence export for cash events (R4): every rails event, decoded from
  * transaction logs, written as JSON Lines plus a manifest with a SHA-256
- * over the file — so an auditor can re-derive every cash movement and prove
- * the export wasn't edited.
+ * over the file, and the manifest **signed** (ed25519) by the exporting
+ * key (#127, SRS 08 §6 "signed JSON files") — so an auditor can re-derive
+ * every cash movement, prove the export wasn't edited, and attribute it.
+ * `verifyEvidence` checks all three without a key or an RPC.
  *
  * Only `Program data:` lines emitted while the rails program itself is the
  * executing frame are attributed to it (the invoke stack is tracked from
  * the logs), so a CPI'd program can't inject look-alike events.
  */
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getBase64Encoder, type Address, type Signature } from "@solana/kit";
+import {
+  getBase58Decoder,
+  getBase58Encoder,
+  getBase64Encoder,
+  getPublicKeyFromAddress,
+  isAddress,
+  signBytes,
+  verifySignature,
+  type Address,
+  type KeyPairSigner,
+  type Signature,
+  type SignatureBytes,
+} from "@solana/kit";
 import type { R } from "./chain.ts";
 import { decodeEvent, PROGRAM_ID, type Value } from "./idl.ts";
 
@@ -77,6 +91,54 @@ export function transferProof(records: readonly Pick<EvidenceRecord, "event" | "
   return { fills: transfers.length, proven, unproven: transfers.length - proven };
 }
 
+/**
+ * Who vouches for a bundle (#127): an ed25519 signature by `signer` over
+ * `EVIDENCE_DOMAIN` + the canonical JSON of the manifest without this field
+ * (keys sorted at every level, so key order on disk doesn't matter). The
+ * manifest carries the SHA-256 of `events.jsonl`, so the signature covers
+ * every event.
+ */
+export interface Attestation {
+  scheme: "ed25519";
+  signer: Address;
+  /** base58, like a transaction signature. */
+  signature: string;
+}
+
+/** Domain separation: a bundle signature can't be replayed as a transaction or message. */
+export const EVIDENCE_DOMAIN = "nundina:payment-rails:evidence-manifest:v1\n";
+
+/** JSON with object keys sorted at every level. Pure. */
+export function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/** The exact bytes a manifest's attestation signs. Pure. */
+export function signedPayload(manifest: UnsignedManifest): Uint8Array {
+  const { attestation: _, ...unsigned } = manifest as Manifest;
+  return new TextEncoder().encode(EVIDENCE_DOMAIN + canonicalJson(unsigned));
+}
+
+/** Sign a manifest with `signer` (the exporting crank's key). */
+export async function signManifest(manifest: UnsignedManifest, signer: KeyPairSigner): Promise<Manifest> {
+  const sig = await signBytes(signer.keyPair.privateKey, signedPayload(manifest));
+  return {
+    ...manifest,
+    attestation: { scheme: "ed25519", signer: signer.address, signature: getBase58Decoder().decode(sig) },
+  };
+}
+
+export type UnsignedManifest = Omit<Manifest, "attestation">;
+
 export interface Manifest {
   program: string;
   generatedAt: string;
@@ -88,6 +150,7 @@ export interface Manifest {
   slotRange: [string, string] | null;
   file: string;
   sha256: string;
+  attestation: Attestation;
 }
 
 /**
@@ -95,7 +158,12 @@ export interface Manifest {
  * successful transaction's events, and write `<outDir>/events.jsonl` (oldest
  * first) + `<outDir>/manifest.json`.
  */
-export async function exportEvidence(rpc: R, outDir: string, opts: { limit?: number; address?: Address } = {}): Promise<Manifest> {
+export async function exportEvidence(
+  rpc: R,
+  outDir: string,
+  signer: KeyPairSigner,
+  opts: { limit?: number; address?: Address } = {},
+): Promise<Manifest> {
   const target = opts.address ?? PROGRAM_ID;
   const limit = opts.limit ?? 1_000;
   const sigs: { signature: Signature; slot: bigint; err: unknown }[] = [];
@@ -136,7 +204,7 @@ export async function exportEvidence(rpc: R, outDir: string, opts: { limit?: num
   writeFileSync(file, body);
   const byEvent: Record<string, number> = {};
   for (const r of records) byEvent[r.event] = (byEvent[r.event] ?? 0) + 1;
-  const manifest: Manifest = {
+  const unsigned: UnsignedManifest = {
     program: PROGRAM_ID,
     generatedAt: new Date().toISOString(),
     transactions: txs,
@@ -147,6 +215,48 @@ export async function exportEvidence(rpc: R, outDir: string, opts: { limit?: num
     file: "events.jsonl",
     sha256: createHash("sha256").update(body).digest("hex"),
   };
+  const manifest = await signManifest(unsigned, signer);
   writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   return manifest;
+}
+
+export interface EvidenceCheck {
+  ok: boolean;
+  signer: string | null;
+  problems: string[];
+}
+
+/**
+ * Keyless, offline check of an exported bundle (#127): `events.jsonl`
+ * hashes to the manifest's `sha256`, its event count matches, and the
+ * manifest's attestation verifies, optionally against an expected signer
+ * (the crank key the auditor was told to trust).
+ */
+export async function verifyEvidence(dir: string, expectedSigner?: string): Promise<EvidenceCheck> {
+  const problems: string[] = [];
+  const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as Manifest;
+  const body = readFileSync(join(dir, manifest.file), "utf8");
+  if (createHash("sha256").update(body).digest("hex") !== manifest.sha256) {
+    problems.push(`${manifest.file} does not hash to the manifest's sha256 (edited after export)`);
+  }
+  const lines = body.split("\n").filter((l) => l.length > 0).length;
+  if (lines !== manifest.events) problems.push(`${manifest.file} has ${lines} events, manifest says ${manifest.events}`);
+
+  const a = manifest.attestation;
+  if (!a || a.scheme !== "ed25519" || !isAddress(a.signer) || typeof a.signature !== "string") {
+    problems.push("manifest is unsigned or its attestation is malformed");
+    return { ok: false, signer: null, problems };
+  }
+  if (expectedSigner !== undefined && a.signer !== expectedSigner) {
+    problems.push(`signed by ${a.signer}, expected ${expectedSigner}`);
+  }
+  let valid = false;
+  try {
+    const sig = getBase58Encoder().encode(a.signature) as SignatureBytes;
+    valid = sig.length === 64 && (await verifySignature(await getPublicKeyFromAddress(a.signer), sig, signedPayload(manifest)));
+  } catch {
+    valid = false;
+  }
+  if (!valid) problems.push("attestation signature does not verify over the manifest");
+  return { ok: problems.length === 0, signer: a.signer, problems };
 }

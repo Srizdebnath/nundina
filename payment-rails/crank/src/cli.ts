@@ -5,10 +5,12 @@
  *   npm run crank -- settle    --session <addr> --plan fills.json [--max-sends N]
  *   npm run crank -- finish    --session <addr>
  *   npm run crank -- reconcile --session <addr> | --facility <addr>
- *   npm run crank -- export    --out <dir> [--limit N]
+ *   npm run crank -- export    --out <dir> [--limit N]          # signed (#127)
+ *   npm run crank -- verify-export --dir <dir> [--signer <addr>] # keyless, offline
  *
  * Env: RPC_URL (default localhost), WS_URL, KEYPAIR (default
- * ~/.config/solana/id.json), PRIORITY_FEE_MIN/MAX (µlamports/CU),
+ * ~/.config/solana/id.json), EVIDENCE_KEYPAIR (signs exports; default
+ * KEYPAIR), PRIORITY_FEE_MIN/MAX (µlamports/CU),
  * MAX_ATTEMPTS, RETRY_BASE_MS. Exit code 1 on any failed action or a
  * reconciliation that isn't clean.
  */
@@ -16,8 +18,8 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { address } from "@solana/kit";
 import { finish, refundAll, settlePlan, type FillPlan, type Outcome } from "./crank.ts";
-import { makeCtx } from "./ctx.ts";
-import { exportEvidence } from "./evidence.ts";
+import { loadKeypair, makeCtx } from "./ctx.ts";
+import { exportEvidence, verifyEvidence } from "./evidence.ts";
 import { formatReport, reconcileFacility, reconcileSession } from "./ledger.ts";
 
 const { positionals, values } = parseArgs({
@@ -29,6 +31,8 @@ const { positionals, values } = parseArgs({
     "max-sends": { type: "string" },
     out: { type: "string" },
     limit: { type: "string" },
+    dir: { type: "string" },
+    signer: { type: "string" },
   },
 });
 
@@ -68,6 +72,12 @@ export function parsePlan(json: string): FillPlan[] {
 
 async function main(): Promise<boolean> {
   const cmd = positionals[0];
+  if (cmd === "verify-export") {
+    // Needs neither a key nor an RPC: an auditor runs it on the files alone.
+    const r = await verifyEvidence(need("dir"), values.signer);
+    console.log(r.ok ? `evidence OK — signed by ${r.signer}` : `evidence REJECTED:\n  ${r.problems.join("\n  ")}`);
+    return r.ok;
+  }
   const ctx = await makeCtx();
   switch (cmd) {
     case "refunds":
@@ -87,12 +97,13 @@ async function main(): Promise<boolean> {
       return r.ok;
     }
     case "export": {
-      const m = await exportEvidence(ctx.rpc, need("out"), { limit: values.limit ? Number(values.limit) : undefined });
+      const signer = await loadKeypair(process.env.EVIDENCE_KEYPAIR ?? process.env.KEYPAIR ?? "~/.config/solana/id.json");
+      const m = await exportEvidence(ctx.rpc, need("out"), signer, { limit: values.limit ? Number(values.limit) : undefined });
       console.log(JSON.stringify(m, null, 2));
       return true;
     }
     default:
-      console.error("usage: crank <refunds|settle|finish|reconcile|export> [options] — see src/cli.ts");
+      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export> [options] — see src/cli.ts");
       return false;
   }
 }

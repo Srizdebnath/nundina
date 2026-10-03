@@ -364,8 +364,8 @@ in contradiction.
 | api | ❌ no route handlers | P6 (#10) |
 | nav-publisher | ❌ no cron, key, publisher set or `publish_nav` (no mark-engine) | P2 (#6); the arithmetic exists in `credit-math` |
 | treasury-agent | 🟡 manual checklist in `token/runbook.md` § Treasury (sleeve reconciliation) | No Kamino integration; backup mode is a plain USDC account |
-| crank-runner | 🟡 settlement pagination + refunds, idempotent on on-chain state; **escalating priority fee (×1.5 per retry from a floor) + ±10% jitter on fee and backoff (D11)**; kill-switch drill in CI | No phase-deadline, seasoning-merge or distribution cranks (the programs don't exist yet); no bonded crank wallet (it uses the operator's `id.json`) |
-| evidence-exporter | 🟡 program-scoped JSONL of the rails' own events + SHA-256 manifest | Not **signed** (a hash is not a signature), not session-scoped, no marks or model versions yet |
+| crank-runner | 🟡 settlement pagination + refunds, idempotent on on-chain state; **escalating priority fee (×1.5 per retry from a floor) + ±10% jitter on fee and backoff (D11)**; kill-switch drill in CI | No phase-deadline, seasoning-merge or distribution cranks (the programs don't exist yet); no bonded crank wallet (it signs with `KEYPAIR`; no program holds a crank bond). Tracked as roadmap in `payment-rails/crank/README.md` § Not built yet (#127) |
+| evidence-exporter | 🟡 program-scoped JSONL of the rails' own events + SHA-256 manifest, **ed25519-signed** by the exporting key; `crank verify-export` checks hash, count and signature offline (#127) | Not session-scoped, no marks or model versions yet |
 
 ---
 

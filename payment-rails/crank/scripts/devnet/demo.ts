@@ -237,8 +237,8 @@ async function main(): Promise<void> {
   console.log("\n" + formatReport(rs) + "\n" + formatReport(rf));
   if (!rs.ok || !rf.ok) throw new Error("reconciliation not clean");
   const evidenceDir = join(stateDir(rpcUrl), `evidence-${sessionId}`);
-  const manifest = await exportEvidence(ops.rpc, evidenceDir, { limit: 300 });
-  console.log(`evidence: ${manifest.events} events, sha256 ${manifest.sha256} → ${evidenceDir}`);
+  const manifest = await exportEvidence(ops.rpc, evidenceDir, authority, { limit: 300 });
+  console.log(`evidence: ${manifest.events} events, sha256 ${manifest.sha256}, signed by ${manifest.attestation.signer} → ${evidenceDir}`);
 
   // Hygiene: return the participants' leftover SOL to the authority.
   for (const key of [H, X, Y]) {
