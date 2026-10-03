@@ -1,0 +1,23 @@
+{
+  "name": "@nundina/squads-migration",
+  "version": "1.0.0",
+  "description": "Squads v4 2-of-2 authority migration (SRS 08 §8, #126)",
+  "scripts": {
+    "migrate": "tsx migrate.ts",
+    "typecheck": "tsc",
+    "test": "bash test-localnet.sh"
+  },
+  "type": "module",
+  "dependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/spl-token-metadata": "^0.1.6",
+    "@solana/web3.js": "^1.99.0",
+    "@sqds/multisig": "^2.1.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  },
+  "private": true
+}

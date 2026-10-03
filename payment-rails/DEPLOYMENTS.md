@@ -10,6 +10,7 @@ derives the Cluster from the genesis hash (never from the caller).
 | Program | Cluster | Genesis hash | Program ID | Slot | Signature | Build SHA-256 | Bytes | Upgrade authority |
 |---|---|---|---|---|---|---|---|---|
 | payment-rails v0.1.0 (deploy) | devnet | `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | 849016 | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (single key, pilot; Squads 2-of-2 per SRS §8 before mainnet) |
+| payment-rails v0.1.0 (upgrade authority → Squads vault, #126; same build) | devnet | `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | 849016 | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV` (Squads v4 vault of 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock; set-authority tx `519n9Dw2dr3sNMYB…`, full record `ops/squads/deployment-devnet.json`) |
 
 ## R5 devnet demo (exit criterion: commit → settle → payout on devnet)
 

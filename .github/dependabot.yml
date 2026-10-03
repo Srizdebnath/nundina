@@ -88,6 +88,18 @@ updates:
     allow:
       - dependency-type: "direct"
 
+  # Squads authority migration tool (#126).
+  - package-ecosystem: "npm"
+    directory: "/ops/squads"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct"
+
   # credit-gate's LiteSVM tests: their own [workspace] and lockfile, like
   # payment-rails/tests-svm above, so they need their own entry (#98).
   # Same anchor-* rule as the root entry.

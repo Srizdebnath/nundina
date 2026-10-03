@@ -64,7 +64,7 @@ than badged complete.
 | 1 | `services/` (nav-publisher, crank-runner, indexer, evidence-exporter) | ⏭ **deferred to P1** | [`services/README.md`](services/README.md): none built; only `payment-rails/crank` exists (#58) |
 | 2 | `credit-math` skeleton with property tests running | ✅ | CI `credit-math — coverage` gates 100% lines + branches |
 | 3 | CI: anchor build + test; fmt/clippy; app lint | ✅ | `.github/workflows/ci.yml`: every job is a required check on `main`; `app — lint · typecheck · build` |
-| 4 | Squads 2-of-2 authority created; key ceremony + storage runbook | ⚠️ runbook ✅ · **Squads deferred to P1** | `token/runbook.md` § Keys, `payment-rails/README.md` § Keys; every authority is a single key today (#57) |
+| 4 | Squads 2-of-2 authority created; key ceremony + storage runbook | ⚠️ runbook ✅ · **Squads 2-of-2 live on devnet** (48h timelock), `payment-rails` upgrade authority moved ✅ · NPCS and `credit-gate` keys not on the migrating machine, their moves are scripted for the key holders | `ops/squads/`, `DEPLOYMENTS.md` § Squads (#126) |
 | 5 | Verifiable builds; program-ID registry | ⚠️ registry ✅ · `anchor build --verifiable` **deferred to P1** | `DEPLOYMENTS.md` + keyless `verify.sh`; pinned toolchains, SHA-256-verified CLI installs and a lockfile-drift check on every SBF build (#98); deployed `.so` files published as release assets (#99). No deterministic (docker) build yet |
 | 6 | Helius (dev) + Supabase (dev) provisioned | ⏭ **deferred to P1** | not provisioned; nothing in the repo references them ([`services/README.md`](services/README.md)) |
 | 7 | Dependabot `npm` entries | ✅ | `.github/dependabot.yml`: npm ×3, cargo ×4, github-actions |
@@ -102,6 +102,7 @@ nundina/
 │   ├── crank/                ← settlement/refund crank, reconciliation ledger, evidence export (TS)
 │   └── DEPLOYMENTS.md        ← payment-rails deployment registry
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
+├── ops/squads/               ← Squads v4 2-of-2 authority migration + record (#126)
 ├── services/                 ← off-chain services: deferral record only (none built, #58)
 ├── preresearch/              ← the research corpus that justifies every design decision
 │   ├── architecture/         ← 00 index · 05 problem register · 06 solution · 07 legal · 08 SRS · 09 asset spec

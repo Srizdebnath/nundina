@@ -245,8 +245,8 @@ no recorded backup, for every row.
 | Secret | Public key | Lives in | If lost |
 |---|---|---|---|
 | Program keypair | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | `keys/payment_rails-keypair.json` (gitignored) | The program can't be deployed at this id on any **new** cluster (mainnet included). The live devnet program is unaffected: upgrades are signed by the upgrade authority, not by this key. |
-| Upgrade authority | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` | operator wallet (`AUTHORITY=` for `deploy.sh`) | The devnet program is **frozen at its current build forever**: no bug fix, no upgrade. **This is the real single point of failure**, not the program keypair. |
-| Same key `9WH1…2uDZ`, in its other roles | `RailsConfig.authority`, `.operator` and `.registrar` (the registrar is initialised to the authority, `initialize_config.rs`) | same wallet | Losing it also loses fee/breaker/registrar governance and session operation. |
+| Upgrade authority | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault of the 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7` (48h timelock), since 2026-10-03 (#126; was `9WH1…2uDZ`) | the two member keys (`~/.config/nundina/squads-devnet/`; one machine on devnet, see root `DEPLOYMENTS.md`) | Losing **one** member blocks every upgrade (2-of-2). An upgrade is a Squads proposal, two approvals and a 48h wait; `deploy.sh` alone can no longer upgrade. |
+| Former upgrade key `9WH1…2uDZ`, in its remaining roles | `RailsConfig.authority`, `.operator` and `.registrar` (the registrar is initialised to the authority, `initialize_config.rs`) | same wallet | Losing it also loses fee/breaker/registrar governance and session operation. |
 | Fee receiver and reserve **token accounts** | `BCppgtLV86NShmezwdUsEAMxCy6BDfpbqpQfpDbqfcsc` (fee) · `2sZdQ5F3UHbehXYxkv67t5JGRxVb3hGvU6gDryiuWNz6` (reserve), both **owned by `9WH1…2uDZ`** (checked on devnet) | created by `setup.ts` from the authority wallet | The reserve receives every **forfeited client bid bond**, so that money sits in a single-key wallet. There is no setter: both are fixed at `initialize_config` (doc 07 L12's non-custodial posture is not met; see #59). |
 | credit-gate upgrade authority | `BprmmqrzBADdQ2iKARtqcDndWV5k22aUGrkMKeySjKgp` | not on the rails operator's machine | The gate can't be fixed or redeployed (#45). After #26/#50 it also becomes the initial `gate_config_authority` of every new market config. |
 | credit-gate program keypair | `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` | `target/deploy/credit_gate-keypair.json` on the deploying machine | No new-cluster deploys at this id; the live program is unaffected. |
@@ -297,22 +297,17 @@ release after every deploy.
   SOL and prints the `solana program close --buffers` command that reclaims
   them.
 
-### Before mainnet: Squads 2-of-2 upgrade authority
+### Squads 2-of-2 upgrade authority (done on devnet, #126)
 
-SRS 08 §8 requires every administrative authority to be a Squads 2-of-2. For
-this program that's one transaction, signed by the current authority, that
-points the upgrade authority at the Squads **vault** PDA (not the multisig
-account):
-
-```bash
-solana program set-upgrade-authority GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn \
-  --upgrade-authority <current-authority.json> \
-  --new-upgrade-authority <SQUADS_VAULT_PDA> \
-  --skip-new-upgrade-authority-signer-check -u devnet
-```
-
-After that, upgrades go through a Squads proposal. Record the change as a new
-row in `DEPLOYMENTS.md`.
+SRS 08 §8 requires every administrative authority to be a Squads 2-of-2. On
+devnet the upgrade authority is the vault of multisig
+`CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7` (48h timelock), moved with
+[`ops/squads/migrate.ts`](../ops/squads/README.md). An upgrade is now:
+`solana program write-buffer`, `solana program set-buffer-authority <buffer>
+--new-buffer-authority <vault>`, then a Squads vault transaction carrying the
+loader's `Upgrade` instruction, approved by both members and executed after
+the timelock. Record it as a new row in `DEPLOYMENTS.md`; `verify.sh` checks
+the authority against the latest row.
 
 `credit-gate` is different. Each `MarketConfig` has its own
 `gate_config_authority`, and handing the upgrade authority to Squads does not
