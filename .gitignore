@@ -29,6 +29,8 @@ target/
 test-ledger/
 .deps/
 *.so
+# Third-party programs the credit-gate suite runs, pinned by SHA-256 (#122).
+!programs/credit-gate/tests-svm/fixtures/*.so
 
 # Rust
 Cargo.lock will be committed for programs; ignore incremental build noise only

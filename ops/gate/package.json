@@ -1,0 +1,21 @@
+{
+  "name": "@nundina/gate-ops",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "credit-gate onboarding: SAS credential, schemas and attestations; Token ACL wiring (SRS 08 §5, #122)",
+  "scripts": {
+    "sas": "tsx sas.ts",
+    "wire": "tsx wire.ts",
+    "typecheck": "tsc",
+    "test": "bash test-localnet.sh"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.99.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

@@ -40,13 +40,13 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 
 | AC | Grade | What exists / what blocks it |
 |---|---|---|
-| AC-1 | ❌ | NPCS mint ✅. `credit-gate` has the CG-P2 config, the CG-P5 block-list and the CG-P3 lot ledger, but no Token ACL wiring, no SAS read and no `validate` (#122, #52). The freeze authority is a wallet key, so no thaw goes through the gate |
+| AC-1 | ⚠️ passes off-chain-of-record | SAS credential + 3 schemas live on devnet; `validate` + Token ACL hooks thaw an attested wallet and reject an ineligible one with a typed reason, on a validator with the real SAS and Token ACL programs (`ops/gate/test-localnet.sh`, `tests-svm/tests/sas_token_acl.rs`). Not yet on the NPCS mint: needs the gate redeploy (`Bprm…`, #45) and the freeze authority handed to Token ACL (`2xhj…`) |
 | AC-2 | 🗺 | `mark-engine` and `nav-publisher` have no code; NAV math is in `credit-math` (`nav.rs`) with no consumer |
 | AC-3 | ⚠️ cash leg only | `payment-rails` escrow + one-fill DvP cash leg (live devnet, R5 on a manifest mint, not live NPCS). `auction-engine` has no code |
 | AC-4 | 🗺 | needs `auction-engine` + `mark-engine` |
 | AC-5 | ⚠️ cash leg only | `payment-rails` ROFR cash path; no session state machine around it |
 | AC-6 | ⚠️ ledger only | `credit-gate` lot ledger (#122): lots season by the config's `seasoning_seconds`, splits keep seasoning, permissionless `merge_expired` into FREE (LiteSVM). No auction session sells against it, and no fee pays the merge crank |
-| AC-7 | ❌ | no holder governor: it counts `investor_id`s, which only a SAS attestation supplies (#52). `holder_cap` is stored config nothing reads |
+| AC-7 | ⚠️ gate side | holder governor counts attested `investor_id`s against `holder_cap` (a second wallet of one investor counts once; `release_holder` frees the slot; `project_and_check` for allocation). No auction session yet to reallocate a rejected bid |
 | AC-8 | ⚠️ cash leg only | facility advance/repay/sweep in `payment-rails`; `queue-claim` has no code, so neither the sell path nor the pledge path exists. **The headline demo is unshipped** |
 | AC-9 | 🗺 **re-graded (#124)** | No liquidation instruction and no ladder (ROFR → backstop → forced sale → workout) anywhere; no `mark-engine`, so "no liquidation on a stale mark" (H4, LF-P4) has no implementation and no test. What exists: the H1 advance-rate ceiling on `payment-rails` advances |
 | AC-10 | ⚠️ cash leg only | exact-conservation cash waterfall in `payment-rails` + `credit-math`; no `tranche-engine` (no tranches, no subordination check) |
@@ -196,7 +196,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.1 `credit-gate` (Anchor; audit-scope-critical)
 
-> **As built (2026-10, #122):** CG-P2 (config PDA + governance); CG-P5 (block-list: one PDA per blocked wallet, governed, screened first on every lot path, fails closed on an unreadable list); CG-P3 (lot ledger: append / split / permissionless `merge_expired`; no crank fee yet; appends signed by the gate-config authority until auction-engine exists); CG-P7 events for all of them. **Not built:** CG-P1 (`validate` + Token ACL), CG-P4 (governor) and CG-P6 (SAS read): all three need the SAS decision (#52). See §1.1.
+> **As built (2026-10, #122):** CG-P1..P7 on `main`. CG-P6 reads real SAS attestations (owner program, canonical PDA, credential, schema, signer ∈ attesters, expiry vs settlement horizon); CG-P4 counts attested `investor_id`s; CG-P5 block-list wins on every path; CG-P3 lot ledger; CG-P1 `validate` plus the Token ACL `can_thaw_permissionless` / `can_freeze_permissionless` hooks (revocation = anyone may freeze a holder the gate no longer admits). Tested against the real SAS and Token ACL binaries (LiteSVM) and on a validator (`ops/gate`). **Not live:** devnet still runs the pre-#26 gate and NPCS's freeze authority is a wallet (key holders, `ops/gate/README.md`). No crank fee on `merge_expired` yet.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -326,7 +326,9 @@ Interface: `payment-rails/INTERFACE.md`. Phases: `payment-rails/PHASES.md`. Regi
 | Rotation/revocation | Attester rotation: add-new → re-attest → remove-old, both in market config attester sets (multisig). Revocation = expiry + block-list, per CG-P5 |
 | Mainnet note | Real SAS program on mainnet-beta; attestations cost real fees — negligible at pilot scale |
 
-**As-built status (2026-09, #52): nothing in this section exists yet.** There
+**As-built status (2026-10, #122): live on devnet.** Credential `7H1P4RLB9VhsrSHwqtxJJsMC5wMtF9T7HUN6EUovhfxV` (authority `ErrdHFMVEDdY8idFNKrr4TBsfBgsedxFt89otFm2xCc7`), authorized signer (our attester) `2L8VPRJme9bEtqoBRTG3kR9JkfbT3GF1DBf48vp2ksQC`, and the three schemas above, recorded in `ops/gate/deployment-devnet.json` and checkable with `npm run sas -- verify`; `sas.ts attest` is the registrar step. Key custody: both keys sit outside the repo on the operator machine (`payment-rails/README.md § Keys`); the encrypted-custody requirement below is not met yet. The history that follows is kept for the record.
+
+**As-built status (2026-09, #52, superseded): nothing in this section exists yet.** There
 is no SAS program id, no schema, no attester keypair or custody runbook, no
 issuance path, and no on-chain read. `credit-gate`'s schema and attester
 fields are storage only, and `payment-rails` admits payout destinations on a

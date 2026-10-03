@@ -1,0 +1,4 @@
+node_modules/
+keys/
+deployment-localnet.json
+gate-localnet.json

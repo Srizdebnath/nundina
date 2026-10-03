@@ -88,6 +88,18 @@ updates:
     allow:
       - dependency-type: "direct"
 
+  # credit-gate onboarding tools (#122).
+  - package-ecosystem: "npm"
+    directory: "/ops/gate"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "onchain"
+      - "dependencies"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct"
+
   # Squads authority migration tool (#126).
   - package-ecosystem: "npm"
     directory: "/ops/squads"

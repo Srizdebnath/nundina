@@ -10,6 +10,9 @@
 import {
   address,
   createSolanaRpc,
+  getAddressDecoder,
+  getAddressEncoder,
+  getProgramDerivedAddress,
   getUtf8Encoder,
 } from "@solana/kit";
 import {
@@ -19,6 +22,9 @@ import {
 } from "@solana-program/token-2022";
 import { readFile } from "node:fs/promises";
 
+const TOKEN_ACL = address("TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP");
+const CREDIT_GATE = "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c";
+const bs58 = (b: Uint8Array): string => getAddressDecoder().decode(b);
 const CLUSTER = (process.env.CLUSTER ?? "devnet") as "devnet" | "mainnet";
 const RPC_URL =
   process.env.RPC_URL ??
@@ -62,7 +68,6 @@ async function main(): Promise<void> {
   const mintAuth = unwrapOpt(mint.data.mintAuthority);
   const freezeAuth = unwrapOpt(mint.data.freezeAuthority);
   check(mintAuth === admin, "mint authority == admin", mintAuth ?? "none");
-  check(freezeAuth === admin, "freeze authority == admin (bootstrap)", freezeAuth ?? "none");
 
   const extOpt = mint.data.extensions;
   const exts = (extOpt && extOpt.__option === "Some" ? extOpt.value : []) as unknown as Array<{
@@ -135,13 +140,33 @@ async function main(): Promise<void> {
     check(!byKind(k), `forbidden absent: ${k}`);
   }
 
-  // ── §2.1 provenance (INFORMATIONAL until ACL wiring) ────────────────
+  // ── §2.1 provenance: thaws route through credit-gate (#122) ─────────
+  // doc 09 §2.1: default-frozen + a gate-owned freeze authority is what
+  // separates a regulated fund from a honeypot. REQUIRED: the freeze
+  // authority is Token ACL's MintConfig for this mint, and that config sends
+  // permissionless thaw/freeze to credit-gate. A wallet-held freeze key fails.
   console.log("\n§2.1 provenance:");
-  const aclProgram = "TACLkU6aswbpgiUF6dMuVHnVp3S6oBxDiWzN5iJebFu";
-  console.log(
-    `  · freeze authority ${freezeAuth} is wallet-held (bootstrap). After Token ACL ` +
-      `wiring this becomes a REQUIRED check: authority account owner == ${aclProgram}`,
+  const [mintConfig] = await getProgramDerivedAddress({
+    programAddress: TOKEN_ACL,
+    seeds: ["MINT_CONFIG", getAddressEncoder().encode(address(mintAddress))],
+  });
+  check(
+    freezeAuth === mintConfig,
+    "freeze authority == Token ACL MintConfig (not a wallet)",
+    freezeAuth === admin ? `${freezeAuth} is the bootstrap wallet: not gated (ops/token-acl, #122)` : (freezeAuth ?? "none"),
   );
+  if (freezeAuth === mintConfig) {
+    const { value } = await rpc.getAccountInfo(mintConfig, { encoding: "base64" }).send();
+    const d = value ? Buffer.from(value.data[0], "base64") : Buffer.alloc(0);
+    // MintConfig (100 bytes; layout pinned by credit-gate's sas_token_acl.rs):
+    // disc=1 | bump | thaw_enabled | freeze_enabled | mint | freeze_authority | gating_program
+    const ok = value?.owner === TOKEN_ACL && d.length === 100 && d[0] === 1;
+    check(ok, "MintConfig owned by Token ACL", `${value?.owner} · ${d.length} bytes`);
+    check(ok && bs58(d.subarray(4, 36)) === mintAddress, "MintConfig.mint == this mint");
+    check(ok && bs58(d.subarray(68, 100)) === CREDIT_GATE, "gating program == credit-gate", ok ? bs58(d.subarray(68, 100)) : "");
+    check(d[2] === 1, "permissionless thaw enabled (investors thaw through the gate)");
+    check(d[3] === 1, "permissionless freeze enabled (revocation is enforceable)");
+  }
 
   console.log(`\nresult: ${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
   process.exit(failures === 0 ? 0 : 1);

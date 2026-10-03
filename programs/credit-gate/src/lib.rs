@@ -3,14 +3,12 @@
 //! SRS 08 §4.1 (CG-P1..P7) · doc 09. Audit-scope-critical: this program is
 //! the one that enforces law.
 //!
-//! Built: the CG-P2 config anchor (one governed, evented policy PDA per
-//! mint), the CG-P5 block-list and its screen ([`blocklist`]), and the
-//! CG-P3 lot ledger ([`lots`]) (#122). Not built: CG-P1 (the Token ACL
-//! `validate` entrypoint), CG-P4 (holder governor) and CG-P6 (SAS
-//! attestation read). CG-P4 and CG-P6 both need the SAS decision (#52):
-//! the governor counts `investor_id`s, which only an attestation supplies.
-//! This crate carries no `unsafe` and no external program CPIs yet; the
-//! sRFC37 gate interface lands with CG-P1 behind a lint-gated boundary.
+//! CG-P1..P7 (#122): the CG-P2 config anchor (one governed, evented policy
+//! PDA per mint), the CG-P5 block-list ([`blocklist`]), the CG-P3 lot ledger
+//! ([`lots`]), the CG-P6 SAS attestation read and CG-P4 holder governor
+//! behind `validate` ([`eligibility`]), and the CG-P1 Token ACL (sRFC37)
+//! thaw/freeze hooks ([`token_acl`]). The crate carries no `unsafe`; its
+//! only CPI is to the system program (account creation).
 
 #![deny(unsafe_code)]
 // missing_docs activates in P1 when the hand-written account surface
@@ -24,10 +22,14 @@
 use anchor_lang::prelude::*;
 
 pub mod blocklist;
+pub mod eligibility;
 pub mod lots;
+pub mod token_acl;
 
 pub use blocklist::*;
+pub use eligibility::*;
 pub use lots::*;
+pub use token_acl::*;
 
 declare_id!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
 
@@ -260,28 +262,14 @@ pub struct GateAuthorityTransfer {
     pub new_config_hash: [u8; 32],
 }
 
-/// Emitted when a thaw/at-rest validate decision is made (P1: CG-P1).
-#[event]
-#[derive(Debug)]
-pub struct ValidateDecision {
-    /// Rejection reason; `None` = approved.
-    pub reject: Option<GateReject>,
-    /// The gated mint.
-    pub mint: Pubkey,
-    /// Owner whose account was validated.
-    pub owner: Pubkey,
-    /// Hash of the attestation inputs used (privacy: no PII on-chain).
-    pub attestation_inputs_hash: [u8; 32],
-}
-
 /// Typed rejection reasons (CG-P7). Wire-stable; human-readable mapping
 /// lives off-chain (ME-5/UI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
 pub enum GateReject {
     /// Owner wallet is on the enforced block-list ([`blocklist::screen`]).
     Blocklisted,
-    /// Missing/expired/mismatched-attester attestation for the owner.
-    /// Never constructed yet: there is no attestation read (#52).
+    /// Missing, closed, malformed or wrongly-signed attestation, or one not
+    /// under this market's credential and schema (CG-P6).
     AttestationInvalid,
     /// Attestation expires before the configured settlement horizon (H4).
     AttestationExpiry,
@@ -294,6 +282,14 @@ pub enum GateReject {
     /// Lot ledger full of unexpired lots (D15 boundary). Raised today as
     /// [`GateError::LotLedgerFull`].
     LotLedgerFull,
+    /// The accreditation attestation says not accredited, and the market's
+    /// policy requires it (506(c)).
+    NotAccredited,
+    /// Identity `kyc_level` below the market policy's minimum.
+    KycLevelTooLow,
+    /// The wallet is admitted under one `investor_id` and now presents an
+    /// identity attestation with another (CG-P4: no silent re-mapping).
+    InvestorIdChanged,
 }
 
 /// Error set for the gate program.
@@ -363,6 +359,51 @@ pub enum GateError {
     /// Arithmetic overflow.
     #[msg("Math overflow")]
     MathOverflow,
+    /// Attestation missing, closed, malformed, mis-signed or off-schema.
+    #[msg("Attestation invalid")]
+    AttestationInvalid,
+    /// Attestation expires inside the settlement horizon (H4).
+    #[msg("Attestation expires before the settlement horizon")]
+    AttestationExpired,
+    /// Jurisdiction not allowed by the market policy.
+    #[msg("Jurisdiction rejected")]
+    JurisdictionRejected,
+    /// A new investor_id would exceed `holder_cap` (CG-P4).
+    #[msg("Holder cap reached")]
+    GovernorCap,
+    /// Not accredited where the policy requires it.
+    #[msg("Not accredited")]
+    NotAccredited,
+    /// KYC level below the policy minimum.
+    #[msg("KYC level too low")]
+    KycLevelTooLow,
+    /// Identity attestation carries a different investor_id.
+    #[msg("investor_id changed")]
+    InvestorIdChanged,
+    /// More jurisdictions than `MAX_JURISDICTIONS`.
+    #[msg("Too many jurisdictions")]
+    TooManyJurisdictions,
+    /// Not an upper-case alpha-2 code, or a duplicate.
+    #[msg("Invalid jurisdiction code")]
+    InvalidJurisdiction,
+    /// Schema account is not the config's SAS schema under the credential.
+    #[msg("Invalid SAS schema")]
+    InvalidSchema,
+    /// Investor record address does not match the attested investor_id.
+    #[msg("Investor record mismatch")]
+    InvestorRecordMismatch,
+    /// A Token ACL hook called outside Token ACL's own thaw/freeze.
+    #[msg("Not inside a Token ACL thaw/freeze")]
+    NotTokenAclFlow,
+    /// Token account is not a Token-2022 account of this mint and owner.
+    #[msg("Token account does not match mint/owner")]
+    TokenAccountMismatch,
+    /// `can_freeze_permissionless` on a holder the gate still admits.
+    #[msg("Holder is still eligible")]
+    StillEligible,
+    /// `update_policy` with nothing to write.
+    #[msg("Policy update writes nothing")]
+    EmptyPolicyUpdate,
 }
 
 #[program]
@@ -771,6 +812,158 @@ pub mod credit_gate {
             free_qty: lots.free_qty,
         });
         Ok(())
+    }
+
+    /// CG-P1/P6: create the market's eligibility policy. Verifies both
+    /// config schemas are SAS schemas under `credential`.
+    pub fn initialize_policy(
+        ctx: Context<InitializePolicy>,
+        credential: Pubkey,
+        jurisdictions: Vec<[u8; 2]>,
+        min_kyc_level: u8,
+        require_accreditation: bool,
+    ) -> Result<()> {
+        eligibility::check_schema(&ctx.accounts.identity_schema, &credential)?;
+        eligibility::check_schema(&ctx.accounts.accreditation_schema, &credential)?;
+        let p = &mut ctx.accounts.policy;
+        p.mint = ctx.accounts.config.mint;
+        p.credential = credential;
+        p.set_jurisdictions(&jurisdictions)?;
+        p.min_kyc_level = min_kyc_level;
+        p.require_accreditation = require_accreditation;
+        p.distinct_investors = 0;
+        p.bump = ctx.bumps.policy;
+        emit!(PolicyUpdated {
+            mint: p.mint,
+            credential,
+            jurisdictions,
+            min_kyc_level,
+            require_accreditation,
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// Governed policy edits. The credential is fixed at init: moving to a
+    /// new credential is a new market policy, not an edit.
+    pub fn update_policy(
+        ctx: Context<UpdatePolicy>,
+        jurisdictions: Option<Vec<[u8; 2]>>,
+        min_kyc_level: Option<u8>,
+        require_accreditation: Option<bool>,
+    ) -> Result<()> {
+        require!(
+            jurisdictions.is_some() || min_kyc_level.is_some() || require_accreditation.is_some(),
+            GateError::EmptyPolicyUpdate
+        );
+        let p = &mut ctx.accounts.policy;
+        if let Some(j) = &jurisdictions {
+            p.set_jurisdictions(j)?;
+        }
+        if let Some(k) = min_kyc_level {
+            p.min_kyc_level = k;
+        }
+        if let Some(a) = require_accreditation {
+            p.require_accreditation = a;
+        }
+        emit!(PolicyUpdated {
+            mint: p.mint,
+            credential: p.credential,
+            jurisdictions: p.jurisdictions[..usize::from(p.jurisdiction_count)].to_vec(),
+            min_kyc_level: p.min_kyc_level,
+            require_accreditation: p.require_accreditation,
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// CG-P1 `validate(owner, mint)`: block-list → SAS attestations →
+    /// expiry → policy → governor → lot-ledger init, every decision evented
+    /// as [`ValidateDecision`]. A rejection changes no state and succeeds
+    /// (so the event is kept); an approval writes the holder link that the
+    /// Token ACL hooks read.
+    pub fn validate(ctx: Context<Validate>, owner: Pubkey) -> Result<()> {
+        eligibility::process_validate(ctx, owner)
+    }
+
+    /// CG-P4 decrement: the gate-config authority confirms `owner` exited
+    /// to zero; its link closes, and its investor leaves the count with its
+    /// last wallet.
+    pub fn release_holder(ctx: Context<ReleaseHolder>, owner: Pubkey) -> Result<()> {
+        let investor = &mut ctx.accounts.investor;
+        investor.wallets = investor.wallets.saturating_sub(1);
+        let exited = investor.wallets == 0;
+        let policy = &mut ctx.accounts.policy;
+        if exited {
+            policy.distinct_investors = policy.distinct_investors.saturating_sub(1);
+            investor.close(ctx.accounts.gate_config_authority.to_account_info())?;
+        }
+        emit!(HolderReleased {
+            mint: policy.mint,
+            owner,
+            investor_id: ctx.accounts.holder_link.investor_id,
+            investor_exited: exited,
+            distinct_investors: policy.distinct_investors,
+        });
+        Ok(())
+    }
+
+    /// CG-P4 `project_and_check` (for auction-engine at allocation): fails
+    /// [`GateError::GovernorCap`] iff admitting `investor_id` would exceed
+    /// the cap. An already-admitted investor always passes.
+    pub fn project_and_check(ctx: Context<ProjectAndCheck>, _investor_id: [u8; 16]) -> Result<()> {
+        let known = !ctx.accounts.investor.data_is_empty();
+        require!(
+            known || ctx.accounts.policy.distinct_investors < ctx.accounts.config.holder_cap,
+            GateError::GovernorCap
+        );
+        Ok(())
+    }
+
+    /// CG-P1: write the Token ACL extra-account-meta lists for this mint
+    /// (`["thaw_extra_account_metas", mint]` and the freeze one).
+    pub fn initialize_token_acl_metas(ctx: Context<InitializeTokenAclMetas>) -> Result<()> {
+        let a = &ctx.accounts;
+        let mint = a.mint.key();
+        for (ai, seed, bump, disc) in [
+            (
+                &a.thaw_metas,
+                THAW_EXTRA_METAS_SEED,
+                ctx.bumps.thaw_metas,
+                CAN_THAW_DISCRIMINATOR,
+            ),
+            (
+                &a.freeze_metas,
+                FREEZE_EXTRA_METAS_SEED,
+                ctx.bumps.freeze_metas,
+                CAN_FREEZE_DISCRIMINATOR,
+            ),
+        ] {
+            eligibility::create_pda(
+                &a.gate_config_authority,
+                ai,
+                &a.system_program,
+                EXTRA_METAS_LEN,
+                &[seed, mint.as_ref(), &[bump]],
+            )?;
+            ai.try_borrow_mut_data()?
+                .copy_from_slice(&extra_metas_tlv(disc));
+        }
+        Ok(())
+    }
+
+    /// Token ACL `can-thaw-permissionless` hook (sRFC37): succeeds iff the
+    /// owner is admitted by the gate right now.
+    #[instruction(discriminator = &CAN_THAW_DISCRIMINATOR)]
+    pub fn can_thaw_permissionless(ctx: Context<GateHook>) -> Result<()> {
+        token_acl::can_thaw(ctx.accounts)
+    }
+
+    /// Token ACL `can-freeze-permissionless` hook: succeeds iff the owner is
+    /// no longer admitted (revocation).
+    #[instruction(discriminator = &CAN_FREEZE_DISCRIMINATOR)]
+    pub fn can_freeze_permissionless(ctx: Context<GateHook>) -> Result<()> {
+        token_acl::can_freeze(ctx.accounts)
     }
 
     /// CG-P3 `merge_expired`: permissionless. Folds every seasoned lot into

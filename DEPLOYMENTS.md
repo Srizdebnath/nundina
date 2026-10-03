@@ -38,9 +38,11 @@ cd token && CLUSTER=devnet npm run verify
 
 ## Notes
 
-- The P0 skeleton contains only the CG-P2 config anchor (initialize/update
-  config). It carries **no gate entrypoint yet** — nothing consumes it; it
-  proves the build–deploy–verify loop and pins the program ID early.
+- The live devnet build is the P0 skeleton: only the CG-P2 config anchor.
+  `main` now carries CG-P1..P7 (SAS read, governor, block-list, lot ledger,
+  `validate`, Token ACL hooks; #122). Going live is the key holders' run in
+  [`ops/gate/README.md`](ops/gate/README.md): redeploy (below), `wire.ts root`,
+  `wire.ts market`, then the NPCS freeze-authority hand-over `wire.ts acl`.
 - The program keypair (`target/deploy/credit_gate-keypair.json`, gitignored)
   is the only way to deploy at this fixed ID on a new cluster. Back it up
   before any `cargo clean`. Upgrades of the live program need only the
@@ -123,3 +125,20 @@ cd token && CLUSTER=devnet npm run verify
   people's own hardware wallets; `create` takes no member key from the repo.
   The `RailsConfig` roles (`authority`, `operator`, `registrar`) still sit
   on `9WH1…2uDZ`: they are program-level roles, not the upgrade authority.
+
+## SAS attester (devnet, #122)
+
+| Item | Address |
+|---|---|
+| SAS program | `22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG` |
+| Credential `nundina` | `7H1P4RLB9VhsrSHwqtxJJsMC5wMtF9T7HUN6EUovhfxV` (authority `ErrdHFMVEDdY8idFNKrr4TBsfBgsedxFt89otFm2xCc7`) |
+| Authorized signer (attester) | `2L8VPRJme9bEtqoBRTG3kR9JkfbT3GF1DBf48vp2ksQC` |
+| `nundina.identity.v1` `[U128, String, U8]` | `6ooYMTCt89VLStUxPPWdTq19Ee9E9TaQCnJPxt3abRUL` |
+| `nundina.accreditation.v1` `[Bool, U8]` | `FVxSDQnri8zSREZTXjdgdXc2D8KPyNSFWFsUjG3BuWaU` |
+| `nundina.redemption_request.v1` `[VecU8, U64, I64, U32]` | `tdbagMb6dFGBTF83onfstpoeJqBMvHvsgV6m1VQniHs` |
+
+Signatures: `ops/gate/deployment-devnet.json`. Keyless check:
+`cd ops/gate && npm ci && npm run sas -- verify`. A team-wallet attestation
+pair was issued to the operator wallet `9WH1…2uDZ` (registrar step, pilot
+policy: team wallets only) and decodes exactly as the gate's CG-P6 parser
+expects.
