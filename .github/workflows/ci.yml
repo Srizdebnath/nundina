@@ -287,6 +287,26 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # ops/gate (#122): SAS + Token ACL onboarding tools. They talk to a live
+  # cluster and their end-to-end test clones Token ACL and SAS from devnet,
+  # so CI gates the typecheck. Not in the main-protection ruleset yet.
+  gate-ops:
+    name: ops/gate — typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ops/gate
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ops/gate/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+
   # ops/squads (#126): the migration tool talks to a live cluster and its
   # end-to-end test clones Squads v4 from devnet, so CI gates what runs
   # offline: the typecheck. Not in the main-protection ruleset yet.

@@ -1,0 +1,21 @@
+{
+  "cluster": "devnet",
+  "sasProgram": "22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG",
+  "credential": "7H1P4RLB9VhsrSHwqtxJJsMC5wMtF9T7HUN6EUovhfxV",
+  "credentialName": "nundina",
+  "credentialAuthority": "ErrdHFMVEDdY8idFNKrr4TBsfBgsedxFt89otFm2xCc7",
+  "authorizedSigners": [
+    "2L8VPRJme9bEtqoBRTG3kR9JkfbT3GF1DBf48vp2ksQC"
+  ],
+  "schemas": {
+    "nundina.identity.v1": "6ooYMTCt89VLStUxPPWdTq19Ee9E9TaQCnJPxt3abRUL",
+    "nundina.accreditation.v1": "FVxSDQnri8zSREZTXjdgdXc2D8KPyNSFWFsUjG3BuWaU",
+    "nundina.redemption_request.v1": "tdbagMb6dFGBTF83onfstpoeJqBMvHvsgV6m1VQniHs"
+  },
+  "signatures": {
+    "credential": "26QbrU5tVKR18TifqpJ3PqpNtcg59uhxX6qLtKfpLAu2CRKwUfPkHqw8e5Hf9JdR87XKCSAAe1BGpteFJULSJF8T",
+    "nundina.identity.v1": "4cxP3bs7GXXdvKg83AtWAM1ZRoxjo8XHshdqnW2BYpFxKA9aGLQ5JWPZ6PhXkTqpsvot4MVANqbqVFx5sXd5Xufm",
+    "nundina.accreditation.v1": "4anKY2Gitym3sUPYYuKY6Ju1YxY7J2h33kyfnTfinwfFpGm3bNmzHMGgu9z1jsG2qRPjWVdzTJNyTnhQTwnvxLfw",
+    "nundina.redemption_request.v1": "3gnqpbbqntXy8HFGK7Qb2iUNrnCCsEE3LwWAfKCBjhCSEoFv1NkaErcqa88nGCPTMo9XptcJf8W3QD9kBMT92b6x"
+  }
+}

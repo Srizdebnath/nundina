@@ -12,7 +12,7 @@ each one today.
 |---|---|---|
 | **I1** backing (`supply == deposits × 10⁶`) | nothing to compute | ❌ **No.** No deposit instruction, no mint-on-deposit or burn-on-redemption script, no recorded supply check. It is enforced by process and event evidence, not by a program (doc 09 §12). The mint authority is a single bootstrap key, not Squads |
 | **I2** NAV | ✅ implemented and tested in `credit-math` (`nav.rs`) | ❌ **No program calls it yet** (no mark engine) |
-| **I3** eligibility | ⚠️ lot ledger + block-list on `main` (#122, not deployed); no governor | ❌ **No.** `credit-gate` has no validate/thaw path. Every account is born frozen, and today the freeze authority, the bootstrap wallet `2xhjfAdr…6sRXMh`, thaws by hand. `seasoning_seconds` and `holder_cap` are stored config that nothing reads |
+| **I3** eligibility | ✅ on `main` (#122): SAS read, governor, lot ledger, block-list, Token ACL hooks; not deployed | ❌ **No, not yet on the live mint.** The gate is built and tested against the real SAS and Token ACL programs, but devnet runs the pre-#26 gate and NPCS is not handed to Token ACL (`ops/gate/`). Every account is born frozen, and today the freeze authority, the bootstrap wallet `2xhjfAdr…6sRXMh`, thaws by hand. `seasoning_seconds` and `holder_cap` are stored config that nothing reads |
 
 Until P1 wires the gate, the eligibility of every holder rests on the
 operator of one wallet. That is the shape doc 09 §2.1 warns is

@@ -26,12 +26,13 @@ today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 |---|---|---|
 | **`payment-rails`**: the USDC cash layer. Escrow and bonds (AE-P3/P4), permissionless never-pausable refunds (AE-P10), atomic one-fill DvP (AE-P8), issuer ROFR (AE-P7), facility funding, advances, interest and sweep (LF-P2/P6), exact-conservation cash waterfall (TE-P4) | ✅ **live devnet** · LiteSVM suite + kill-the-crank drill on a real validator. Auction, mark, claim and tranche *semantics* are not built; the rails move their cash | [`payment-rails/`](payment-rails/) · `bash payment-rails/crank/scripts/devnet/verify.sh` |
 | `credit-math`: shared fixed-point crate (NAV, clearing, pro-rata, waterfall, PV, prudential floor) | ✅ built · unit + property suites · CI gates 100% line + branch coverage. **Wired:** `payment-rails` uses 4 functions; clearing, pro-rata, NAV, haircut and PV have no program consumer yet | `cargo test --workspace` |
-| `credit-gate`: sRFC37 Gate Program, partial | ⚠️ **on `main`:** config PDA, CG-P5 block-list (screened on every lot path), CG-P3 lot ledger (append / split / permissionless merge). **Not built:** `validate` + Token ACL wiring (CG-P1), holder governor (CG-P4) and SAS read (CG-P6), which wait on #52. Devnet runs the **pre-#26 build**; `main` awaits a redeploy (#45) | `DEPLOYMENTS.md` |
+| `credit-gate`: sRFC37 Gate Program | ✅ **on `main` (CG-P1..P7):** SAS attestation read (CG-P6), holder governor (CG-P4), block-list (CG-P5), lot ledger (CG-P3), `validate` + Token ACL `can_thaw`/`can_freeze` hooks (CG-P1), all against the **real** SAS and Token ACL programs in LiteSVM and on a validator. ⚠️ Devnet runs the **pre-#26 build** and NPCS is not yet handed to Token ACL: both need key holders (`ops/gate/README.md`) | `DEPLOYMENTS.md` |
 | **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** · manifest verified. Not yet gated or backed on-chain; one bootstrap key holds every authority | [`token/`](token/) · `DEPLOYMENTS.md` |
 | Off-chain services | 🔨 crank + evidence exporter only. No indexer, database or NAV publisher (#58) | `payment-rails/crank/` |
 | Next.js 16 app | shell only (one static page; no wallet, no routes) | `app/` |
 | CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ✅ green | `.github/workflows/ci.yml` |
-| CG-P1..P6 gate logic + Token ACL wiring | 🔨 P1, in progress | SRS 08 §4.1 |
+| SAS attester (credential + 3 schemas) | ✅ **live devnet** (#122) | `ops/gate/deployment-devnet.json` · `npm run sas -- verify` |
+| Token ACL wiring of NPCS | ⏳ tool tested end to end; waits on the `2xhj…` and `Bprm…` key holders | `ops/gate/` |
 | mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
 
 ### Programs: as built vs roadmap
@@ -43,7 +44,7 @@ repo that describes them is the target, not a shipped feature.
 | Program | Crate | IDL | Tests | Crank | State |
 |---|---|---|---|---|---|
 | `payment-rails` | ✅ | ✅ | ✅ LiteSVM + drill | ✅ | live devnet |
-| `credit-gate` | ✅ | ✅ | ✅ LiteSVM | — | config + block-list + lot ledger; no validate / governor / SAS (#122) |
+| `credit-gate` | ✅ | ✅ | ✅ LiteSVM + real SAS/Token ACL | — | CG-P1..P7 on `main`; devnet redeploy pending (#45) |
 | `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 4 functions consumed by `payment-rails` |
 | `auction-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P3) |
 | `mark-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P2) |
@@ -74,8 +75,8 @@ substantive P0 exit (HACKATHON §4) is open:
 
 | # | P0 exit | State | Blocker |
 |---|---|---|---|
-| 8 | An investor thaws **through** `credit-gate` (Token ACL) | ❌ | no `validate` (#122); NPCS freeze authority is a wallet key; devnet runs the pre-#26 build (#45) |
-| 9 | SAS attestation read by the gate | ❌ | no SAS program id, schema or attester (#52) |
+| 8 | An investor thaws **through** `credit-gate` (Token ACL) | ⚠️ | ✅ on a validator with the real programs (`ops/gate/test-localnet.sh`); on devnet NPCS's freeze authority is still the `2xhj…` wallet and the gate is the pre-#26 build (#45) |
+| 9 | SAS attestation read by the gate | ✅ | credential + schemas live on devnet (`ops/gate/deployment-devnet.json`); CG-P6 read tested against the real SAS program (#122) |
 | 10 | R5 settles **live NPCS** | ❌ | R5 ran against a manifest mint (`payment-rails/PHASES.md`); waits on row 8 |
 | 11 | Auction session + queue-claim sale | ❌ | `auction-engine` and `queue-claim` have no code (#128) |
 
@@ -102,6 +103,7 @@ nundina/
 │   ├── crank/                ← settlement/refund crank, reconciliation ledger, evidence export (TS)
 │   └── DEPLOYMENTS.md        ← payment-rails deployment registry
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
+├── ops/gate/                 ← credit-gate onboarding: SAS credential/schemas/attestations, Token ACL wiring (#122)
 ├── ops/squads/               ← Squads v4 2-of-2 authority migration + record (#126)
 ├── services/                 ← off-chain services: deferral record only (none built, #58)
 ├── preresearch/              ← the research corpus that justifies every design decision

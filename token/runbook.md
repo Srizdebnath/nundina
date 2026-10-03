@@ -122,11 +122,29 @@ mint with extensions + TLV metadata:
 7. codama `getTokenSize()` under-computes if given a `TokenMetadata` arg —
    size pods via getTokenSize, add metadata TLV manually (`4 + pack(meta).length`).
 
-## ACL wiring (next step, P1)
+## ACL wiring: thaws through credit-gate (#122)
 
-Freeze authority currently = wallet (bootstrap). At P1:
-1. Implement `credit-gate::validate` (CG-P1, the sRFC37 gate interface).
-2. Delegate freeze authority to the Token ACL `MintConfig` PDA naming
-   `credit-gate` as gate program.
-3. Promote verify.ts's §2.1 provenance check from informational to REQUIRED:
-   freeze-authority account owner == Token ACL program (`TACLkU6…`).
+Built and tested; not yet run on the devnet mint. Every step is a command
+in [`ops/gate`](../ops/gate/README.md), and the whole sequence passes on a
+validator with the real Token ACL and SAS programs (`npm test` there).
+
+1. **Gate redeploy** (holder of `Bprm…jKgp`, #45): `anchor build`, then
+   `solana program deploy … --program-id 7yREa5V3…Qa9c --upgrade-authority <Bprm.json>`;
+   record the row in `DEPLOYMENTS.md`.
+2. **Gate root** (same key): `npm run wire -- root --upgrade-authority <Bprm.json> --root <governance key>`.
+3. **Market** (the root/governance key): `npm run wire -- market --authority <kp> --mint Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i`
+   (config, policy US / KYC ≥ 1 / accreditation required, block-list, Token ACL extra metas).
+4. **Freeze authority → Token ACL** (holder of `2xhjfAdr…6sRXMh`):
+   `npm run wire -- acl --freeze-authority <2xhj.json> --mint Dy1VW2…dx2i`.
+   From this transaction on, no wallet can freeze or thaw NPCS by hand:
+   investors thaw through the gate, anyone can freeze a holder the gate no
+   longer admits. Do this **before** moving the remaining NPCS authorities to
+   Squads (`DEPLOYMENTS.md` § Squads row 3): the freeze authority goes to
+   Token ACL, not to the vault.
+5. **Check:** `npm run wire -- verify --mint Dy1VW2…dx2i` and
+   `CLUSTER=devnet npm run verify` here: the §2.1 provenance check is
+   REQUIRED and passes only when the freeze authority is Token ACL's
+   `MintConfig` routing to `credit-gate` with permissionless thaw and freeze on.
+6. **Each investor:** `npm run sas -- attest <wallet> …` (registrar step),
+   `npm run wire -- validate <wallet> --mint …`, then anyone runs
+   `npm run wire -- thaw <token-account> --mint …`.
