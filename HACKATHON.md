@@ -11,21 +11,21 @@
 
 - **Problem:** tokenized private-credit funds (ACRED, STAC, ONyc, SCOPE…) are locked, gated at about 5% of NAV per quarter, and the manager marks them only once a quarter. In 2026 the gates became the story: Apollo got redemption requests of 17% of NAV against a 5% cap, and $5B+ is trapped.
 - **Gap:** Securitize+Jump+Jupiter, Orca permissioned pools, Exponent tranching and Uniswap permissioned pools all shipped *venues* in May–July 2026. **Nobody built the mechanism** to price a stale-NAV gated asset, tokenize the redemption queue, or liquidate permissioned collateral.
-- **Seven Anchor programs + one shared crate** (six engines plus the `payment-rails` cash layer, SRS 08 §4.7):
+- **Seven Anchor programs + one shared crate** in the design (six engines plus the `payment-rails` cash layer, SRS 08 §4.7). **As built (2026-10): one program is live (`payment-rails`), one is a config-only skeleton (`credit-gate`), and four have no code at all** (#128). The Status column is the as-built truth; the description is the target:
 
-| Program | What it does |
-|---|---|
-| `credit-gate` | Gate Program for Token ACL (sRFC37) that reads SAS attestations. Enforces eligibility, Rule 144 per-lot seasoning, a 12(g) holder cap and jurisdiction checks **when an account is activated**, not on every transfer |
-| `auction-engine` | Sealed-bid, periodic, uniform-price batch auction (commit → reveal → clear → pro-rata → DvP settle → print). It has no passive LP, so there is nothing to pick off |
-| `mark-engine` | Turns a stale NAV into a usable mark: discount curve, haircuts, and Fresh/Warned/Stale/Suspended states. **It never liquidates on a stale mark** |
-| `queue-claim` | **The novel primitive.** A tokenized, pro-rated redemption request that can be sold in an auction or pledged for a loan |
-| `liquidity-facility` | NAV-collateralized advance with a liquidation ladder: issuer ROFR → backstop bidder → forced-sale auction → workout |
-| `tranche-engine` | Senior/junior credit-loss waterfall with three-book accounting |
-| `payment-rails` | **Built, live on devnet.** The USDC cash layer under the engines: per-escrow vaults and bonds, permissionless never-pausable refunds, atomic one-fill DvP cash leg, issuer ROFR, facility cash, coupon waterfall. It **holds all client cash**, so it is audit-scope-critical alongside `credit-gate` |
-| `credit-math` | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
+| Program | Status (as built) | What it does (target) |
+|---|---|---|
+| `credit-gate` | ⚠️ skeleton: config PDA + root governance only; no validate, SAS read, lot ledger, governor or block-list check (#122) | Gate Program for Token ACL (sRFC37) that reads SAS attestations. Enforces eligibility, Rule 144 per-lot seasoning, a 12(g) holder cap and jurisdiction checks **when an account is activated**, not on every transfer |
+| `auction-engine` | 🗺 **roadmap**: no crate, IDL, test or crank | Sealed-bid, periodic, uniform-price batch auction (commit → reveal → clear → pro-rata → DvP settle → print). It has no passive LP, so there is nothing to pick off |
+| `mark-engine` | 🗺 **roadmap**: no crate, IDL, test or crank | Turns a stale NAV into a usable mark: discount curve, haircuts, and Fresh/Warned/Stale/Suspended states. **It never liquidates on a stale mark** |
+| `queue-claim` | 🗺 **roadmap**: no crate, IDL, test or crank | **The novel primitive.** A tokenized, pro-rated redemption request that can be sold in an auction or pledged for a loan |
+| `liquidity-facility` | 🗺 **roadmap**: engine not built; only the cash leg (advance/repay/sweep) exists in `payment-rails`; no liquidation ladder (#124) | NAV-collateralized advance with a liquidation ladder: issuer ROFR → backstop bidder → forced-sale auction → workout |
+| `tranche-engine` | 🗺 **roadmap**: engine not built; only the cash waterfall exists in `payment-rails` | Senior/junior credit-loss waterfall with three-book accounting |
+| `payment-rails` | ✅ **live on devnet** | The USDC cash layer under the engines: per-escrow vaults and bonds, permissionless never-pausable refunds, atomic one-fill DvP cash leg, issuer ROFR, facility cash, coupon waterfall. It **holds all client cash**, so it is audit-scope-critical alongside `credit-gate` |
+| `credit-math` | ✅ built, tested | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
 
 - **v1 go-to-market:** an issuer-sponsored liquidity window, meaning the issuer runs the auction on its own securities as a buyback tool.
-- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 token backed 1:1 by USDC in a Kamino vault, with NAV genuinely computed and published through our own SAS attester.
+- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#120): supply is 0 and nothing backs it on-chain.** There is no deposit or mint-on-deposit path, no Kamino (or any) treasury vault, no NAV publisher and no SAS attester; invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). *Target:* minted 1:1 against USDC in a Kamino supply vault (backup: a program-owned USDC PDA), with NAV computed from the sleeve and published through our own SAS attester.
 
 Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-Pilot-Rails.md`, `preresearch/research/12-Validation-2026-Reality-Check.md`.
 
@@ -49,7 +49,7 @@ Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-
 
 | Track | Prize | Fit | Why |
 |---|---|---|---|
-| **Solana Ecosystem track** | $100K (10 × $10K) | 🟢 **Primary** | Solana-native: Token ACL, SAS, Token-2022, Kamino integration |
+| **Solana Ecosystem track** | $100K (10 × $10K) | 🟢 **Primary** | Solana-native: Token-2022 today; Token ACL, SAS and a Kamino sleeve are the target design, not yet integrated |
 | **Grand Champion** | $30K | 🟢 Reach | Novel primitive (queue-claim) aimed at a live $5B+ problem |
 | **Top 20 standout teams** | $15K each ($300K) | 🟢 Realistic target | Scores well on the rules' criteria (see §5) |
 | **Public Goods Award** | $5K | 🟡 Stretch | Only if we pitch the open-source `credit-gate` Gate Program and `credit-math` as reusable compliance infra for any RWA issuer on Solana (the repo is MIT) |
@@ -99,16 +99,23 @@ Solana track ($10K) + Superteam India (up to $2.5K) + CertiK ($10K credits) + Ad
 
 The SRS (`08`) is a ~24-week plan that includes a 10-week audit. For the hackathon we ship a **devnet MVP that proves the novel parts**, and present the rest as the roadmap (which also feeds the CertiK and Adevar applications).
 
-| Priority | Build | Proves (SRS AC) |
-|---|---|---|
-| **✅ built** | `payment-rails`: escrow + bonds, permissionless refunds, atomic DvP cash leg, ROFR, facility cash, coupon waterfall, crank + reconciliation + evidence export — live on devnet (R5) | AC-11 (refund liveness), cash legs of AC-3/AC-8 |
-| **P0 — must** | NPCS Token-2022 mint (DefaultAccountState=frozen) + Token ACL + `credit-gate` + SAS attestation. An eligible wallet thaws; an ineligible one gets a typed rejection | AC-1: compliance at activation |
-| **P0 — must** | `auction-engine` + `credit-math`: commit → reveal → uniform-price clear → pro-rata → settle → print, with 3+ bidders | AC-3 / AC-4: price discovery at a discount to NAV |
-| **P0 — must** | `queue-claim`: mint a claim from a redemption request and **sell it in an auction session** | AC-8 (sell path): **the headline demo** |
-| **P1 — should** | `mark-engine` (minimal): publish NAV, Fresh→Stale states, and the auction print feeding the discount curve | AC-2 (simplified) |
-| **P1 — should** | `liquidity-facility`: pledge a claim → USDC advance, plus a demo of "no liquidation on a stale mark" | AC-8 pledge path, part of AC-9 |
-| **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides |
-| **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, and a gate-rejection view | 3-minute demo video |
+| Priority | Build | Proves (SRS AC) | State (2026-10, #128/#129) |
+|---|---|---|---|
+| **✅ built** | `payment-rails`: escrow + bonds, permissionless refunds, atomic DvP cash leg, ROFR, facility cash, coupon waterfall, crank + reconciliation + evidence export — live on devnet (R5) | AC-11 (refund liveness), cash legs of AC-3/AC-8 | ✅ met. R5 settled Circle devnet USDC against a **manifest mint, not live NPCS** (`payment-rails/PHASES.md`); the live-NPCS DvP waits on the gate thaw |
+| **P0 — must** | NPCS Token-2022 mint (DefaultAccountState=frozen) + Token ACL + `credit-gate` + SAS attestation. An eligible wallet thaws; an ineligible one gets a typed rejection | AC-1: compliance at activation | ❌ **unmet.** Mint ✅. No Token ACL wiring, no SAS (#52), no `validate` (#122); devnet `credit-gate` is the pre-#26 build (#45). The freeze authority is a wallet key, so no investor can be thawed *through the gate* |
+| **P0 — must** | `auction-engine` + `credit-math`: commit → reveal → uniform-price clear → pro-rata → settle → print, with 3+ bidders | AC-3 / AC-4: price discovery at a discount to NAV | ❌ **unmet.** `credit-math` clearing + pro-rata ✅ (tested, no program consumer); `auction-engine` has no code |
+| **P0 — must** | `queue-claim`: mint a claim from a redemption request and **sell it in an auction session** | AC-8 (sell path): **the headline demo** | ❌ **unmet, no code.** The headline demo is unshipped |
+| **P1 — should** | `mark-engine` (minimal): publish NAV, Fresh→Stale states, and the auction print feeding the discount curve | AC-2 (simplified) | ❌ no code. NAV math exists in `credit-math`; nothing publishes it |
+| **P1 — should** | `liquidity-facility`: pledge a claim → USDC advance, plus a demo of "no liquidation on a stale mark" | AC-8 pledge path, part of AC-9 | ⚠️ cash leg only: `payment-rails` advance/repay/sweep with the H1 50% ceiling. No pledge path, no mark, no liquidation, so "no liquidation on a stale mark" is untestable (#124) |
+| **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides | 🗺 roadmap (the cash waterfall alone is built in `payment-rails`) |
+| **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, and a gate-rejection view | 3-minute demo video | ❌ shell only (one static page) |
+
+**P0 is not met** (#129). #4 was closed with P0 badges; the substantive
+P0 story (gate thaw through `credit-gate` + SAS, an auction session, a
+queue-claim sale, R5 on live NPCS) is still open and is graded here, not
+badged. The per-criterion record is [`README.md` § P0 exit criteria](README.md#p0-exit-criteria);
+the per-scenario grade is [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
+The pitch must present the ❌ rows as roadmap.
 
 **Guardrails from our own docs:** stay on devnet, keep NPCS inside team wallets (the offering gate in `08` §10.3), label everything `PILOT-DEMO-ASSET`, and never fake a mainnet markdown.
 
@@ -122,7 +129,7 @@ The SRS (`08`) is a ~24-week plan that includes a 10-week audit. For the hackath
 | **Potential impact / TAM** | $5B+ trapped behind gates, ~$8B tokenized private credit, 1–20% secondaries discounts (research `12`) |
 | **Novelty** | Queue-claim: a pro-rated redemption request as a tokenized, financeable claim. Nobody has shipped this on any chain |
 | **UX** | Denied redemption → exit or loan in one flow. Institutional dark UI |
-| **Open-source / composability** | MIT license. Composes with Token ACL, SAS, Kamino, Orca, RedStone |
+| **Open-source / composability** | MIT license. Built on Token-2022 + USDC today; designed to compose with Token ACL, SAS, Kamino, Orca and RedStone (none integrated yet) |
 | **Business plan** | Issuer sponsorship license + facility spread + discount-curve data product. No trading fees (`06` §13) |
 
 ---

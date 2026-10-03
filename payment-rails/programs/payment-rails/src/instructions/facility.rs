@@ -14,6 +14,12 @@
 //!   what is owed;
 //! - claim-sale proceeds repay the facility **before** the holder sees a
 //!   micro-USDC (QC-P4 sweep order), and the two legs sum to the proceeds.
+//!
+//! Not here, and not anywhere else yet (#124, roadmap): a health check, a
+//! liquidate instruction and the LF-P5 ladder (issuer ROFR → backstop
+//! bidder → forced-sale auction → workout). With no mark engine there is no
+//! mark state to read, so H4 / LF-P4 ("never liquidate on a stale mark") has
+//! no implementation and no test. AC-9 is graded roadmap in SRS 08 §1.1.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};

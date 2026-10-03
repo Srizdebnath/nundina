@@ -32,7 +32,7 @@ flowchart TB
     end
 
     subgraph I2["I2 · NAV — what it is worth"]
-        T["real treasury value<br/>(Kamino vault shares)"] --> G["nav_gross<br/>= floor(treasury × 10¹² ÷ supply)"]
+        T["treasury value<br/>(target: Kamino vault shares;<br/>none deployed, supply 0)"] --> G["nav_gross<br/>= floor(treasury × 10¹² ÷ supply)"]
         G --> F["fee accrual<br/>= floor(nav × 10bps × Δt ÷ year)"]
         F --> P["nav_published = nav_gross − fee<br/>→ SAS-attested weekly mark"]
     end

@@ -108,6 +108,15 @@ async function main(): Promise<void> {
     );
     check(labels.some(([k, v]) => k === "backing" && v === "USDC_1to1"), "backing label ok");
     check(labels.some(([k, v]) => k === "nav_precision" && v === "pico"), "nav_precision label ok");
+    // #121: `backing` and the off-chain permissioning describe the target.
+    // Until the gate, the backing and Squads are real, the mint itself must
+    // say so. Mints created before #121 need one UpdateField (runbook.md
+    // § On-chain status marker).
+    check(
+      labels.some(([k, v]) => k === "status" && v.startsWith("TARGET-STATE")),
+      "TARGET-STATE status label present on-chain",
+      labels.find(([k]) => k === "status")?.[1] ?? "missing: see runbook.md § On-chain status marker",
+    );
   }
 
   // ── §2 forbidden manifest (what NPCS must NOT carry) ────────────────

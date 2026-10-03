@@ -35,8 +35,11 @@ cadence = "weekly"
 rounding = "floor-against-initiator"
 
 [treasury]
-backing = "USDC 1:1 (I1)"
-venue = "Kamino USDC supply vault (permissionless); backup: program-owned USDC PDA, flat NAV"
+# #120: everything in this section is TARGET-STATE. No vault, deposit path or
+# mint-on-deposit script exists; I1 holds only because supply is 0.
+status = "TARGET-STATE: not deployed; supply 0; I1 enforced by process only"
+backing = "USDC 1:1 (I1) — target, not enforced on-chain"
+target_venue = "Kamino USDC supply vault (permissionless); backup: program-owned USDC PDA, flat NAV — decided at P2, nothing deployed"
 supply_cap_rule = "supply_base == confirmed_deposits_usdc * 10^6"
 
 [clusters]

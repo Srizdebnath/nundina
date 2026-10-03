@@ -13,6 +13,11 @@
 //! | H4 no liquidation on a stale mark | rule, not a number | **not enforced**: no mark engine, no liquidation instruction |
 //! | H5 timeout refund path | rule, not a number | enforced by `payment-rails` refunds (see its PHASES.md for the ask-vault caveat) |
 //!
+//! **Grade (#123): 1 of 5 HARD items enforced on-chain (H5), H1 partial,
+//! H2/H3/H4 roadmap.** H2 and H3 wait on a dated value decision; H4 lands
+//! with `mark-engine` and a facility liquidate instruction, neither of which
+//! has code (#124). SRS 08 §1.1 carries the same grade.
+//!
 //! Do not add a constant for H2/H3 with a guessed value. The number has to
 //! come from the plan first.
 //!
