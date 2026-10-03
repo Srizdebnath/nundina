@@ -26,7 +26,7 @@ today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 |---|---|---|
 | **`payment-rails`**: the USDC cash layer. Escrow and bonds (AE-P3/P4), permissionless never-pausable refunds (AE-P10), atomic one-fill DvP (AE-P8), issuer ROFR (AE-P7), facility funding, advances, interest and sweep (LF-P2/P6), exact-conservation cash waterfall (TE-P4) | ✅ **live devnet** · LiteSVM suite + kill-the-crank drill on a real validator. Auction, mark, claim and tranche *semantics* are not built; the rails move their cash | [`payment-rails/`](payment-rails/) · `bash payment-rails/crank/scripts/devnet/verify.sh` |
 | `credit-math`: shared fixed-point crate (NAV, clearing, pro-rata, waterfall, PV, prudential floor) | ✅ built · unit + property suites · CI gates 100% line + branch coverage. **Wired:** `payment-rails` uses 4 functions; clearing, pro-rata, NAV, haircut and PV have no program consumer yet | `cargo test --workspace` |
-| `credit-gate`: sRFC37 Gate Program skeleton | ⚠️ **config PDA only**: gate logic (validate, lot ledger, governor, block-list check) not built. Devnet runs the **pre-#26 build**; the fixes on `main` await a redeploy (#45) | `DEPLOYMENTS.md` |
+| `credit-gate`: sRFC37 Gate Program, partial | ⚠️ **on `main`:** config PDA, CG-P5 block-list (screened on every lot path), CG-P3 lot ledger (append / split / permissionless merge). **Not built:** `validate` + Token ACL wiring (CG-P1), holder governor (CG-P4) and SAS read (CG-P6), which wait on #52. Devnet runs the **pre-#26 build**; `main` awaits a redeploy (#45) | `DEPLOYMENTS.md` |
 | **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** · manifest verified. Not yet gated or backed on-chain; one bootstrap key holds every authority | [`token/`](token/) · `DEPLOYMENTS.md` |
 | Off-chain services | 🔨 crank + evidence exporter only. No indexer, database or NAV publisher (#58) | `payment-rails/crank/` |
 | Next.js 16 app | shell only (one static page; no wallet, no routes) | `app/` |
@@ -43,7 +43,7 @@ repo that describes them is the target, not a shipped feature.
 | Program | Crate | IDL | Tests | Crank | State |
 |---|---|---|---|---|---|
 | `payment-rails` | ✅ | ✅ | ✅ LiteSVM + drill | ✅ | live devnet |
-| `credit-gate` | ✅ | ✅ | ✅ LiteSVM | — | config PDA only (#122) |
+| `credit-gate` | ✅ | ✅ | ✅ LiteSVM | — | config + block-list + lot ledger; no validate / governor / SAS (#122) |
 | `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 4 functions consumed by `payment-rails` |
 | `auction-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P3) |
 | `mark-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P2) |
