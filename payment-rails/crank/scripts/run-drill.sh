@@ -1,19 +1,35 @@
 #!/usr/bin/env bash
 # Kill-the-crank drill: fresh solana-test-validator with the built program
 # (upgradeable, throwaway upgrade authority), run scripts/drill.ts, tear down.
-# Needs: `anchor build` in payment-rails/, solana-cli on PATH, npm install.
+# Every fill CPIs credit-gate (#133), so the validator also runs this
+# checkout's credit-gate (same throwaway authority) and the pinned SAS
+# fixture, and starts with the sellers' seasoned lot ledgers
+# (scripts/drill-gate.ts fixtures).
+# Needs: `anchor build` in payment-rails/ AND at the repo root, solana-cli
+# on PATH, npm install.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROGRAM_ID=GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn
 SO=../target/deploy/payment_rails.so
+GATE_ID=7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c
+GATE_SO=../../target/deploy/credit_gate.so
+SAS_ID=22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG
+SAS_SO=../../programs/credit-gate/tests-svm/fixtures/sas.so
 PORT=${PORT:-8899}
 [ -f "$SO" ] || { echo "missing $SO — run 'anchor build' in payment-rails/ first" >&2; exit 1; }
+[ -f "$GATE_SO" ] || { echo "missing $GATE_SO — run 'anchor build' at the repo root first" >&2; exit 1; }
 
 TMP=$(mktemp -d)
 solana-keygen new --no-bip39-passphrase --silent --force -o "$TMP/authority.json" >/dev/null
+# Sellers A (1 unit) and B (2 units): keys + ledgers seasoned 30 days ago.
+LEDGERS=$(npx tsx scripts/drill-gate.ts fixtures "$TMP/keys" 1000000 2000000)
+# shellcheck disable=SC2086 # LEDGERS is a flag list
 solana-test-validator --reset --quiet --ledger "$TMP/ledger" --rpc-port "$PORT" \
-  --upgradeable-program "$PROGRAM_ID" "$SO" "$TMP/authority.json" >"$TMP/validator.log" 2>&1 &
+  --upgradeable-program "$PROGRAM_ID" "$SO" "$TMP/authority.json" \
+  --upgradeable-program "$GATE_ID" "$GATE_SO" "$TMP/authority.json" \
+  --bpf-program "$SAS_ID" "$SAS_SO" \
+  $LEDGERS >"$TMP/validator.log" 2>&1 &
 VPID=$!
 trap 'kill $VPID 2>/dev/null || true; wait $VPID 2>/dev/null || true' EXIT
 
@@ -25,7 +41,7 @@ done
 
 EVIDENCE_DIR=${EVIDENCE_DIR:-$TMP/evidence}
 export RPC_URL="http://127.0.0.1:$PORT"
-AUTHORITY="$TMP/authority.json" EVIDENCE_DIR="$EVIDENCE_DIR" DRILL_OUT="$TMP/drill.json" \
+AUTHORITY="$TMP/authority.json" EVIDENCE_DIR="$EVIDENCE_DIR" DRILL_OUT="$TMP/drill.json" DRILL_KEYS="$TMP/keys" \
   npx tsx scripts/drill.ts
 
 # Exercise the CLI itself against the drill's final state.

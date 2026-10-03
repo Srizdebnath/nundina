@@ -12,6 +12,7 @@
  */
 import type { Address, TransactionSigner } from "@solana/kit";
 import { clockNow, exists, fetchDecoded, listByKey, ownerTokenAccount, tokenProgramOf, type R } from "./chain.ts";
+import { fillGateAccounts } from "./gate.ts";
 import { ix, type Struct } from "./idl.ts";
 import { assetVaultPda, configPda, escrowPda, receiptPda, sessionKeeperPda, vaultPda } from "./pda.ts";
 import { refundRoute, type SessionStatus } from "./rules.ts";
@@ -225,6 +226,12 @@ export async function settlePlan(
       out.push({ target, result: "skipped", detail: "seller USDC or buyer asset account missing" });
       continue;
     }
+    // AE-P8: every fill carries credit-gate's accounts (#133/#134).
+    const gate = await fillGateAccounts(ctx.rpc, s.asset_mint, f.seller, f.buyer);
+    if ("reason" in gate) {
+      out.push({ target, result: "skipped", detail: gate.reason });
+      continue;
+    }
     const instruction = ix(
       "settle_fill",
       {
@@ -244,6 +251,7 @@ export async function settlePlan(
         asset_mint: s.asset_mint,
         token_program: usdcProgram,
         asset_token_program: assetProgram,
+        gate: gate.accounts,
       },
       {
         fill_index: f.index,
@@ -253,7 +261,7 @@ export async function settlePlan(
       },
     );
     sends++;
-    const r = await send(ctx, `settle ${target}`, [instruction], { cuLimit: 200_000 });
+    const r = await send(ctx, `settle ${target}`, [instruction], { cuLimit: 400_000 });
     if (r.status === "sent") out.push({ target, result: "sent", signature: r.signature });
     else if (r.alreadyInUse || (await exists(ctx.rpc, receipt))) out.push({ target, result: "already-done", detail: "landed concurrently" });
     else out.push({ target, result: "failed", detail: r.name ?? r.message });

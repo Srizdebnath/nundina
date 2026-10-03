@@ -7,8 +7,10 @@
 //! PDA per mint), the CG-P5 block-list ([`blocklist`]), the CG-P3 lot ledger
 //! ([`lots`]), the CG-P6 SAS attestation read and CG-P4 holder governor
 //! behind `validate` ([`eligibility`]), and the CG-P1 Token ACL (sRFC37)
-//! thaw/freeze hooks ([`token_acl`]). The crate carries no `unsafe`; its
-//! only CPI is to the system program (account creation).
+//! thaw/freeze hooks ([`token_acl`]), and the AE-P8 settle-time re-check
+//! that payment-rails runs on every fill ([`settle`], #133/#134). The crate
+//! carries no `unsafe`; its only CPI is to the system program (account
+//! creation).
 
 #![deny(unsafe_code)]
 // missing_docs activates in P1 when the hand-written account surface
@@ -24,11 +26,13 @@ use anchor_lang::prelude::*;
 pub mod blocklist;
 pub mod eligibility;
 pub mod lots;
+pub mod settle;
 pub mod token_acl;
 
 pub use blocklist::*;
 pub use eligibility::*;
 pub use lots::*;
+pub use settle::*;
 pub use token_acl::*;
 
 declare_id!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
@@ -404,6 +408,15 @@ pub enum GateError {
     /// `update_policy` with nothing to write.
     #[msg("Policy update writes nothing")]
     EmptyPolicyUpdate,
+    /// A sale wants more than the seller's seasoned quantity (C2, #133).
+    #[msg("Seller's seasoned quantity is short of the sale")]
+    SeasoningNotMet,
+    /// `settle_check*` not signed by payment-rails' settlement PDA.
+    #[msg("Signer is not the payment-rails settlement authority")]
+    NotSettlementAuthority,
+    /// A fill whose buyer is its seller.
+    #[msg("Buyer and seller are the same wallet")]
+    SelfTrade,
 }
 
 #[program]
@@ -964,6 +977,33 @@ pub mod credit_gate {
     #[instruction(discriminator = &CAN_FREEZE_DISCRIMINATOR)]
     pub fn can_freeze_permissionless(ctx: Context<GateHook>) -> Result<()> {
         token_acl::can_freeze(ctx.accounts)
+    }
+
+    /// AE-P8 settle-time re-check for one fill (#133, #134): block-list on
+    /// both sides, the buyer's admission and SAS attestations re-read, the
+    /// seller's seasoned lots debited, the buyer's lot appended. Signed only
+    /// by payment-rails' settlement PDA, inside `settle_fill`; any failure
+    /// aborts the fill. Returns what the transfer record needs.
+    pub fn settle_check(
+        ctx: Context<SettleCheck>,
+        seller: Pubkey,
+        buyer: Pubkey,
+        qty: u64,
+    ) -> Result<SettleOutcome> {
+        settle::process_settle_check(ctx, seller, buyer, qty)
+    }
+
+    /// [`settle_check`](credit_gate::settle_check) for the issuer's ROFR
+    /// fill (AE-P7): block-list on both sides and the seller's seasoned
+    /// lots debited. The issuer is buying its own security back, so it is
+    /// not admitted as a holder and gets no lot.
+    pub fn settle_check_rofr(
+        ctx: Context<SettleCheckRofr>,
+        seller: Pubkey,
+        issuer: Pubkey,
+        qty: u64,
+    ) -> Result<SettleOutcome> {
+        settle::process_settle_check_rofr(ctx, seller, issuer, qty)
     }
 
     /// CG-P3 `merge_expired`: permissionless. Folds every seasoned lot into

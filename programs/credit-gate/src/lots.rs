@@ -16,9 +16,9 @@
 //! - `merge_expired`: anyone. There is no crank fee yet (SRS 08 CG-P3 asks
 //!   for one); the call only moves expired quantity into FREE.
 //!
-//! What this does not do yet: decrement on sale (the seller side of a fill
-//! lands with auction-engine's settle path), holder-count bookkeeping
-//! (CG-P4 needs `investor_id` from SAS, #52) and the Token ACL thaw (CG-P1).
+//! - `settle_check` ([`crate::settle`]): payment-rails' settlement PDA, once
+//!   per fill (AE-P8, #133). It debits the seller's seasoned quantity
+//!   ([`HolderLots::debit`]) and appends the buyer's new lot.
 
 use anchor_lang::prelude::*;
 
@@ -85,12 +85,32 @@ pub struct HolderLots {
     pub bump: u8,
 }
 
+/// Most lots one sale may draw from, FREE included. Equal to payment-rails'
+/// `MAX_LOTS_PER_FILL`, the cap on a `TransferInstruction`'s `lot_ids`.
+pub const MAX_DRAWS: usize = 8;
+
+/// The `lot_id` a [`LotDraw`] from the FREE bucket carries. FREE quantity
+/// was seasoned lots that `merge_expired` folded together, so it has no
+/// single acquisition time; its draw reports `acquired_ts` and
+/// `restriction_expiry` as 0.
+pub const FREE_LOT_ID: u32 = u32::MAX;
+
+/// Quantity a sale took from one lot (or from FREE, [`FREE_LOT_ID`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+pub struct LotDraw {
+    pub lot_id: u32,
+    pub qty: u64,
+    pub acquired_ts: i64,
+    pub restriction_expiry: i64,
+}
+
 /// Emitted for every lot-ledger change (CG-P3, CG-P7). Same family as the
 /// skeleton's `LotEvent`, extended with the lot id and holder FREE balance.
 #[event]
 #[derive(Debug)]
 pub struct LotEvent {
-    /// 0 = append, 1 = split, 2 = merge-to-free.
+    /// 0 = append, 1 = split, 2 = merge-to-free. A sale's debit is evented
+    /// as [`crate::SettleChecked`], which lists every lot it drew from.
     pub kind: u8,
     /// Gated mint.
     pub mint: Pubkey,
@@ -200,6 +220,68 @@ impl HolderLots {
             },
             now,
         )
+    }
+
+    /// Take `qty` for a sale at `now` (AE-P8, C2). Only seasoned quantity
+    /// can go: FREE plus every lot with `restriction_expiry ≤ now`. Fails
+    /// [`GateError::SeasoningNotMet`] if that is short of `qty`, whatever
+    /// the unseasoned lots hold.
+    ///
+    /// Seasoned lots are drawn oldest acquisition first, each one a
+    /// [`LotDraw`], so the transfer record names the lots that went. At
+    /// most `MAX_DRAWS - 1` lots are named; past that, and when the named
+    /// lots run out, every seasoned lot is merged into FREE and the rest
+    /// comes from FREE as a single last draw. Emptied lots leave the ring.
+    pub fn debit(&mut self, qty: u64, now: i64) -> Result<Vec<LotDraw>> {
+        require!(qty > 0, GateError::InvalidLotQty);
+        require!(self.sellable(now)? >= qty, GateError::SeasoningNotMet);
+        let mut seasoned: Vec<usize> = (0..usize::from(self.lot_count))
+            .filter(|&i| self.lots[i].restriction_expiry <= now)
+            .collect();
+        seasoned.sort_by_key(|&i| (self.lots[i].acquired_ts, self.lots[i].lot_id));
+        let mut draws = Vec::new();
+        let mut left = qty;
+        for &i in seasoned.iter().take(MAX_DRAWS - 1) {
+            let lot = &mut self.lots[i];
+            let take = left.min(lot.qty);
+            lot.qty -= take;
+            left -= take;
+            draws.push(LotDraw {
+                lot_id: lot.lot_id,
+                qty: take,
+                acquired_ts: lot.acquired_ts,
+                restriction_expiry: lot.restriction_expiry,
+            });
+            if left == 0 {
+                break;
+            }
+        }
+        if left > 0 {
+            self.merge_expired(now)?;
+            // `sellable ≥ qty` above: FREE now holds at least `left`.
+            self.free_qty -= left;
+            draws.push(LotDraw {
+                lot_id: FREE_LOT_ID,
+                qty: left,
+                acquired_ts: 0,
+                restriction_expiry: 0,
+            });
+        }
+        self.drop_empty();
+        Ok(draws)
+    }
+
+    /// Remove zero-quantity lots, keeping the order of the rest.
+    fn drop_empty(&mut self) {
+        let mut kept = 0usize;
+        for i in 0..usize::from(self.lot_count) {
+            if self.lots[i].qty > 0 {
+                self.lots[kept] = self.lots[i];
+                kept += 1;
+            }
+        }
+        self.lots[kept..].fill(Lot::default());
+        self.lot_count = kept as u8;
     }
 
     /// Split `qty` off lot `lot_id` into a new lot with the same metadata
@@ -436,6 +518,70 @@ mod tests {
             .unwrap();
         assert_eq!(lot.lot_id, MAX_LOTS as u32, "ids are never reused");
         assert_eq!((h.free_qty, usize::from(h.lot_count)), (1, MAX_LOTS));
+    }
+
+    #[test]
+    fn debit_takes_only_seasoned_quantity_oldest_first() {
+        let mut h = ledger();
+        h.append(5, 30, DAY, LotSource::PrimaryMint, false, 0)
+            .unwrap(); // id 0, exp 30+DAY
+        h.append(7, 10, DAY, LotSource::PrimaryMint, false, 0)
+            .unwrap(); // id 1, exp 10+DAY (older)
+        h.append(100, 50, 10 * DAY, LotSource::AuctionSettle, false, 1)
+            .unwrap(); // id 2, unseasoned until 50+10·DAY
+        let now = 30 + DAY;
+        // 12 seasoned, 100 not: a sale of 13 fails however much is held.
+        assert_eq!(h.total().unwrap(), 112);
+        assert!(h.debit(13, now).is_err());
+        assert!(h.debit(0, now).is_err());
+        let draws = h.debit(9, now).unwrap();
+        assert_eq!(
+            draws
+                .iter()
+                .map(|d| (d.lot_id, d.qty, d.acquired_ts))
+                .collect::<Vec<_>>(),
+            vec![(1, 7, 10), (0, 2, 30)],
+            "oldest acquisition first"
+        );
+        // Lot 1 is gone, lot 0 keeps 3, the unseasoned lot is untouched.
+        assert_eq!(
+            h.live()
+                .iter()
+                .map(|l| (l.lot_id, l.qty))
+                .collect::<Vec<_>>(),
+            vec![(0, 3), (2, 100)]
+        );
+        assert_eq!(h.total().unwrap(), 103);
+        assert_eq!(h.lots[2], Lot::default(), "tail is zeroed");
+    }
+
+    #[test]
+    fn debit_falls_back_to_free_and_caps_named_draws() {
+        let mut h = ledger();
+        h.free_qty = 4;
+        for i in 0..10 {
+            h.append(1, i, DAY, LotSource::PrimaryMint, false, 0)
+                .unwrap();
+        }
+        let now = 10 + DAY;
+        // 10 seasoned lots of 1 + FREE 4: sell 12. Seven named draws, then
+        // the other three lots merge into FREE (4 + 3 = 7) and 5 comes from it.
+        let draws = h.debit(12, now).unwrap();
+        assert_eq!(draws.len(), MAX_DRAWS);
+        assert!(draws[..7].iter().all(|d| d.qty == 1 && d.lot_id < 7));
+        assert_eq!(
+            (draws[7].lot_id, draws[7].qty, draws[7].restriction_expiry),
+            (FREE_LOT_ID, 5, 0)
+        );
+        assert_eq!((h.free_qty, h.lot_count), (2, 0));
+        assert_eq!(h.total().unwrap(), 2);
+        // Only FREE left: one draw.
+        let draws = h.debit(2, now).unwrap();
+        assert_eq!(
+            draws.iter().map(|d| (d.lot_id, d.qty)).collect::<Vec<_>>(),
+            vec![(FREE_LOT_ID, 2)]
+        );
+        assert!(h.debit(1, now).is_err(), "nothing left");
     }
 
     #[test]

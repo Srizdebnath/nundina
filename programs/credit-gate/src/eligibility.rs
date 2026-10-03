@@ -254,6 +254,32 @@ impl InvestorRecord {
     pub const SEED: &'static [u8] = b"investor";
 }
 
+/// Which SAS attestation a decision rested on (#131): who signed it, under
+/// which schema, and until when (`0` = SAS "never expires"). No PII: the
+/// attestation's data stays behind `attestation_inputs_hash`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, AnchorSerialize, AnchorDeserialize)]
+pub struct AttestationRef {
+    /// The SAS attestation account.
+    pub attestation: Pubkey,
+    /// The attester that signed it (one of `MarketConfig::attesters`).
+    pub attester: Pubkey,
+    /// Its SAS schema.
+    pub schema: Pubkey,
+    /// Its SAS expiry (unix seconds).
+    pub expiry: i64,
+}
+
+impl AttestationRef {
+    fn of(ai: &AccountInfo, att: &SasAttestation) -> AttestationRef {
+        AttestationRef {
+            attestation: *ai.key,
+            attester: att.signer,
+            schema: att.schema,
+            expiry: att.expiry,
+        }
+    }
+}
+
 /// Emitted on every `validate` decision (CG-P1, CG-P7).
 #[event]
 #[derive(Debug)]
@@ -266,6 +292,11 @@ pub struct ValidateDecision {
     pub owner: Pubkey,
     /// SHA-256 over both attestation addresses and data (no PII on-chain).
     pub attestation_inputs_hash: [u8; 32],
+    /// The identity attestation the approval rests on (#131). All zero on
+    /// a rejection: `reject` says why, and nothing was admitted.
+    pub identity: AttestationRef,
+    /// The accreditation attestation read; zero as for `identity`.
+    pub accreditation: AttestationRef,
     /// Distinct investors admitted after this decision.
     pub distinct_investors: u32,
 }
@@ -300,6 +331,10 @@ pub struct Eligible {
     pub identity: Identity,
     pub accreditation: Accreditation,
     pub inputs_hash: [u8; 32],
+    /// The identity attestation it rests on (#131).
+    pub identity_ref: AttestationRef,
+    /// The accreditation attestation it rests on.
+    pub accreditation_ref: AttestationRef,
 }
 
 fn read_attestation(
@@ -397,6 +432,8 @@ pub fn evaluate(
         identity,
         accreditation,
         inputs_hash,
+        identity_ref: AttestationRef::of(identity_ai, &id),
+        accreditation_ref: AttestationRef::of(accreditation_ai, &acc),
     }))
 }
 
@@ -484,15 +521,21 @@ pub fn process_validate(ctx: Context<Validate>, owner: Pubkey) -> Result<()> {
         &a.accreditation_attestation,
         now,
     )?;
-    let (outcome, hash) = match decided {
-        Err(r) => (Err(r), [0; 32]),
-        Ok(e) => (admit(a, &ctx.bumps, owner, mint, &e, now)?, e.inputs_hash),
+    let (outcome, hash, refs) = match decided {
+        Err(r) => (Err(r), [0; 32], Default::default()),
+        Ok(e) => (
+            admit(a, &ctx.bumps, owner, mint, &e, now)?,
+            e.inputs_hash,
+            (e.identity_ref, e.accreditation_ref),
+        ),
     };
     emit!(ValidateDecision {
         reject: outcome.err(),
         mint,
         owner,
         attestation_inputs_hash: hash,
+        identity: refs.0,
+        accreditation: refs.1,
         distinct_investors: a.policy.distinct_investors,
     });
     Ok(())

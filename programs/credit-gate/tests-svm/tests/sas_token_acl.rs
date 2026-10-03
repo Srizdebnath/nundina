@@ -675,11 +675,32 @@ fn an_attested_investor_thaws_through_token_acl_and_the_gate() {
     assert!(env.thaw(ta, alice).is_err());
     assert_eq!(env.state(&ta), FROZEN);
 
-    env.attest_good(alice, 7);
+    let (id_att, acc_att) = env.attest_good(alice, 7);
     let d = env.validate(alice, 7);
     assert_eq!(d.reject, None);
     assert_eq!(d.distinct_investors, 1);
     assert_ne!(d.attestation_inputs_hash, [0; 32]);
+    // #131: the decision names what it rests on: each attestation, its
+    // attester, its schema and its expiry, as SAS holds them.
+    let att = env.attester.pubkey();
+    assert_eq!(
+        (
+            d.identity.attestation,
+            d.identity.attester,
+            d.identity.schema,
+            d.identity.expiry
+        ),
+        (id_att, att, env.id_schema, NOW + 90 * DAY)
+    );
+    assert_eq!(
+        (
+            d.accreditation.attestation,
+            d.accreditation.attester,
+            d.accreditation.schema,
+            d.accreditation.expiry
+        ),
+        (acc_att, att, env.acc_schema, NOW + 90 * DAY)
+    );
     // validate also opened the lot ledger (CG-P1 step 5).
     let lots = pda(
         &[HolderLots::SEED, env.mint.pubkey().as_ref(), alice.as_ref()],
@@ -816,7 +837,13 @@ fn the_block_list_wins_over_valid_attestations() {
     let w = Pubkey::new_unique();
     env.attest_good(w, 4);
     env.block(w);
-    assert_eq!(env.validate(w, 4).reject, Some(GateReject::Blocklisted));
+    let d = env.validate(w, 4);
+    assert_eq!(d.reject, Some(GateReject::Blocklisted));
+    assert_eq!(
+        (d.identity, d.accreditation),
+        Default::default(),
+        "a rejection names no attestation"
+    );
 }
 
 #[test]

@@ -193,6 +193,13 @@ pub enum RailsError {
     /// The keeper assignment belongs to another session (#127).
     #[msg("Keeper assignment is for another session")]
     KeeperSessionMismatch,
+    /// The account passed as credit-gate is not credit-gate (#133).
+    #[msg("Gate program is not credit-gate")]
+    GateProgramMismatch,
+    /// credit-gate approved but its return data is missing, from another
+    /// program, or not a well-formed outcome (#133).
+    #[msg("Gate outcome missing or malformed")]
+    GateOutcomeInvalid,
 }
 
 impl From<MathError> for RailsError {

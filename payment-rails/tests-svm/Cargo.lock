@@ -917,6 +917,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "credit-gate"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "solana-sha256-hasher",
+]
+
+[[package]]
 name = "credit-math"
 version = "0.1.0"
 
@@ -1968,6 +1976,8 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "base64 0.22.1",
+ "credit-gate",
  "credit-math",
  "litesvm",
  "payment-rails",

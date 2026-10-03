@@ -3681,6 +3681,70 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+            },
+            {
+              "name": "gate_authority",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      116,
+                      101,
+                      95,
+                      115,
+                      101,
+                      116,
+                      116,
+                      108,
+                      101
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "gate_config",
+              "docs": [
+                "re-derives it, as it does every gate account below)."
+              ]
+            },
+            {
+              "name": "gate_policy"
+            },
+            {
+              "name": "seller_block"
+            },
+            {
+              "name": "buyer_block"
+            },
+            {
+              "name": "seller_lots",
+              "writable": true
+            },
+            {
+              "name": "buyer_lots",
+              "writable": true
+            },
+            {
+              "name": "buyer_link"
+            },
+            {
+              "name": "buyer_identity"
+            },
+            {
+              "name": "buyer_accreditation"
+            }
+          ]
         }
       ],
       "args": [
@@ -3893,6 +3957,51 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+            },
+            {
+              "name": "gate_authority",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      116,
+                      101,
+                      95,
+                      115,
+                      101,
+                      116,
+                      116,
+                      108,
+                      101
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "seller_block"
+            },
+            {
+              "name": "issuer_block"
+            },
+            {
+              "name": "seller_lots",
+              "writable": true
+            }
+          ]
         }
       ],
       "args": [
@@ -4738,6 +4847,16 @@
       "code": 6053,
       "name": "KeeperSessionMismatch",
       "msg": "Keeper assignment is for another session"
+    },
+    {
+      "code": 6054,
+      "name": "GateProgramMismatch",
+      "msg": "Gate program is not credit-gate"
+    },
+    {
+      "code": 6055,
+      "name": "GateOutcomeInvalid",
+      "msg": "Gate outcome missing or malformed"
     }
   ],
   "types": [
@@ -5588,9 +5707,10 @@
       "name": "ExemptionPath",
       "docs": [
         "Legal basis a fill relies on (doc 07 L3–L5, SRS 08 AE-P8). Wire-stable",
-        "by index and append-only. `NotRecorded` means the rails were not given",
-        "one, which is the case for every fill until the gate's per-fill checklist",
-        "(CG-4) exists."
+        "by index and append-only; the indices are credit-gate's exemption codes.",
+        "credit-gate's settle-time check picks it for every fill (#133), so a",
+        "settled fill never carries `NotRecorded`; the variant stays for wire",
+        "stability and for records made before the check existed."
       ],
       "type": {
         "kind": "enum",
@@ -6150,7 +6270,8 @@
     {
       "name": "LotRef",
       "docs": [
-        "One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3)."
+        "One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3), as",
+        "credit-gate's settle-time check debited it."
       ],
       "type": {
         "kind": "struct",
@@ -6158,9 +6279,17 @@
           {
             "name": "lot_index",
             "docs": [
-              "Index in the seller's `HolderLots` ring."
+              "The lot's id in the seller's `HolderLots` ledger. `u32::MAX` is the",
+              "FREE bucket (seasoned lots merged together; its times are 0)."
             ],
             "type": "u32"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Base units this fill took from the lot."
+            ],
+            "type": "u64"
           },
           {
             "name": "acquired_ts",
@@ -6687,12 +6816,12 @@
         "event has the fields a transfer agent (doc 07 L21) and a",
         "books-and-records export (L22) need to show the transfer was lawful.",
         "",
-        "**It does not prove that today (#88).** Until the gate's lot ledger and",
-        "settle-time re-check exist (#53), every fill emits `lot_ids = []`,",
-        "`exemption_path = NotRecorded` and `gate_check = NotPerformed`: no lot",
-        "is validated, no exemption is derived, no check runs. Those values",
-        "state the absence, and the crank's evidence manifest counts every such",
-        "fill as `unproven` — doc 07 L4/L21 are **not** satisfiable yet."
+        "Every fill now runs credit-gate's settle-time check first (#133, #134):",
+        "block-list on both wallets, the buyer's SAS attestations re-read, the",
+        "seller's seasoned lots debited. The record carries what the gate",
+        "returned: the lots drawn, the exemption basis, and `gate_check =",
+        "Passed`. The crank's evidence manifest counts a fill as `proven` only",
+        "when all three are present (#88)."
       ],
       "type": {
         "kind": "struct",
