@@ -117,6 +117,21 @@ senior and junior coupons.
   that receive anything must be allowlisted. A receipt per
   `(distributor, period)` makes a replay fail.
 
+### Bonded keepers (doc 06 §8, #127)
+
+Refunds are permissionless, so a dead crank never traps cash (AE-P10).
+Keepers add accountability on top: a keeper bonds USDC into a vault its
+`Keeper` PDA owns (`register_keeper`, ≥ `KeeperPolicy.min_bond`); the
+session operator assigns it (`assign_keeper`), snapshotting `due_at =
+settle_deadline + sla_seconds` and the per-escrow reward. After `due_at`
+anyone may call `refund_escalated` / `refund_ask_escalated`: the same
+refund as `refund` / `refund_ask` (one shared body), plus the reward paid
+from the keeper's bond to the caller and a recorded miss. The reward is
+capped by what the bond holds and never blocks the refund. The bond stays
+locked while the keeper has a live assignment (`release_assignment` once
+the session has no escrow, then `withdraw_keeper`). Tests:
+`tests-svm/tests/keeper.rs` (8, both token programs) and the drill.
+
 ### Escrow rules
 
 | When | Unrevealed escrow | Revealed escrow |

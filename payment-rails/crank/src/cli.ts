@@ -1,7 +1,14 @@
 /**
  * payment-rails crank CLI.
  *
- *   npm run crank -- refunds   --session <addr>              # any wallet can run this
+ *   npm run crank -- refunds   --session <addr> [--escalate-to <usdc>]  # any wallet; past a
+ *                                                          #   keeper's SLA, paid from its bond (#127)
+ *   npm run crank -- keeper register --bond N --token <usdc>   # KEYPAIR = the keeper wallet
+ *   npm run crank -- keeper top-up   --amount N --token <usdc>
+ *   npm run crank -- keeper assign   --session <addr> --keeper <wallet>   # KEYPAIR = operator
+ *   npm run crank -- keeper release  --session <addr>         # anyone
+ *   npm run crank -- keeper withdraw --token <usdc>
+ *   npm run crank -- seasoning --mint <gated mint>          # credit-gate merge_expired (#127)
  *   npm run crank -- settle    --session <addr> --plan fills.json [--max-sends N]
  *   npm run crank -- finish    --session <addr>
  *   npm run crank -- reconcile --session <addr> | --facility <addr>
@@ -20,6 +27,8 @@ import { address } from "@solana/kit";
 import { finish, refundAll, settlePlan, type FillPlan, type Outcome } from "./crank.ts";
 import { loadKeypair, makeCtx } from "./ctx.ts";
 import { exportEvidence, verifyEvidence } from "./evidence.ts";
+import { assignKeeper, registerKeeper, releaseAssignment, topUpKeeper, withdrawKeeper } from "./keeper.ts";
+import { seasonAll } from "./seasoning.ts";
 import { formatReport, reconcileFacility, reconcileSession } from "./ledger.ts";
 
 const { positionals, values } = parseArgs({
@@ -32,6 +41,12 @@ const { positionals, values } = parseArgs({
     out: { type: "string" },
     limit: { type: "string" },
     dir: { type: "string" },
+    "escalate-to": { type: "string" },
+    bond: { type: "string" },
+    amount: { type: "string" },
+    token: { type: "string" },
+    keeper: { type: "string" },
+    mint: { type: "string" },
     signer: { type: "string" },
   },
 });
@@ -81,7 +96,21 @@ async function main(): Promise<boolean> {
   const ctx = await makeCtx();
   switch (cmd) {
     case "refunds":
-      return summarize(await refundAll(ctx, address(need("session"))));
+      return summarize(await refundAll(ctx, address(need("session")), {
+        escalateTo: values["escalate-to"] ? address(values["escalate-to"]) : undefined,
+      }));
+    case "keeper": {
+      const sub = positionals[1];
+      if (sub === "register") return summarize([await registerKeeper(ctx, BigInt(need("bond")), address(need("token")))]);
+      if (sub === "top-up") return summarize([await topUpKeeper(ctx, BigInt(need("amount")), address(need("token")))]);
+      if (sub === "assign") return summarize([await assignKeeper(ctx, address(need("session")), ctx.payer, address(need("keeper")))]);
+      if (sub === "release") return summarize([await releaseAssignment(ctx, address(need("session")))]);
+      if (sub === "withdraw") return summarize([await withdrawKeeper(ctx, address(need("token")))]);
+      console.error("usage: crank keeper <register|top-up|assign|release|withdraw> — see src/cli.ts");
+      return false;
+    }
+    case "seasoning":
+      return summarize(await seasonAll(ctx, address(need("mint"))));
     case "settle": {
       const plan = parsePlan(readFileSync(need("plan"), "utf8"));
       const maxSends = values["max-sends"] ? Number(values["max-sends"]) : undefined;
@@ -103,7 +132,7 @@ async function main(): Promise<boolean> {
       return true;
     }
     default:
-      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export> [options] — see src/cli.ts");
+      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export|keeper|seasoning> [options] — see src/cli.ts");
       return false;
   }
 }

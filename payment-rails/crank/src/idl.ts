@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import {
   AccountRole,
+  isTransactionSigner,
   address,
   getAddressDecoder,
   getAddressEncoder,
@@ -39,6 +40,8 @@ interface IdlAccountMeta {
   writable?: boolean;
   signer?: boolean;
   address?: string;
+  /** A composite `Accounts` field (e.g. `refund_escalated.refund`, #127). */
+  accounts?: IdlAccountMeta[];
 }
 interface IdlInstruction {
   name: string;
@@ -214,8 +217,9 @@ export function errorCode(name: string): number {
 // ── instructions ─────────────────────────────────────────────────────────
 
 /** An account argument: a plain address, or a signer for signing slots. */
-export type AccountArg = Address | TransactionSigner;
-const isSigner = (a: AccountArg): a is TransactionSigner => typeof a === "object";
+export type AccountArg = Address | TransactionSigner | { [name: string]: AccountArg };
+const isSigner = (a: AccountArg): a is TransactionSigner =>
+  typeof a === "object" && isTransactionSigner(a as TransactionSigner);
 
 /**
  * Build a program instruction by IDL name. Accounts are matched by IDL name
@@ -226,17 +230,25 @@ const isSigner = (a: AccountArg): a is TransactionSigner => typeof a === "object
 export function ix(name: string, accounts: Record<string, AccountArg>, args: Struct = {}): Instruction {
   const def = idl.instructions.find((i) => i.name === name);
   if (!def) throw new Error(`unknown instruction ${name}`);
-  const metas = def.accounts.map((a) => {
-    const given = accounts[a.name] ?? (a.address ? address(a.address) : undefined);
-    if (given === undefined) throw new Error(`${name}: missing account ${a.name}`);
-    if (a.signer && !isSigner(given)) throw new Error(`${name}: ${a.name} must be a signer`);
-    const role = a.signer
-      ? a.writable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER
-      : a.writable ? AccountRole.WRITABLE : AccountRole.READONLY;
-    return isSigner(given)
-      ? { address: given.address, role, signer: given }
-      : { address: given, role };
-  });
+  // Composite fields nest: `{ refund: { caller, … }, keeper: { … } }`,
+  // flattened in IDL order, exactly as Anchor lays them out on the wire.
+  type Meta = NonNullable<Instruction["accounts"]>[number];
+  const flatten = (defs: IdlAccountMeta[], given: Record<string, AccountArg>, path: string): Meta[] =>
+    defs.flatMap((a) => {
+      const v = given[a.name] ?? (a.address ? address(a.address) : undefined);
+      if (v === undefined) throw new Error(`${name}: missing account ${path}${a.name}`);
+      if (a.accounts) {
+        if (typeof v === "string" || isSigner(v)) throw new Error(`${name}: ${path}${a.name} is a group of accounts`);
+        return flatten(a.accounts, v as Record<string, AccountArg>, `${path}${a.name}.`);
+      }
+      if (typeof v !== "string" && !isSigner(v)) throw new Error(`${name}: ${path}${a.name} is a single account`);
+      if (a.signer && !isSigner(v)) throw new Error(`${name}: ${a.name} must be a signer`);
+      const role = a.signer
+        ? a.writable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER
+        : a.writable ? AccountRole.WRITABLE : AccountRole.READONLY;
+      return [isSigner(v) ? { address: v.address, role, signer: v } : { address: v, role }];
+    });
+  const metas = flatten(def.accounts, accounts, "");
   const data: number[] = [...def.discriminator];
   for (const arg of def.args) {
     const v = args[arg.name];

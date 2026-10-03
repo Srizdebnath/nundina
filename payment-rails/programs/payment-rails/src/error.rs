@@ -174,6 +174,25 @@ pub enum RailsError {
     /// A fill's lot list is longer than `MAX_LOTS_PER_FILL` (#88).
     #[msg("Too many lots in one fill")]
     TooManyLots,
+    /// Keeper policy values outside their bounds (#127): SLA in
+    /// `1..=MAX_KEEPER_SLA_SECONDS`, `0 < escalation_reward ≤ min_bond`.
+    #[msg("Keeper policy out of bounds")]
+    KeeperPolicyOutOfBounds,
+    /// Keeper bond below the policy minimum (#127).
+    #[msg("Keeper bond below the minimum")]
+    KeeperBondTooLow,
+    /// Escalation before the session's keeper SLA ran out (#127).
+    #[msg("Keeper SLA has not run out")]
+    KeeperSlaNotDue,
+    /// Keeper still holds live session assignments (#127).
+    #[msg("Keeper has live assignments")]
+    KeeperAssigned,
+    /// Assignment released while escrows are still open (#127).
+    #[msg("Session still has open escrows")]
+    SessionStillOpen,
+    /// The keeper assignment belongs to another session (#127).
+    #[msg("Keeper assignment is for another session")]
+    KeeperSessionMismatch,
 }
 
 impl From<MathError> for RailsError {

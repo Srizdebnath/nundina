@@ -27,6 +27,7 @@ npm run crank -- settle    --session <addr> --plan fills.json [--max-sends N]
 npm run crank -- finish    --session <addr>                    # operator
 npm run crank -- reconcile --session <addr>                    # or --facility <addr>
 npm run crank -- export    --out evidence/ [--limit N]       # signed by EVIDENCE_KEYPAIR (or KEYPAIR)
+npm run crank -- keeper …  /  seasoning …                    # see § Bonded keepers below
 npm run crank -- verify-export --dir evidence/ [--signer <addr>]   # keyless, offline
 ```
 
@@ -74,18 +75,45 @@ The exit code is 1 if any action fails or a reconciliation isn't clean.
   signature, optionally against the signer the auditor was told to trust;
   it needs no key and no RPC.
 
-## Not built yet (#127)
+## Bonded keepers and the seasoning crank (#127)
 
-What SRS 08 §6 asks of the crank-runner beyond this package. None of it
-can be built here before the programs it would drive exist:
+doc 06 §8: bonded keepers with a permissionless fallback. On-chain in
+`payment-rails` (`instructions/keeper.rs`), driven from here:
 
-| SRS 08 §6 / §8 | State | Waits on |
-|---|---|---|
-| **Bonded** crank wallet | ❌ The crank signs with whatever `KEYPAIR` names (the operator's for settle/finish). No program holds a crank bond, so there is nothing to bond against | a crank-bond account in the engine programs (auction-engine) |
-| Phase-deadline cranks (Commit → Reveal → Clearing …) | ❌ | `auction-engine` (no code, #128). The rails' own deadlines need no crank: refunds open by themselves at `settle_deadline` |
-| Seasoning merges (`merge_expired`) | ❌ | the `credit-gate` lot ledger (CG-P3, #122) |
-| Distribution cranks | ❌ | `tranche-engine` (TE-P4). The rails' `distribute_coupon` is called by the distributor, not cranked |
-| Session-scoped bundles with marks + model versions (AC-12) | ❌ bundles are program-scoped, cash events only | `mark-engine` |
+```bash
+KEYPAIR=<keeper.json>   npm run crank -- keeper register --bond 50000000 --token <keeper usdc>
+KEYPAIR=<operator.json> npm run crank -- keeper assign --session <addr> --keeper <keeper wallet>
+KEYPAIR=<anyone.json>   npm run crank -- refunds --session <addr> --escalate-to <their usdc>
+KEYPAIR=<anyone.json>   npm run crank -- keeper release --session <addr>
+KEYPAIR=<keeper.json>   npm run crank -- keeper withdraw --token <keeper usdc>
+npm run crank -- seasoning --mint <gated mint>      # credit-gate merge_expired, any wallet
+```
+
+- The keeper posts a USDC bond (≥ `KeeperPolicy.min_bond`) into a vault its
+  `Keeper` PDA owns. The operator assigns it per session, snapshotting
+  `due_at = settle_deadline + sla_seconds` and the reward.
+- Inside the SLA the keeper refunds with the ordinary `refunds`. Past it,
+  `refunds --escalate-to` runs `refund_escalated` / `refund_ask_escalated`:
+  the same refund (one shared body), and the caller is paid the reward
+  from the keeper's bond, capped by what the bond holds (never blocking the
+  refund). The escrow owner may escalate its own refund.
+- The bond can't leave while the keeper holds a live assignment;
+  `release` (anyone) closes an assignment once the session has no escrow.
+- `seasoning` lists the gated mint's `HolderLots` ledgers and sends
+  `merge_expired` for every one holding a lot past `restriction_expiry`
+  (layout pinned by credit-gate's `layout_read_by_the_seasoning_crank`).
+
+The kill-the-crank drill exercises the keeper path on a real validator: a
+bonded keeper is assigned, dies with the crank, and the participant who
+refunds after the SLA is paid from its bond (38 checks).
+
+Still not built, because the programs they would drive don't exist:
+
+| SRS 08 §6 | Waits on |
+|---|---|
+| Phase-deadline cranks (Commit → Reveal → Clearing …) | `auction-engine` (#136). The rails' own deadline duty (refunds) is the keeper SLA above |
+| Distribution cranks | `tranche-engine` (#140); `distribute_coupon` is called by the distributor |
+| Session bundles with marks + model versions (AC-12) | `mark-engine` (#137) |
 
 The R5 devnet run settled Circle devnet USDC against a **manifest mint, not
 live NPCS** (`../PHASES.md` R5). R5 is met for the cash leg; the live-NPCS

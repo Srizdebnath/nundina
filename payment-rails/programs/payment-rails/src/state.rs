@@ -653,6 +653,84 @@ impl CouponSplit {
     }
 }
 
+// ── #127 · bonded keepers (doc 06 §8) ─────────────────────────────────
+
+/// Ceiling on a keeper SLA: 30 days. A sanity bound, not a policy number.
+pub const MAX_KEEPER_SLA_SECONDS: i64 = 30 * 86_400;
+
+/// Keeper terms, set by the config authority. Snapshotted into every
+/// assignment, so a later change never moves a live session's SLA (L5).
+#[account]
+#[derive(InitSpace)]
+pub struct KeeperPolicy {
+    /// Minimum bond (micro-USDC) to register and to be assigned.
+    pub min_bond: u64,
+    /// Seconds after a session's hard deadline by which the assigned keeper
+    /// must have refunded every escrow.
+    pub sla_seconds: i64,
+    /// Paid from the keeper's bond to whoever refunds an escrow the keeper
+    /// left open past its SLA (per escrow, capped by what the bond holds).
+    pub escalation_reward: u64,
+    pub bump: u8,
+}
+
+impl KeeperPolicy {
+    /// PDA seed: `["keeper_policy"]` (one per program, like the config).
+    pub const SEED: &'static [u8] = b"keeper_policy";
+
+    pub fn check(min_bond: u64, sla_seconds: i64, escalation_reward: u64) -> Result<()> {
+        require!(
+            (1..=MAX_KEEPER_SLA_SECONDS).contains(&sla_seconds)
+                && escalation_reward > 0
+                && escalation_reward <= min_bond,
+            RailsError::KeeperPolicyOutOfBounds
+        );
+        Ok(())
+    }
+}
+
+/// A bonded keeper. Its bond sits in `["keeper_vault", keeper]`, a USDC
+/// account owned by this PDA, never by the keeper's wallet.
+#[account]
+#[derive(InitSpace)]
+pub struct Keeper {
+    pub wallet: Pubkey,
+    pub vault: Pubkey,
+    /// Live session assignments; the bond can't leave while > 0.
+    pub assignments: u32,
+    /// Escrows third parties had to refund past this keeper's SLA.
+    pub missed: u32,
+    pub bump: u8,
+}
+
+impl Keeper {
+    /// PDA seed prefix: `["keeper", wallet]`.
+    pub const SEED: &'static [u8] = b"keeper";
+    /// Vault seed prefix: `["keeper_vault", keeper]`.
+    pub const VAULT_SEED: &'static [u8] = b"keeper_vault";
+}
+
+/// One keeper's duty for one session: every escrow refunded by `due_at`.
+#[account]
+#[derive(InitSpace)]
+pub struct SessionKeeper {
+    pub session: Pubkey,
+    /// The `Keeper` PDA.
+    pub keeper: Pubkey,
+    /// `session.settle_deadline + policy.sla_seconds` at assignment.
+    pub due_at: i64,
+    /// `policy.escalation_reward` at assignment.
+    pub reward: u64,
+    /// Escrows escalated so far.
+    pub escalations: u32,
+    pub bump: u8,
+}
+
+impl SessionKeeper {
+    /// PDA seed prefix: `["session_keeper", session]`.
+    pub const SEED: &'static [u8] = b"session_keeper";
+}
+
 /// Idempotency + audit record for one coupon period.
 #[account]
 #[derive(InitSpace)]

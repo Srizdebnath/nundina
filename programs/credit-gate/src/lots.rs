@@ -327,6 +327,29 @@ mod tests {
 
     const DAY: i64 = 86_400;
 
+    /// The byte layout `payment-rails/crank/src/seasoning.ts` decodes to
+    /// find ledgers with seasoned lots (#127). Changing a field here must
+    /// change the crank in the same commit.
+    #[test]
+    fn layout_read_by_the_seasoning_crank() {
+        use anchor_lang::AccountSerialize;
+        assert_eq!(8 + HolderLots::INIT_SPACE, 582);
+        let mut h = ledger();
+        h.append(7, 100, 50, LotSource::AuctionSettle, true, 3)
+            .unwrap();
+        h.append(9, 200, 50, LotSource::PrimaryMint, false, 0)
+            .unwrap();
+        let mut buf = Vec::new();
+        h.try_serialize(&mut buf).unwrap();
+        assert_eq!(buf.len(), 582);
+        assert_eq!(&buf[8..40], h.mint.as_ref(), "mint at 8");
+        assert_eq!(buf[84], 2, "lot_count at 84");
+        let lot = |i: usize| 85 + 31 * i;
+        let at = |o: usize| i64::from_le_bytes(buf[o..o + 8].try_into().unwrap());
+        assert_eq!(at(lot(0) + 20), 150, "lot 0 restriction_expiry at +20");
+        assert_eq!(at(lot(1) + 20), 250, "lot 1 restriction_expiry at +20");
+    }
+
     #[test]
     fn append_seasons_from_acquisition() {
         let mut h = ledger();
