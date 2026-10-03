@@ -127,36 +127,42 @@ pub fn allocate_pro_rata(total: u128, bids: &[(u64, u128)]) -> Result<Vec<(u64, 
         .iter()
         .try_fold(0u128, |acc, &(_, q)| acc.checked_add(q))
         .ok_or(MathError::Overflow)?;
-    if sum_qty == 0 {
-        // Every bid committed nothing: each gets nothing, one entry per bid,
-        // so the output stays index-aligned with `bids` (#125: an empty
-        // vector here broke that for a caller zipping the two).
-        return if total == 0 {
-            Ok(bids.iter().map(|&(id, _)| (id, 0)).collect())
-        } else {
-            Err(MathError::InvalidInput)
-        };
-    }
+    // Preconditions only: every accepted input takes the single path below,
+    // so the output is one entry per bid in input order, whatever the bids.
     if total > sum_qty {
-        return Err(MathError::OverAllocation);
+        return Err(if sum_qty == 0 {
+            // Nothing was committed at all: malformed input, not a scale-down.
+            MathError::InvalidInput
+        } else {
+            MathError::OverAllocation
+        });
     }
 
     let mut out: Vec<(u64, u128)> = bids
         .iter()
-        .map(|&(id, q)| {
-            // Bidders claim units: floor against them; residue re-attached below.
-            let a = total
-                .checked_mul(q)
-                .ok_or(MathError::Overflow)?
-                .div_round(sum_qty, RoundDirection::AgainstInitiator)?;
-            Ok((id, a))
-        })
+        .map(|&(id, q)| Ok((id, floor_share(total, q, sum_qty)?)))
         .collect::<Result<Vec<_>, MathError>>()?;
 
     let allocated: u128 = out.iter().map(|&(_, a)| a).sum();
     let residue = total.checked_sub(allocated).ok_or(MathError::Underflow)?;
     hand_out_residue(&mut out, bids, residue)?;
     Ok(out)
+}
+
+/// One bidder's floored share, `⌊total × qty / Σqty⌋` (bidders claim units:
+/// round against them; the residue is re-attached by [`hand_out_residue`]).
+///
+/// Given `total ≤ Σqty`, a zero `total` is the only way `Σqty` can be 0, and
+/// a zero total is a zero share for everyone, so no division by zero exists
+/// on this path.
+fn floor_share(total: u128, qty: u128, sum_qty: u128) -> Result<u128, MathError> {
+    if total == 0 {
+        return Ok(0);
+    }
+    total
+        .checked_mul(qty)
+        .ok_or(MathError::Overflow)?
+        .div_round(sum_qty, RoundDirection::AgainstInitiator)
 }
 
 /// Hand `residue` out one unit per bidder, larger committed qty first, then

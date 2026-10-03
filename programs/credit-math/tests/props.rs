@@ -39,17 +39,30 @@ proptest! {
     // ---------------------------------------------------------------
     #[test]
     fn prop_pro_rata_sums_exactly(
-        total in 0u128..5_000_000,
-        bids in prop::collection::vec((0u64..1000, 1u128..250_000), 1..8),
+        // Zero quantities included (and every-bid-zero books, see the
+        // `prop_oneof!`): the old suite drew 1.. only, so it never reached the
+        // zero-sum input that returned a misaligned (empty) result (#125).
+        bids in prop_oneof![
+            prop::collection::vec((0u64..1000, 0u128..250_000), 0..8),
+            prop::collection::vec((0u64..1000, Just(0u128)), 0..8),
+        ],
+        total_pick in 0u128..5_000_000,
+        zero_total in any::<bool>(),
     ) {
+        let total = if zero_total { 0 } else { total_pick };
         let sum_qty: u128 = bids.iter().map(|&(_, q)| q).sum();
         let res = allocate_pro_rata(total, &bids);
         if total > sum_qty {
-            // Over-allocation is a typed rejection, never a silent scale-up.
-            prop_assert_eq!(res.unwrap_err(), MathError::OverAllocation);
+            // Over-allocation is a typed rejection, never a silent scale-up;
+            // with nothing committed at all the input itself is invalid.
+            let want = if sum_qty == 0 { MathError::InvalidInput } else { MathError::OverAllocation };
+            prop_assert_eq!(res.unwrap_err(), want);
             return Ok(());
         }
         let out = res.unwrap();
+        // One entry per bid, in input order: `zip` below would hide a short
+        // result, so the length is asserted on its own.
+        prop_assert_eq!(out.len(), bids.len());
         let sum: u128 = out.iter().map(|&(_, a)| a).sum();
         prop_assert_eq!(sum, total);
         for ((id, a), (bid_id, q)) in out.iter().zip(bids.iter()) {
@@ -57,7 +70,7 @@ proptest! {
             // Nobody is allocated more than they committed …
             prop_assert!(a <= q);
             // … nor more than their proportional ceiling (+1 dust).
-            prop_assert!(*a <= q * total / sum_qty + 1);
+            prop_assert!(*a <= (q * total).checked_div(sum_qty).unwrap_or(0) + 1);
         }
     }
 
