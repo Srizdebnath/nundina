@@ -58,11 +58,16 @@ const SYMBOL = "NPCS";
 const DECIMALS = 6;
 const URI = "https://nundina.com/npcs/metadata.json";
 const LABEL = "PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL";
+const STATUS =
+  "TARGET-STATE: backing, Token ACL/credit-gate gating and Squads custody are NOT in force; one bootstrap key holds every authority";
 const LABELS: [string, string][] = [
   ["label", LABEL],
   ["asset_class", "pilot_credit_sleeve"],
   ["nav_precision", "pico"],
   ["backing", "USDC_1to1"],
+  // #121: the label pairs above describe the target. This one says, on-chain,
+  // that none of it is in force yet. verify.ts requires it.
+  ["status", STATUS],
 ];
 
 // spl_token_metadata_interface discriminators (installed package source).

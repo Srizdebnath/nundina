@@ -31,6 +31,43 @@ The pilot succeeds when all twelve scenarios below have been executed **on mainn
 | **AC-11** | Timeout/refund: kill a crank mid-session; verify any-participant refund path returns all escrow | Liveness guarantees (D6, G13) |
 | **AC-12** | Evidence export: one session's complete event bundle exports and every mark is reproducible from raw inputs + model version | Audit trail (J1, J4; ME-1) |
 
+### 1.1 · As-built grade (2026-10)
+
+The table above is the **target**. This one is the grade at `main` today
+(#128, #129, #123, #124), so a reader mapping an AC to code does not
+over-claim. ✅ passes as specified · ⚠️ a named part is built ·
+❌ not built · 🗺 roadmap (no crate, IDL, test or crank).
+
+| AC | Grade | What exists / what blocks it |
+|---|---|---|
+| AC-1 | ❌ | NPCS mint ✅. `credit-gate` is the CG-P2 config PDA only; no Token ACL wiring, no SAS read, no `validate` (#122, #52). The freeze authority is a wallet key, so no thaw goes through the gate |
+| AC-2 | 🗺 | `mark-engine` and `nav-publisher` have no code; NAV math is in `credit-math` (`nav.rs`) with no consumer |
+| AC-3 | ⚠️ cash leg only | `payment-rails` escrow + one-fill DvP cash leg (live devnet, R5 on a manifest mint, not live NPCS). `auction-engine` has no code |
+| AC-4 | 🗺 | needs `auction-engine` + `mark-engine` |
+| AC-5 | ⚠️ cash leg only | `payment-rails` ROFR cash path; no session state machine around it |
+| AC-6 | ❌ | no lot ledger (#122). `seasoning_seconds` is stored config nothing reads |
+| AC-7 | ❌ | no holder governor (#122). `holder_cap` is stored config nothing reads |
+| AC-8 | ⚠️ cash leg only | facility advance/repay/sweep in `payment-rails`; `queue-claim` has no code, so neither the sell path nor the pledge path exists. **The headline demo is unshipped** |
+| AC-9 | 🗺 **re-graded (#124)** | No liquidation instruction and no ladder (ROFR → backstop → forced sale → workout) anywhere; no `mark-engine`, so "no liquidation on a stale mark" (H4, LF-P4) has no implementation and no test. What exists: the H1 advance-rate ceiling on `payment-rails` advances |
+| AC-10 | ⚠️ cash leg only | exact-conservation cash waterfall in `payment-rails` + `credit-math`; no `tranche-engine` (no tranches, no subordination check) |
+| AC-11 | ✅ devnet | permissionless never-pausable refunds + kill-the-crank drill (CI and devnet) |
+| AC-12 | ⚠️ payment-rails only | `crank export` bundles payment-rails events with a SHA-256 manifest; no marks to reproduce (no `mark-engine`) |
+
+**Prudential floor (doc 06 §11 HARD, #123).** On-chain enforcement today is
+1 of 5, and that one rests on an unverified input:
+
+| Item | Grade | Detail |
+|---|---|---|
+| H1 max advance rate 50% | ⚠️ | enforced by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ mark × rate. The **mark is curator-stated**: no `mark-engine` exists to verify it |
+| H2 min subordination floor | 🗺 | no value in the plan of record; no `tranche-engine` |
+| H3 max discount / reserve bound | 🗺 | no value in the plan of record; no `auction-engine` reserve check |
+| H4 no liquidation on a stale mark | 🗺 | no `mark-engine`, no liquidation instruction (#124) |
+| H5 timeout refund path | ✅ | `payment-rails` refunds (AC-11) |
+
+H2 and H3 need a dated value decision before any constant lands
+(`programs/credit-math/src/prudential.rs`); H4 lands with `mark-engine` and
+the facility's liquidate path (LF-P4/LF-P5).
+
 **Non-goals (explicit):** no protocol token · no public solicitation or public participation (allowlist only, and **no NPCS tokens leave team-controlled wallets before counsel confirms the offering question — Q3/506(c) gate**, see §10.3) · no cross-chain · no mobile · no real third-party issuer asset · no public data-room content beyond synthetic-labeled prints.
 
 ---
@@ -159,6 +196,8 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.1 `credit-gate` (Anchor; audit-scope-critical)
 
+> **As built (2026-10, #122):** CG-P2 (config PDA + governance) and the CG-P7 event types only. CG-P1, CG-P3, CG-P4, CG-P5 and CG-P6 have no code; see §1.1.
+
 | ID | Requirement | Ref |
 |---|---|---|
 | CG-P1 | `validate(owner, mint)` instruction implementing the Token ACL Gate Program interface (sRFC37): on thaw, verify (1) block-list miss, (2) valid SAS attestation set {accredited, jurisdiction, investor_id, expiry} for owner per market policy, (3) attestation expiry ≥ configured settlement horizon, (4) holder-governor headroom, (5) lot-ledger init. Approve/reject with typed reason codes; every decision evented | CG-1..7; L17 |
@@ -172,6 +211,8 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 **Acceptance:** AC-1, AC-6, AC-7.
 
 ### 4.2 `auction-engine` (Anchor; audit-scope-critical for escrow paths)
+
+> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The escrow, refund and DvP *cash* legs exist in `payment-rails` (§4.7).
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -191,6 +232,8 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.3 `mark-engine`
 
+> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** NAV and haircut math exist in `credit-math` with no program consumer.
+
 | ID | Requirement | Ref |
 |---|---|---|
 | ME-P1 | Feed PDA per asset: `{nav_latest, effective_ts, state, model_version, inputs_hash, publisher_set}`; `publish_nav(attestation)` verifies SAS attestation ∈ publisher set before writing | B4; ME-1 |
@@ -205,6 +248,8 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.4 `queue-claim`
 
+> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The QC-P4 sweep order exists in `payment-rails` `sweep_proceeds`.
+
 | ID | Requirement | Ref |
 |---|---|---|
 | QC-P1 | `RedemptionRequest` PDA created only from an attested request: in pilot, our issuer side (multisig) attests via SAS: `{holder, asset, qty, request_ts, window_date, rank, fill_history}` — a *real* request by a team wallet against real NPCS | QC-1; L21 |
@@ -216,6 +261,8 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 **Acceptance:** AC-8 (both paths).
 
 ### 4.5 `liquidity-facility`
+
+> **As built (2026-10, #124): 🗺 roadmap for the engine.** `payment-rails` carries the cash leg (open/fund facility, advance under the H1 ceiling, repay, sweep). LF-P3 (health check), LF-P4 (no liquidation on a stale mark) and LF-P5 (the ladder) have no code; AC-9 is re-graded 🗺 in §1.1.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -229,6 +276,8 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 **Acceptance:** AC-9.
 
 ### 4.6 `tranche-engine`
+
+> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The TE-P4 cash waterfall exists in `payment-rails` + `credit-math`.
 
 | ID | Requirement | Ref |
 |---|---|---|

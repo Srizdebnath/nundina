@@ -76,3 +76,33 @@ test("verify.ts forbids every extension params.toml declares absent", () => {
     assert.ok(forbidden.has(kind), `verify.ts does not forbid ${kind} (params.toml ${key} = false)`);
   }
 });
+
+// #120/#121: nothing on the asset's public surface may state backing, gating
+// or Squads custody as if in force. Every such claim carries TARGET-STATE.
+test("metadata.json marks every unbuilt control TARGET-STATE", () => {
+  const unbuilt = /Token ACL|credit-gate|Squads|USDC 1:1|Kamino/;
+  for (const [k, v] of Object.entries(metadata.extensions as Record<string, unknown>)) {
+    if (typeof v !== "string" || !unbuilt.test(v)) continue;
+    assert.match(v, /TARGET-STATE/, `metadata.json extensions.${k} names an unbuilt control without TARGET-STATE`);
+    assert.match(v, /AS-BUILT/, `metadata.json extensions.${k} must also say what is true today`);
+  }
+  assert.match(metadata.description, /TARGET-STATE/);
+  assert.ok(metadata.extensions.authority_model, "metadata.json must describe the real authority model");
+});
+
+test("params.toml treasury is marked target, not deployed", () => {
+  assert.match(String(params.treasury.status), /^TARGET-STATE/);
+  assert.equal(params.treasury.venue, undefined, "use target_venue: no venue is deployed (#120)");
+});
+
+test("init-mint writes the on-chain TARGET-STATE status pair that verify.ts requires", () => {
+  const init = read("../scripts/init-mint.ts");
+  const verify = read("../scripts/verify.ts");
+  const status = init.match(/const STATUS =\s*"([^"]+)"/);
+  assert.ok(status, "STATUS not found in init-mint.ts");
+  assert.match(status[1], /^TARGET-STATE/);
+  assert.match(init, /\["status", STATUS\]/);
+  assert.match(verify, /k === "status" && v\.startsWith\("TARGET-STATE"\)/);
+  const runbook = read("../runbook.md");
+  assert.ok(runbook.includes(status[1]), "runbook.md § On-chain status marker must use init-mint's STATUS value");
+});

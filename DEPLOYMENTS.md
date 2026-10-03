@@ -20,7 +20,7 @@ to match.
 
 | Asset | Cluster | Mint | Details |
 |---|---|---|---|
-| NPCS — NUNDINA Pilot Credit Sleeve | devnet | `Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i` | 6dp · DefaultAccountState=Frozen · MetadataPointer(self, TLV metadata in mint, 581B) · PermanentDelegate · all authorities = `2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh` (bootstrap, Squads 2-of-2 at P1) · `verify.ts`: ALL CHECKS PASSED |
+| NPCS — NUNDINA Pilot Credit Sleeve | devnet | `Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i` | 6dp · DefaultAccountState=Frozen · MetadataPointer(self, TLV metadata in mint, 581B) · PermanentDelegate · all authorities = `2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh` (bootstrap, Squads 2-of-2 at P1) · `verify.ts`: every manifest check passes; the #121 on-chain `status` marker is not written yet (`token/runbook.md` § On-chain status marker) |
 
 ## Verification procedure
 
@@ -102,3 +102,21 @@ cd token && CLUSTER=devnet npm run verify
   #96). Do this for every config when the bootstrap key is retired, and
   before the key is destroyed. A config whose authority key is lost cannot
   be governed again.
+- **Squads 2-of-2 migration: dated schedule (#126).** Not executed. Every
+  authority below is still a single key; this table is the plan, and a row
+  counts as done only when its *Executed* cell holds a devnet signature.
+  The highest-blast-radius key moves first. The two vault members (founder
+  + ops, SRS 08 §8) are named by the key holders; a date that slips gets a
+  new date here, never a blank.
+
+  | # | Authority | Held by today | Moves to | How | Target date | Executed |
+  |---|---|---|---|---|---|---|
+  | 0 | — | — | Squads 2-of-2 multisig on devnet, 48h timelock on upgrades | Squads app or CLI, members = founder + ops; record the multisig and vault PDA here | 2026-10-08 | ☐ |
+  | 1 | Offline backups of every key below until its row is done | — | two offline copies each ([`token/runbook.md`](token/runbook.md) § Backup) | record *that* a backup exists, by custodian, in the private ops notes | 2026-10-08 | ☐ |
+  | 2 | NPCS mint, freeze, permanent delegate, metadata update | `2xhjfAdr…6sRXMh` (if stolen: unlimited mint and freeze) | vault PDA (freeze authority moves on to the Token ACL `MintConfig` when the gate wires in) | `spl-token authorize <mint> mint <vault>` and `… freeze <vault>`; the delegate and metadata authorities via Token-2022 `SetAuthority` / `UpdateMetadataAuthority` | 2026-10-09 | ☐ |
+  | 3 | `payment-rails` upgrade authority | `9WH1…2uDZ` | vault PDA | `solana program set-upgrade-authority` ([`payment-rails/README.md`](payment-rails/README.md) § Before mainnet) | 2026-10-09 | ☐ |
+  | 4 | `credit-gate` upgrade authority + gate root + every config | `Bprm…jKgp` | vault PDA | after the #45 redeploy: `set-upgrade-authority`, then `propose_root_authority` → `accept_root_authority`, then each config per #50 above | 2026-10-10 | ☐ |
+
+  After each row: re-run `verify.sh` / `npm run verify`, put the signature
+  and the new authority in the registry rows at the top, and update
+  `token/metadata.json` `authority_model`.

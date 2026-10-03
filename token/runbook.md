@@ -1,7 +1,7 @@
 # NPCS operations runbook
 
 The pilot asset: a real, USDC 1:1-backed Token-2022 sleeve. Spec: doc 09.
-Parameters: `params.toml`. Status: **mint live on devnet, verify ALL CHECKS PASSED.**
+Parameters: `params.toml`. Status: **mint live on devnet.** Since #121, `verify` fails on the devnet mint until the key holder writes the on-chain status marker below (one command); every other check passes.
 
 ## Keys (gitignored — `token/keys/`)
 
@@ -48,6 +48,25 @@ CLUSTER=devnet npm run verify
 # override the mint under test:
 CLUSTER=devnet MINT=<address> npm run verify
 ```
+
+## On-chain status marker (#121)
+
+The mint's TLV metadata carries `backing = USDC_1to1` and the off-chain
+`metadata.json` names the Token ACL → `credit-gate` model. Neither is in
+force. Mints made by `init-mint.ts` after #121 also carry a `status` pair
+that says so; `verify` requires it. The devnet mint predates #121, so the
+holder of `freeze-authority.json` (the metadata update authority) adds it
+once:
+
+```bash
+spl-token update-metadata Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i status \
+  "TARGET-STATE: backing, Token ACL/credit-gate gating and Squads custody are NOT in force; one bootstrap key holds every authority" \
+  --authority keys/freeze-authority.json --fee-payer keys/freeze-authority.json -u devnet
+CLUSTER=devnet npm run verify   # → ALL CHECKS PASSED
+```
+
+The value must equal `STATUS` in `scripts/init-mint.ts`. Replace it (same
+command) when the gate, backing or Squads custody actually land.
 
 ## Treasury (sleeve) — weekly checklist (treasury-agent, SRS 08 §6)
 

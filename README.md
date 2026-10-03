@@ -4,7 +4,7 @@
 > Not a venue. Not an AMM. The mechanism that tells a quarterly-marked, gated credit position what it's worth — and turns a denied redemption request into a priceable, financeable claim.
 
 [![Status](https://img.shields.io/badge/status-building_P1-blue)](preresearch/)
-[![Phase](https://img.shields.io/badge/P0-partial-yellow)](#p0-exit-criteria)
+[![Phase](https://img.shields.io/badge/P0-open-orange)](#p0-exit-criteria)
 [![Token](https://img.shields.io/badge/NPCS-live_on_devnet-8A2BE2)](token/)
 [![Docs](https://img.shields.io/badge/docs-10_files_~200KB-success)](preresearch/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -34,9 +34,28 @@ today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 | CG-P1..P6 gate logic + Token ACL wiring | 🔨 P1, in progress | SRS 08 §4.1 |
 | mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
 
+### Programs: as built vs roadmap
+
+Seven programs are named in the design (SRS 08 §4). Five have **no code**:
+their names appear only in docs and doc comments (#128). Anything in this
+repo that describes them is the target, not a shipped feature.
+
+| Program | Crate | IDL | Tests | Crank | State |
+|---|---|---|---|---|---|
+| `payment-rails` | ✅ | ✅ | ✅ LiteSVM + drill | ✅ | live devnet |
+| `credit-gate` | ✅ | ✅ | ✅ LiteSVM | — | config PDA only (#122) |
+| `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 4 functions consumed by `payment-rails` |
+| `auction-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P3) |
+| `mark-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P2) |
+| `queue-claim` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); "sell a claim in an auction" is the unshipped headline demo |
+| `liquidity-facility` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); cash leg only, no liquidation ladder (#124) |
+| `tranche-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P5); cash waterfall only |
+
+Per-AC grades: [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
+
 ### P0 exit criteria
 
-P0 (#4) was closed with three criteria unmet. Re-baselined in #100: each row
+P0 (#4) was closed with three criteria unmet, and it is **open** again here (#129). Re-baselined in #100: each row
 says what is true, and the unmet ones are deferred to P1 explicitly rather
 than badged complete.
 
@@ -49,6 +68,16 @@ than badged complete.
 | 5 | Verifiable builds; program-ID registry | ⚠️ registry ✅ · `anchor build --verifiable` **deferred to P1** | `DEPLOYMENTS.md` + keyless `verify.sh`; pinned toolchains, SHA-256-verified CLI installs and a lockfile-drift check on every SBF build (#98); deployed `.so` files published as release assets (#99). No deterministic (docker) build yet |
 | 6 | Helius (dev) + Supabase (dev) provisioned | ⏭ **deferred to P1** | not provisioned; nothing in the repo references them ([`services/README.md`](services/README.md)) |
 | 7 | Dependabot `npm` entries | ✅ | `.github/dependabot.yml`: npm ×3, cargo ×4, github-actions |
+
+**The P0 *story* is not met either (#129).** Beyond the #4 checklist, the
+substantive P0 exit (HACKATHON §4) is open:
+
+| # | P0 exit | State | Blocker |
+|---|---|---|---|
+| 8 | An investor thaws **through** `credit-gate` (Token ACL) | ❌ | no `validate` (#122); NPCS freeze authority is a wallet key; devnet runs the pre-#26 build (#45) |
+| 9 | SAS attestation read by the gate | ❌ | no SAS program id, schema or attester (#52) |
+| 10 | R5 settles **live NPCS** | ❌ | R5 ran against a manifest mint (`payment-rails/PHASES.md`); waits on row 8 |
+| 11 | Auction session + queue-claim sale | ❌ | `auction-engine` and `queue-claim` have no code (#128) |
 
 ## Repo structure
 
