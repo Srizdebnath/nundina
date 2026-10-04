@@ -74,9 +74,9 @@ Manual by design: there is no key automation. Run it before every NAV
 publish, and keep the filled checklist with the week's evidence bundle.
 
 1. **Read the sleeve.** Record the USDC value of every sleeve holding, in
-   micro-USDC: the Kamino vault shares × the share price read at a recorded
-   slot, or, in backup mode, the plain USDC account balance. Record each
-   account address, the slot and the raw values.
+   micro-USDC: the USDC balance of each sleeve account at a recorded slot
+   (no yield venue is integrated, #173). Record each account address, the
+   slot and the raw values.
 2. **Read supply.** `spl-token supply <NPCS mint> -u <cluster>` → `supply_base`.
 3. **Check I1.** Deposits confirmed to date (from the deposit log) × 10⁶
    must equal `supply_base` exactly. If not, **stop**: no publish until the

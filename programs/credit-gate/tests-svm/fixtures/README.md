@@ -18,3 +18,20 @@ sha256sum -c SHA256SUMS  # what the tests run is what is recorded
 
 A refresh that changes a hash is a dependency upgrade: re-run the suite and
 update this table in the same change.
+
+## The program under test (#169)
+
+`credit_gate.so` itself is **not** a fixture and is not committed.
+`tests-svm/build.rs` runs `cargo build-sbf --tools-version v1.52` (the
+platform-tools `anchor build` 1.1.2 uses) into the crate's `OUT_DIR`
+whenever `programs/credit-gate/src`, its `Cargo.toml`, `credit-math` or the
+root lockfile changes, and the harness loads exactly that file. A plain
+
+```bash
+cargo test --manifest-path programs/credit-gate/tests-svm/Cargo.toml
+```
+
+from a clean checkout therefore tests the current source, with no manual
+`anchor build` first. CI also checks that this .so is byte-identical to the
+one `anchor build` produces. To test a different binary (for example a
+`solana-verify` build before a deploy), set `CREDIT_GATE_SO=<path>`.

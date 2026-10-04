@@ -106,15 +106,19 @@ pub struct MarketConfig {
     pub gate_config_authority: Pubkey,
     /// Policy class (pilot: `PILOT_506C_TEST`) — stable u32 for consumers.
     pub policy_class: u32,
-    /// Accepted SAS identity schema (CG-P4/P6). **Storage only (#52):** no
-    /// instruction reads a SAS account yet. There is no SAS program id, no
-    /// schema definition and no `validate`, so this field enforces nothing.
+    /// Accepted SAS identity schema (`nundina.identity.v1`, CG-P4/P6).
+    /// `eligibility::evaluate` (called by `validate`, `settle_check` and
+    /// `settle_check_rofr`) accepts an identity attestation only if it is a
+    /// SAS-owned account at its canonical PDA `["attestation", credential,
+    /// schema, holder]`, under `MarketPolicy::credential`, with this schema.
     pub identity_schema: Pubkey,
-    /// Accepted SAS accreditation schema (CG-P6). Storage only (#52).
+    /// Accepted SAS accreditation schema (`nundina.accreditation.v1`,
+    /// CG-P6). Checked the same way as `identity_schema`.
     pub accreditation_schema: Pubkey,
-    /// Attester authorities accepted for these schemas. **Storage only
-    /// (#52):** nothing compares any attestation's signer against this set
-    /// until `validate` (CG-P1/P6) lands.
+    /// Attester authorities accepted for these schemas. An attestation whose
+    /// SAS `signer` is not in `attesters[..attester_count]` is rejected
+    /// (`AttestationInvalid`); one expiring before now +
+    /// `settlement_horizon_seconds` is rejected (`AttestationExpiry`, H4).
     pub attesters: [Pubkey; MAX_ATTESTERS],
     /// Active count into `attesters`.
     pub attester_count: u8,

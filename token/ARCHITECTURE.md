@@ -137,12 +137,20 @@ flowchart LR
     end
 ```
 
-**What exists today (#52):** none of the TARGET box. `credit-gate` stores
-`identity_schema`, `accreditation_schema` and an `attesters` set, but no
-instruction reads a SAS attestation. There is no SAS program id, no schema
-definition, no attester key and no issuance path. Those fields are storage
-only, and their presence must not be read as enforcement. SRS 08 §5
-describes the design; it is unbuilt.
+**What exists today (code, #122/#131/#133):** the right-hand box is built.
+`credit-gate` reads real SAS attestations (`eligibility::evaluate`): SAS
+program owner, canonical attestation PDA, the market's credential and
+schemas, an attester from `MarketConfig::attesters`, and expiry against the
+settlement horizon. `validate` adds the CG-P4 holder governor, and
+`can_thaw_permissionless` / `can_freeze_permissionless` are the Token ACL
+gate hooks. `settle_check` re-runs the same decision inside every
+payment-rails fill. `ops/gate/wire.ts` creates the Token ACL MintConfig and
+delegates the freeze authority to it. The schemas, credential and attester
+are live on devnet (`ops/gate/deployment-devnet.json`).
+
+**What is not done yet:** wiring the devnet NPCS mint to the deployed gate
+(#170/#171, see DEPLOYMENTS.md). Until that is recorded, the left-hand box
+is still what runs on devnet.
 
 After wiring, the §2.1 provenance check becomes REQUIRED: the freeze-authority
 account's owner must be the Token ACL program — the only structural

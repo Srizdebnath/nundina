@@ -25,7 +25,7 @@
 | `credit-math` | ✅ built, tested | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
 
 - **v1 go-to-market:** an issuer-sponsored liquidity window, meaning the issuer runs the auction on its own securities as a buyback tool.
-- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#120): supply is 0 and nothing backs it on-chain.** There is no deposit or mint-on-deposit path, no Kamino (or any) treasury vault, no NAV publisher and no SAS attester; invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). *Target:* minted 1:1 against USDC in a Kamino supply vault (backup: a program-owned USDC PDA), with NAV computed from the sleeve and published through our own SAS attester.
+- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#120): supply is 0 and nothing backs it on-chain.** There is no deposit or mint-on-deposit path, no treasury vault of any kind, no NAV publisher and no SAS attester; invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). The treasury is graded **unbacked, process-only** (#173): no venue is chosen or integrated. *Target:* minted 1:1 against deposited USDC, with NAV computed from the sleeve and published through our own SAS attester.
 
 Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-Pilot-Rails.md`, `preresearch/research/12-Validation-2026-Reality-Check.md`.
 
@@ -49,7 +49,7 @@ Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-
 
 | Track | Prize | Fit | Why |
 |---|---|---|---|
-| **Solana Ecosystem track** | $100K (10 × $10K) | 🟢 **Primary** | Solana-native: Token-2022 today; Token ACL, SAS and a Kamino sleeve are the target design, not yet integrated |
+| **Solana Ecosystem track** | $100K (10 × $10K) | 🟢 **Primary** | Solana-native: Token-2022 today; Token ACL and SAS integrated in the gate (devnet wiring pending); the treasury is unbacked, process-only |
 | **Grand Champion** | $30K | 🟢 Reach | Novel primitive (queue-claim) aimed at a live $5B+ problem |
 | **Top 20 standout teams** | $15K each ($300K) | 🟢 Realistic target | Scores well on the rules' criteria (see §5) |
 | **Public Goods Award** | $5K | 🟡 Stretch | Only if we pitch the open-source `credit-gate` Gate Program and `credit-math` as reusable compliance infra for any RWA issuer on Solana (the repo is MIT) |
@@ -129,7 +129,7 @@ The pitch must present the ❌ rows as roadmap.
 | **Potential impact / TAM** | $5B+ trapped behind gates, ~$8B tokenized private credit, 1–20% secondaries discounts (research `12`) |
 | **Novelty** | Queue-claim: a pro-rated redemption request as a tokenized, financeable claim. Nobody has shipped this on any chain |
 | **UX** | Denied redemption → exit or loan in one flow. Institutional dark UI |
-| **Open-source / composability** | MIT license. Built on Token-2022 + USDC today; designed to compose with Token ACL, SAS, Kamino, Orca and RedStone (none integrated yet) |
+| **Open-source / composability** | MIT license. Built on Token-2022 + USDC today; the gate composes with Token ACL and SAS (tested against the real devnet programs); Orca and RedStone are not integrated |
 | **Business plan** | Issuer sponsorship license + facility spread + discount-curve data product. No trading fees (`06` §13) |
 
 ---
