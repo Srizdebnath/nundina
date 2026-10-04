@@ -7,6 +7,10 @@
  *                                                           #   metadata pointer + update → vault
  *   tsx migrate.ts prove                                    # vault tx: propose → 2 approvals
  *                                                           #   (→ execute once the timelock allows)
+ *   tsx migrate.ts propose-upgrade <program> --buffer <buf> # vault tx: BPF Upgrade from a buffer
+ *                       [--spill <addr>]                    #   whose authority is the vault →
+ *                                                           #   propose + 2 approvals (#172)
+ *   tsx migrate.ts execute-upgrade <program>                # once the timelock allows
  *   tsx migrate.ts verify                                   # keyless: every recorded move holds
  *
  * Env: CLUSTER (devnet | localnet), RPC_URL (overrides), PAYER (fee payer
@@ -16,6 +20,7 @@
  * The record (`deployment-<cluster>.json`) holds only public keys and
  * signatures. Member keypairs stay in KEYS_DIR.
  */
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -32,13 +37,17 @@ import {
 } from "@solana/spl-token";
 import { createUpdateAuthorityInstruction } from "@solana/spl-token-metadata";
 import {
+  ComputeBudgetProgram,
   Connection,
   Keypair,
   PublicKey,
   SystemProgram,
+  SYSVAR_CLOCK_PUBKEY,
+  SYSVAR_RENT_PUBKEY,
   Transaction,
   TransactionInstruction,
   TransactionMessage,
+  VersionedTransaction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import * as multisig from "@sqds/multisig";
@@ -72,6 +81,20 @@ export interface Record {
   createSignature: string;
   moves: Move[];
   proofs: { transactionIndex: string; proposeSignature: string; approvals: string[]; executeSignature?: string }[];
+  /** Program upgrades the vault signed (#172). Absent in older records. */
+  upgrades?: Upgrade[];
+}
+
+export interface Upgrade {
+  program: string;
+  buffer: string;
+  /** SHA-256 of the buffer's program bytes at proposal time. */
+  bufferSha256: string;
+  spill: string;
+  transactionIndex: string;
+  proposeSignature: string;
+  approvals: string[];
+  executeSignature?: string;
 }
 
 export function loadKeypair(path: string): Keypair {
@@ -247,60 +270,176 @@ async function moveMint(conn: Connection, mint: PublicKey, authority: Keypair): 
  * when the timelock allows, executed. With the 48h timelock the execute
  * step is a separate later run (`prove` resumes the pending one).
  */
-async function prove(conn: Connection, payer: Keypair): Promise<void> {
-  const r = readRecord();
+/** Create vault transaction `index` with `instructions`, propose it, and
+ * have both members approve. Returns the proposal and approval signatures. */
+async function proposeAndApprove(
+  conn: Connection,
+  payer: Keypair,
+  r: Record,
+  instructions: TransactionInstruction[],
+): Promise<{ index: bigint; propose: string; approvals: string[] }> {
   const multisigPda = new PublicKey(r.multisig);
   const vault = new PublicKey(r.vault);
   const [m1, m2] = ["member-1", "member-2"].map((n) => keypairAt(n, false));
-  const pending = r.proofs.find((p) => !p.executeSignature);
-  let index: bigint;
-  if (pending) {
-    index = BigInt(pending.transactionIndex);
-  } else {
-    const ms = await multisig.accounts.Multisig.fromAccountAddress(conn, multisigPda);
-    index = BigInt(ms.transactionIndex.toString()) + 1n;
-    const message = new TransactionMessage({
-      payerKey: vault,
-      recentBlockhash: (await conn.getLatestBlockhash()).blockhash,
-      instructions: [SystemProgram.transfer({ fromPubkey: vault, toPubkey: vault, lamports: 0 })],
-    });
-    const create = await multisig.rpc.vaultTransactionCreate({
-      connection: conn, feePayer: payer, multisigPda, transactionIndex: index, creator: m1.publicKey, rentPayer: payer.publicKey,
-      vaultIndex: 0, ephemeralSigners: 0, transactionMessage: message, signers: [payer, m1],
-    });
-    await conn.confirmTransaction(create, "confirmed");
-    // Not rpc.proposalCreate: in @sqds/multisig 2.1.4 it drops `rentPayer`,
-    // so the member would pay the proposal rent. Members hold no SOL.
-    const propose = await send(
-      conn,
-      [multisig.instructions.proposalCreate({ multisigPda, transactionIndex: index, creator: m1.publicKey, rentPayer: payer.publicKey })],
-      [payer, m1],
-    );
-    const approvals: string[] = [];
-    for (const m of [m1, m2]) {
-      const s = await multisig.rpc.proposalApprove({ connection: conn, feePayer: payer, member: m, multisigPda, transactionIndex: index });
-      await conn.confirmTransaction(s, "confirmed");
-      approvals.push(s);
-    }
-    r.proofs.push({ transactionIndex: index.toString(), proposeSignature: propose, approvals });
-    writeRecord(r);
-    console.log(`proposal #${index}: created, approved by both members`);
+  const ms = await multisig.accounts.Multisig.fromAccountAddress(conn, multisigPda);
+  const index = BigInt(ms.transactionIndex.toString()) + 1n;
+  const message = new TransactionMessage({
+    payerKey: vault,
+    recentBlockhash: (await conn.getLatestBlockhash()).blockhash,
+    instructions,
+  });
+  const create = await multisig.rpc.vaultTransactionCreate({
+    connection: conn, feePayer: payer, multisigPda, transactionIndex: index, creator: m1!.publicKey, rentPayer: payer.publicKey,
+    vaultIndex: 0, ephemeralSigners: 0, transactionMessage: message, signers: [payer, m1!],
+  });
+  await conn.confirmTransaction(create, "confirmed");
+  // Not rpc.proposalCreate: in @sqds/multisig 2.1.4 it drops `rentPayer`,
+  // so the member would pay the proposal rent. Members hold no SOL.
+  const propose = await send(
+    conn,
+    [multisig.instructions.proposalCreate({ multisigPda, transactionIndex: index, creator: m1!.publicKey, rentPayer: payer.publicKey })],
+    [payer, m1!],
+  );
+  const approvals: string[] = [];
+  for (const m of [m1!, m2!]) {
+    const s = await multisig.rpc.proposalApprove({ connection: conn, feePayer: payer, member: m, multisigPda, transactionIndex: index });
+    await conn.confirmTransaction(s, "confirmed");
+    approvals.push(s);
   }
+  return { index, propose, approvals };
+}
+
+/** Execute vault transaction `index` if approved and past the timelock;
+ * otherwise say when it opens and return null. */
+async function executeWhenReady(conn: Connection, payer: Keypair, r: Record, index: bigint): Promise<string | null> {
+  const multisigPda = new PublicKey(r.multisig);
   const [proposalPda] = multisig.getProposalPda({ multisigPda, transactionIndex: index });
   const proposal = await multisig.accounts.Proposal.fromAccountAddress(conn, proposalPda);
   const status = proposal.status;
   if (!multisig.types.isProposalStatusApproved(status)) throw new Error(`proposal #${index} is ${status.__kind}, not Approved`);
   const approvedAt = Number(status.timestamp);
   const ready = approvedAt + r.timeLockSeconds;
-  const now = Math.floor(Date.now() / 1000);
-  if (now < ready) {
-    console.log(`approved at ${new Date(approvedAt * 1000).toISOString()}; timelock opens ${new Date(ready * 1000).toISOString()}. Re-run prove then to execute.`);
+  if (Math.floor(Date.now() / 1000) < ready) {
+    console.log(`proposal #${index} approved at ${new Date(approvedAt * 1000).toISOString()}; timelock opens ${new Date(ready * 1000).toISOString()}.`);
+    return null;
+  }
+  const m1 = keypairAt("member-1", false);
+  const { instruction, lookupTableAccounts } = await multisig.instructions.vaultTransactionExecute({
+    connection: conn, multisigPda, transactionIndex: index, member: m1.publicKey,
+  });
+  const msg = new TransactionMessage({
+    payerKey: payer.publicKey, recentBlockhash: (await conn.getLatestBlockhash()).blockhash,
+    instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }), instruction],
+  }).compileToV0Message(lookupTableAccounts);
+  const tx = new VersionedTransaction(msg);
+  tx.sign([payer, m1]);
+  // Simulate first: a failed execute's program logs are the only clue.
+  const sim = await conn.simulateTransaction(tx, { sigVerify: false });
+  if (sim.value.err) throw new Error(`execute #${index} would fail: ${JSON.stringify(sim.value.err)}\n${(sim.value.logs ?? []).join("\n")}`);
+  const exec = await conn.sendTransaction(tx);
+  await conn.confirmTransaction(exec, "confirmed");
+  return exec;
+}
+
+const BPF_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
+/** loader-v3 Buffer header: u32 tag (1) | Option<Pubkey> authority (33) → program bytes at 37. */
+const BUFFER_DATA_AT = 37;
+/** loader-v3 ProgramData header: u32 tag | u64 slot | Option<Pubkey> → 45. */
+const PROGRAMDATA_HEADER = 45;
+
+/** #172: a program upgrade signed by the vault. The buffer must already
+ * hold the new build, with the vault as its authority
+ * (`solana program write-buffer` + `set-buffer-authority`). */
+async function proposeUpgrade(conn: Connection, payer: Keypair, program: PublicKey, buffer: PublicKey, spill: PublicKey): Promise<void> {
+  const r = readRecord();
+  const vault = new PublicKey(r.vault);
+  if ((await upgradeAuthority(conn, program)) !== r.vault) throw new Error(`${program.toBase58()} upgrade authority is not the vault`);
+  const b = await conn.getAccountInfo(buffer, "confirmed");
+  if (!b || !b.owner.equals(BPF_LOADER) || b.data.readUInt32LE(0) !== 1) throw new Error(`${buffer.toBase58()} is not a loader-v3 buffer`);
+  if (b.data[4] !== 1 || !new PublicKey(b.data.subarray(5, 37)).equals(vault)) throw new Error("buffer authority is not the vault (solana program set-buffer-authority)");
+  const sha = createHash("sha256").update(b.data.subarray(BUFFER_DATA_AT)).digest("hex");
+  const [programData] = PublicKey.findProgramAddressSync([program.toBuffer()], BPF_LOADER);
+  // A larger build needs a larger ProgramData. The loader's legacy
+  // ExtendProgram (6) is permissionless, so the operator pays for it before
+  // proposing. Inside the vault transaction it would not work: Squads
+  // executes by CPI, and a CPI may grow an account by only 10 KiB. Where
+  // the cluster has replaced it with ExtendProgramChecked (feature
+  // 2oMRZEDW…xwz; inactive on devnet as of 2026-10-04) this stops instead.
+  const pd = await conn.getAccountInfo(programData, "confirmed");
+  const extra = b.data.length - BUFFER_DATA_AT - ((pd?.data.length ?? 0) - PROGRAMDATA_HEADER);
+  if (extra > 0) {
+    const data = Buffer.alloc(8);
+    data.writeUInt32LE(6, 0);
+    data.writeUInt32LE(extra, 4);
+    const m = (pubkey: PublicKey, isWritable: boolean, isSigner = false) => ({ pubkey, isWritable, isSigner });
+    const legacy = new TransactionInstruction({
+      programId: BPF_LOADER,
+      keys: [m(programData, true), m(program, true), m(SystemProgram.programId, false), m(payer.publicKey, true, true)],
+      data,
+    });
+    const probe = new Transaction().add(legacy);
+    probe.feePayer = payer.publicKey;
+    probe.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+    probe.sign(payer);
+    const sim = await conn.simulateTransaction(probe);
+    if (sim.value.err) {
+      throw new Error(`ProgramData needs ${extra} more bytes and the permissionless ExtendProgram is refused:\n${(sim.value.logs ?? []).join("\n")}`);
+    }
+    console.log(`ProgramData extended by ${extra} bytes (paid by ${payer.publicKey.toBase58()}): ${await send(conn, [legacy], [payer])}`);
+  }
+  const k = (pubkey: PublicKey, isWritable: boolean, isSigner = false) => ({ pubkey, isWritable, isSigner });
+  const upgrade = new TransactionInstruction({
+    programId: BPF_LOADER,
+    keys: [
+      k(programData, true), k(program, true), k(buffer, true), k(spill, true),
+      k(SYSVAR_RENT_PUBKEY, false), k(SYSVAR_CLOCK_PUBKEY, false), k(vault, false, true),
+    ],
+    data: Buffer.from([3, 0, 0, 0]), // UpgradeableLoaderInstruction::Upgrade
+  });
+  const { index, propose, approvals } = await proposeAndApprove(conn, payer, r, [upgrade]);
+  r.upgrades = [...(r.upgrades ?? []), {
+    program: program.toBase58(), buffer: buffer.toBase58(), bufferSha256: sha, spill: spill.toBase58(),
+    transactionIndex: index.toString(), proposeSignature: propose, approvals,
+  }];
+  writeRecord(r);
+  console.log(`upgrade proposal #${index} for ${program.toBase58()} (buffer ${buffer.toBase58()}, sha256 ${sha}): created, approved by both members`);
+  await executeUpgrade(conn, payer, program);
+}
+
+async function executeUpgrade(conn: Connection, payer: Keypair, program: PublicKey): Promise<void> {
+  const r = readRecord();
+  const u = (r.upgrades ?? []).find((x) => x.program === program.toBase58() && !x.executeSignature);
+  if (!u) throw new Error(`no pending upgrade of ${program.toBase58()} in the record`);
+  const exec = await executeWhenReady(conn, payer, r, BigInt(u.transactionIndex));
+  if (!exec) {
+    console.log(`re-run: npx tsx migrate.ts execute-upgrade ${program.toBase58()}`);
     return;
   }
-  const exec = await multisig.rpc.vaultTransactionExecute({
-    connection: conn, feePayer: payer, multisigPda, transactionIndex: index, member: m1.publicKey, signers: [payer, m1],
-  });
-  await conn.confirmTransaction(exec, "confirmed");
+  const rec = readRecord();
+  rec.upgrades!.find((x) => x.transactionIndex === u.transactionIndex)!.executeSignature = exec;
+  writeRecord(rec);
+  console.log(`upgrade #${u.transactionIndex} executed: ${exec}`);
+}
+
+async function prove(conn: Connection, payer: Keypair): Promise<void> {
+  const r = readRecord();
+  const vault = new PublicKey(r.vault);
+  const pending = r.proofs.find((p) => !p.executeSignature);
+  let index: bigint;
+  if (pending) {
+    index = BigInt(pending.transactionIndex);
+  } else {
+    const done = await proposeAndApprove(conn, payer, r, [SystemProgram.transfer({ fromPubkey: vault, toPubkey: vault, lamports: 0 })]);
+    index = done.index;
+    r.proofs.push({ transactionIndex: index.toString(), proposeSignature: done.propose, approvals: done.approvals });
+    writeRecord(r);
+    console.log(`proposal #${index}: created, approved by both members`);
+  }
+  const exec = await executeWhenReady(conn, payer, r, index);
+  if (!exec) {
+    console.log("Re-run prove then to execute.");
+    return;
+  }
   const rec = readRecord();
   rec.proofs.find((p) => p.transactionIndex === index.toString())!.executeSignature = exec;
   writeRecord(rec);
@@ -353,6 +492,13 @@ async function main(): Promise<void> {
       return moveMint(conn, new PublicKey(need(arg, "<mint>")), loadKeypair(need(flag("authority"), "--authority")));
     case "prove":
       return prove(conn, payer());
+    case "propose-upgrade": {
+      const p = payer();
+      return proposeUpgrade(conn, p, new PublicKey(need(arg, "<program>")), new PublicKey(need(flag("buffer"), "--buffer")),
+        new PublicKey(flag("spill") ?? p.publicKey));
+    }
+    case "execute-upgrade":
+      return executeUpgrade(conn, payer(), new PublicKey(need(arg, "<program>")));
     case "verify": {
       const problems = await verify(conn, readRecord());
       if (problems.length) throw new Error(`verify FAILED:\n  ${problems.join("\n  ")}`);
@@ -361,7 +507,7 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      throw new Error("usage: migrate.ts <create|move-program|move-mint|prove|verify> — see the header");
+      throw new Error("usage: migrate.ts <create|move-program|move-mint|prove|propose-upgrade|execute-upgrade|verify> — see the header");
   }
 }
 

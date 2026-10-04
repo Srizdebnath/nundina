@@ -43,5 +43,19 @@
         "3agXhnfVfdC5YERt8xnKdSKXjJNfypTAdojAKRF5azmd3GpA92MMJ6KWtamJoEerzceuu2tdhV5WiTxnVaJ4cMfE"
       ]
     }
+  ],
+  "upgrades": [
+    {
+      "program": "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn",
+      "buffer": "FqAJqkS21CpfUZZZVuK2LMs679JPAukGQtMvAUeXBd5U",
+      "bufferSha256": "b768192445c184a344a58dc816d9e3a3a9ee795a793900ad2b7544c726b1fbec",
+      "spill": "9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ",
+      "transactionIndex": "2",
+      "proposeSignature": "3vxpn9hMGVEq6bBrCY3SnJ5jtSJrL62J7ogEFaeS1cCMWeYkYhsBBH8XDXuugbmietnEz9zJwwSSE1LFaNtMAPp1",
+      "approvals": [
+        "5qTFTaFYMop6qu71rLGAAf4w4GEwPrHmVWJ9hrzcj7obqY3JPAtU1MDSNA61d75oyEds6mpQFmKppcV2bqMVsary",
+        "5HmY5d2FrCSbGbKwCNRWXRn4xKk2FHriex97EqVNZadL9GHQFBEt8HPn6m5fpmxkbzaaDLDAjHzez3P3ziuMxeD1"
+      ]
+    }
   ]
 }
