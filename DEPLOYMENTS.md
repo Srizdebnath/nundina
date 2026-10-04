@@ -14,7 +14,7 @@ to match.
 | Program | Cluster | Program ID | Slot | Deploy signature | Build SHA-256 | Upgrade authority |
 |---|---|---|---|---|---|---|
 | payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
-| credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507268500 | `5CgLegBtQ8PtNto9JweTCXP8AiT14eqaHiJzVvh55iMkzGioCXq11pnkfAfgFBz75spncReYmh4bBmXdPPe8BPL9` | `4866ec513fbb21da9a25e01252470eab6f8746bfaeda7c402237001622f3f457` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer, single key — Squads hand-over pending, Squads row 4 below) |
+| credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507271972 | `wBS5W8CZ3qmyPv9rduw2wEtpaGAHUGqC2HdqLB58xQzrhaSzYr2A6CrMKoRK8okNwvc2BxriY8bxbY4gvbf4nNQ` | `7668a862b60f4d1602aa0dbf8a8c29a6da56658c82a7a9caf6dd27266dfe2270` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer, single key — Squads hand-over pending, Squads row 4 below) |
 
 **Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
 `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
@@ -48,8 +48,11 @@ cd token && CLUSTER=devnet npm run verify
 ## Notes
 
 - **The live devnet build is the current source (#170).** Deployed
-  2026-10-04 by `9WH1…2uDZ` with `anchor build` on this branch; the dump
-  SHA-256 equals the local build (`4866ec51…f457`). The gate root was
+  2026-10-04 by `9WH1…2uDZ` (first deploy slot 507268500, tx
+  `5CgLegBt…e8BPL9`), then upgraded once at slot 507271972 to the build of
+  this branch after merging `main` (doc-comment line shifts change embedded
+  panic locations, so the hash moved). The dump SHA-256 equals the local
+  build (`7668a862…2270`). The gate root was
   seeded in the same session: `initialize_root(EPCf8gbRaQNqyetsnDxrctgaJjwSzSbxDUSyNBxBavSK)`
   (devnet gate governance key, `~/.config/nundina/credit-gate-devnet/`),
   tx `4ZBcLVncsJ7cyf9xAZXeJuUj5661kw4BGdimymZUQPuVs98iV4DfQiBJFbrsvNj2PGCk5BGpjBZftkWUJYDRg1Mc`.

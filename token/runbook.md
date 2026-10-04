@@ -129,7 +129,7 @@ in [`ops/gate`](../ops/gate/README.md), and the whole sequence passes on a
 validator with the real Token ACL and SAS programs (`npm test` there).
 
 1. **Gate deploy** — ✅ done 2026-10-04 (#170): v0.2.0 at
-   `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX`, slot 507268500, row in
+   `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX`, slot 507271972, row in
    `DEPLOYMENTS.md` (the old `7yRE…Qa9c` program is superseded; its
    `Bprm…` key is lost).
 2. **Gate root** — ✅ done in the same session:
