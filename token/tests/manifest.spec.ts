@@ -90,9 +90,14 @@ test("metadata.json marks every unbuilt control TARGET-STATE", () => {
   assert.ok(metadata.extensions.authority_model, "metadata.json must describe the real authority model");
 });
 
-test("params.toml treasury is marked target, not deployed", () => {
-  assert.match(String(params.treasury.status), /^TARGET-STATE/);
-  assert.equal(params.treasury.venue, undefined, "use target_venue: no venue is deployed (#120)");
+// #173: no venue is integrated, so none may be named — not even as a target.
+test("params.toml treasury is graded unbacked, with no venue named", () => {
+  assert.match(String(params.treasury.status), /^UNBACKED, process-only/);
+  assert.equal(params.treasury.venue, undefined, "no venue is deployed (#120)");
+  assert.equal(params.treasury.target_venue, undefined, "no venue is integrated (#173)");
+  for (const f of ["../params.toml", "../TOKENOMICS.md", "../README.md", "../runbook.md", "../metadata.json", "../../HACKATHON.md"]) {
+    assert.doesNotMatch(read(f), /Kamino/, `${f} names Kamino, but no Kamino adapter exists (#173)`);
+  }
 });
 
 test("init-mint writes the on-chain TARGET-STATE status pair that verify.ts requires", () => {
