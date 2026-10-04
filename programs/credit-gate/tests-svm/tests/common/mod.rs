@@ -22,16 +22,13 @@ pub fn programdata_pda() -> Pubkey {
     Pubkey::find_program_address(&[PROGRAM_ID.as_ref()], &LOADER_V3).0
 }
 
-/// Fresh VM with the real `anchor build` artifact loaded, and `upgrade`
-/// installed as its upgrade authority (LiteSVM deploys with none).
+/// Fresh VM with the program built from the current source loaded
+/// (`build.rs`, #169), and `upgrade` installed as its upgrade authority
+/// (LiteSVM deploys with none).
 /// ProgramData header: u32 tag | u64 slot | Option<Pubkey>.
 pub fn deploy(upgrade: &Keypair) -> LiteSVM {
-    let so = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../target/deploy/credit_gate.so"
-    );
-    let bytes = std::fs::read(so)
-        .unwrap_or_else(|e| panic!("{so}: {e} — run `anchor build` at the repo root first"));
+    let so = env!("CREDIT_GATE_SO");
+    let bytes = std::fs::read(so).unwrap_or_else(|e| panic!("{so}: {e}"));
     let mut svm = LiteSVM::new();
     svm.add_program(PROGRAM_ID, &bytes).expect("load program");
     set_upgrade_authority(&mut svm, Some(&upgrade.pubkey()));

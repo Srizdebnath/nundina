@@ -4,7 +4,7 @@
 //! market onboarding keeps working after the program is finalized (doc 06
 //! §11 U1), while only the upgrade authority can seed the root.
 //!
-//! Loads the real `anchor build` artifact as an upgradeable program.
+//! Loads the real SBF build (build.rs) as an upgradeable program.
 
 mod common;
 
