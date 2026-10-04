@@ -14,7 +14,16 @@ to match.
 | Program | Cluster | Program ID | Slot | Deploy signature | Build SHA-256 | Upgrade authority |
 |---|---|---|---|---|---|---|
 | payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
-| credit-gate v0.1.0 (P0 skeleton) | devnet | `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` | 503888002 | `2rDLR9z1NDskQsBXMf1jejEKVrCZ5ch7TJRxNTbfL79mZsms5rzigAi6JX4m7PKFLPVYryREVw7Gvz311xKv32dR` | `6e8c50879a0151c313f33c31b79d0ef4f9a945200a08cbbd4985efd75eef0e21` | `BprmmqrzBADdQ2iKARtqcDndWV5k22aUGrkMKeySjKgp` (single key — P0 bootstrap; Squads 2-of-2 takes over at P1 per 08 §8) |
+| credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507271972 | `wBS5W8CZ3qmyPv9rduw2wEtpaGAHUGqC2HdqLB58xQzrhaSzYr2A6CrMKoRK8okNwvc2BxriY8bxbY4gvbf4nNQ` | `7668a862b60f4d1602aa0dbf8a8c29a6da56658c82a7a9caf6dd27266dfe2270` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer, single key — Squads hand-over pending, Squads row 4 below) |
+
+**Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
+`7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
+`6e8c5087…0e21`, upgrade authority `Bprm…jKgp`) can never be upgraded: no
+one on the team holds `Bprm…` or its seed phrase. Instead of upgrading it,
+the current source was deployed on 2026-10-04 at a **new program id** under
+new keys (row above). The old id is a dead record: nothing in this repo
+references it, and payment-rails `CREDIT_GATE_ID` now names the new id.
+Configs created against the old program are not trusted (#26).
 
 ## NPCS asset (Token-2022 mint)
 
@@ -25,8 +34,8 @@ to match.
 ## Verification procedure
 
 ```bash
-solana program show 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c -u devnet
-solana program dump 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c /tmp/dump.so -u devnet
+solana program show 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX -u devnet
+solana program dump 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX /tmp/dump.so -u devnet
 sha256sum /tmp/dump.so   # must equal the Build SHA-256 above
 
 # payment-rails (keyless; fails closed on any mismatch):
@@ -38,11 +47,18 @@ cd token && CLUSTER=devnet npm run verify
 
 ## Notes
 
-- The live devnet build is the P0 skeleton: only the CG-P2 config anchor.
-  `main` now carries CG-P1..P7 (SAS read, governor, block-list, lot ledger,
-  `validate`, Token ACL hooks; #122). Going live is the key holders' run in
-  [`ops/gate/README.md`](ops/gate/README.md): redeploy (below), `wire.ts root`,
-  `wire.ts market`, then the NPCS freeze-authority hand-over `wire.ts acl`.
+- **The live devnet build is the current source (#170).** Deployed
+  2026-10-04 by `9WH1…2uDZ` (first deploy slot 507268500, tx
+  `5CgLegBt…e8BPL9`), then upgraded once at slot 507271972 to the build of
+  this branch after merging `main` (doc-comment line shifts change embedded
+  panic locations, so the hash moved). The dump SHA-256 equals the local
+  build (`7668a862…2270`). The gate root was
+  seeded in the same session: `initialize_root(EPCf8gbRaQNqyetsnDxrctgaJjwSzSbxDUSyNBxBavSK)`
+  (devnet gate governance key, `~/.config/nundina/credit-gate-devnet/`),
+  tx `4ZBcLVncsJ7cyf9xAZXeJuUj5661kw4BGdimymZUQPuVs98iV4DfQiBJFbrsvNj2PGCk5BGpjBZftkWUJYDRg1Mc`.
+  Next: `wire.ts market` + `acl` on the NPCS mint (#171/#142), then the
+  devnet payment-rails upgrade (Squads proposal, 48h) so its fills CPI
+  this gate's `settle_check`.
 - The program keypair (`target/deploy/credit_gate-keypair.json`, gitignored)
   is the only way to deploy at this fixed ID on a new cluster. Back it up
   before any `cargo clean`. Upgrades of the live program need only the
@@ -55,31 +71,19 @@ cd token && CLUSTER=devnet npm run verify
   hand-over commands are the plan, not a record.
 - Verifiable-build reproduction (deterministic SBF flags) lands with the P1
   CI pipeline; until then hashes are recorded from this machine's build.
-- **Security (#26):** the credit-gate v0.1.0 build above lets *any* signer
-  run `initialize_config` for a mint and become its permanent gate-config
-  authority. The fix on `main` gates it on the gate root (#93; seeded only
-  by the program's upgrade authority) and is **not deployed** until the
-  upgrade authority redeploys. Nothing consumes this skeleton yet, but
-  configs created on devnet before that upgrade aren't trustworthy.
-- **Checking and closing the #45 gap.** Anyone can run
+- **Security (#26):** the superseded v0.1.0 build at `7yRE…Qa9c` lets
+  *any* signer run `initialize_config` for a mint and become its permanent
+  gate-config authority. The deployed v0.2.0 gates it on the gate root
+  (#93), seeded at deploy (above). Configs on the old program are ignored.
+- **Checking the deployment (#45).** Anyone can run
   `bash programs/credit-gate/scripts/verify.sh`. It verifies the row above
   keylessly (source id, genesis, dump SHA-256, authority, slot) and reports
-  whether this checkout's `anchor build` equals the live build. Today it
-  does not: the live build is the pre-#26 one. The redeploy needs the
-  upgrade authority `Bprm…jKgp`:
-  1. `anchor build` on `main`, then `solana program deploy
-     target/deploy/credit_gate.so --program-id 7yREa5V3…Qa9c
-     --upgrade-authority <Bprm….json> -u devnet` (bare id: the program
-     keypair is not needed);
-  2. call `initialize_root(<root authority>)`, signed by the upgrade
-     authority, **in the same session** — until the root exists no market
-     can be onboarded, and it must exist before the program is ever
-     finalized (a finalized program with no root can never seed one);
-  3. update this row's Slot, signature and Build SHA-256, then re-run
-     `verify.sh` (it must now print `local anchor build == live build`);
-  4. discard any `MarketConfig` created against the old build (none are
-     consumed today), and follow the #50 hand-over note below before the
-     bootstrap key is retired.
+  whether this checkout's `anchor build` equals the live build. A future
+  upgrade: `anchor build`, `solana program deploy target/deploy/credit_gate.so
+  --program-id 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX --upgrade-authority
+  <current authority>`, then update this row and re-run `verify.sh`. Once
+  the authority is the Squads vault, that is a Squads vault transaction
+  with the 48h timelock.
 - **Gate root (#93):** `initialize_config` is authorized by the singleton
   `GateRoot` PDA (`["gate_root"]`), not by `ProgramData`, so per-mint
   onboarding (CG-P2, G14) keeps working after doc 06 §11 U1 stages the
@@ -116,7 +120,7 @@ cd token && CLUSTER=devnet npm run verify
   | 1 | `payment-rails` upgrade authority | `9WH1…2uDZ` | vault | ✅ 2026-10-03 · `519n9Dw2…VstjP9`; `verify.sh` passes against the new row in `payment-rails/DEPLOYMENTS.md` |
   | 2 | Vault answers to 2-of-2 | — | proposal #1 approved by both members | ✅ approvals 2026-10-03; execute opens 2026-10-05 10:00 UTC (timelock) — `npx tsx migrate.ts prove` |
   | 3 | NPCS mint, freeze, permanent delegate, metadata pointer, metadata update | `2xhjfAdr…6sRXMh` | vault (freeze moves on to the Token ACL `MintConfig` when the gate wires in) | ☐ **key holder runs** `CLUSTER=devnet npx tsx migrate.ts move-mint Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i --authority <2xhj….json>` (the same command passed on an NPCS-shaped mint in `test-localnet.sh`) |
-  | 4 | `credit-gate` upgrade authority | `Bprm…jKgp` | vault | ☐ **key holder runs**, after the #45 redeploy: `CLUSTER=devnet npx tsx migrate.ts move-program 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c --authority <Bprm….json>`; then the gate root and each config per #50 above (accept signed by the vault through a Squads proposal) |
+  | 4 | `credit-gate` upgrade authority (new id `5ycY…X6XX`, #170; the old `7yRE…Qa9c` / `Bprm…` program is superseded) | `9WH1…2uDZ` | vault | ☐ **pending** `CLUSTER=devnet npx tsx migrate.ts move-program 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX --authority ~/.config/solana/turbine-devnet.json`; then the gate root and each config per #50 above (accept signed by the vault through a Squads proposal) |
 
   **Custody caveat (devnet only):** both member keys were generated on one
   machine (`~/.config/nundina/squads-devnet/`, mode 600, outside the repo).

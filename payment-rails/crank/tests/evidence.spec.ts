@@ -4,7 +4,7 @@ import { address } from "@solana/kit";
 import { encode, idl, PROGRAM_ID, type Value } from "../src/idl.ts";
 import { eventsFromLogs, toJson, transferProof } from "../src/evidence.ts";
 
-const S = address("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
+const S = address("5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX");
 const TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
 function sessionEventLine(action: string): string {

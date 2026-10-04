@@ -128,10 +128,13 @@ Built and tested; not yet run on the devnet mint. Every step is a command
 in [`ops/gate`](../ops/gate/README.md), and the whole sequence passes on a
 validator with the real Token ACL and SAS programs (`npm test` there).
 
-1. **Gate redeploy** (holder of `Bprm…jKgp`, #45): `anchor build`, then
-   `solana program deploy … --program-id 7yREa5V3…Qa9c --upgrade-authority <Bprm.json>`;
-   record the row in `DEPLOYMENTS.md`.
-2. **Gate root** (same key): `npm run wire -- root --upgrade-authority <Bprm.json> --root <governance key>`.
+1. **Gate deploy** — ✅ done 2026-10-04 (#170): v0.2.0 at
+   `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX`, slot 507271972, row in
+   `DEPLOYMENTS.md` (the old `7yRE…Qa9c` program is superseded; its
+   `Bprm…` key is lost).
+2. **Gate root** — ✅ done in the same session:
+   `npm run wire -- root --upgrade-authority <turbine-devnet.json> --root EPCf8gbRaQNqyetsnDxrctgaJjwSzSbxDUSyNBxBavSK`
+   (tx `4ZBcLVnc…RYDg1Mc`).
 3. **Market** (the root/governance key): `npm run wire -- market --authority <kp> --mint Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i`
    (config, policy US / KYC ≥ 1 / accreditation required, block-list, Token ACL extra metas).
 4. **Freeze authority → Token ACL** (holder of `2xhjfAdr…6sRXMh`):

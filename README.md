@@ -32,7 +32,7 @@ today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 | Next.js 16 app | shell only (one static page; no wallet, no routes) | `app/` |
 | CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ✅ green | `.github/workflows/ci.yml` |
 | SAS attester (credential + 3 schemas) | ✅ **live devnet** (#122) | `ops/gate/deployment-devnet.json` · `npm run sas -- verify` |
-| Token ACL wiring of NPCS | ⏳ tool tested end to end; waits on the `2xhj…` and `Bprm…` key holders | `ops/gate/` |
+| Token ACL wiring of NPCS | ⏳ tool tested end to end; gate v0.2.0 live on devnet with its root seeded (#170); market + ACL wiring of the NPCS mint is #171 | `ops/gate/` |
 | mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
 
 ### Programs: as built vs roadmap
@@ -123,7 +123,7 @@ cargo test --workspace
 cd token && npm install && CLUSTER=devnet npm run verify
 
 # the deployed credit-gate program
-solana program show 7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c -u devnet
+solana program show 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX -u devnet
 
 # the live payment-rails program: keyless, read-only; checks source id,
 # genesis, build SHA-256, upgrade authority and slot against the registry

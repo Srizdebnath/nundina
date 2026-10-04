@@ -9,8 +9,9 @@ Two tools for putting a mint behind `credit-gate` (SRS 08 §4.1, §5):
 
 Devnet state: the SAS credential, attester and schemas are live
 ([`deployment-devnet.json`](deployment-devnet.json)). `root`, `market` and
-`acl` wait on the key holders: the `credit-gate` redeploy needs `Bprm…`
-(#45) and the hand-over needs the NPCS key `2xhj…`. The exact sequence is in
+`acl` follow: credit-gate v0.2.0 is deployed at `5ycY…X6XX` with its root
+seeded (governance `EPCf…BavSK`, #170); `market` + `acl` on the NPCS mint
+are #171. The exact sequence is in
 [`token/runbook.md`](../../token/runbook.md) § ACL wiring.
 
 ## How a thaw is decided

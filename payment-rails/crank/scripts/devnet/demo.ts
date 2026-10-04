@@ -23,8 +23,9 @@
  * every fill CPIs credit-gate: the demo asset needs a gate market, the
  * buyers a `validate`, and H a seasoned lot (ops/gate wire.ts, scripts/
  * drill-gate.ts shows the sequence), and the cluster's credit-gate must
- * carry `settle_check` (devnet: blocked on the Bprm… redeploy, #146).
- * Until then settlePlan skips each fill ("buyer not admitted").
+ * carry `settle_check` (devnet: the gate is live at 5ycY…X6XX, #170; the
+ * deployed payment-rails still names the superseded gate id until its
+ * Squads upgrade). Until then settlePlan skips each fill ("buyer not admitted").
  *   RPC_URL=https://api.devnet.solana.com npx tsx scripts/devnet/demo.ts
  */
 import { join } from "node:path";

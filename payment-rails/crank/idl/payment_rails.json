@@ -3687,7 +3687,7 @@
           "accounts": [
             {
               "name": "gate_program",
-              "address": "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
             },
             {
               "name": "gate_authority",
@@ -3963,7 +3963,7 @@
           "accounts": [
             {
               "name": "gate_program",
-              "address": "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
             },
             {
               "name": "gate_authority",

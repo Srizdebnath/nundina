@@ -35,7 +35,7 @@ pub use lots::*;
 pub use settle::*;
 pub use token_acl::*;
 
-declare_id!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
+declare_id!("5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX");
 
 /// Maximum accepted attester authorities per market (H3: multi-source so a
 /// single provider outage cannot halt onboarding).

@@ -35,7 +35,7 @@ import { attestationPda } from "./sas.ts";
 
 const CLUSTER = process.env.CLUSTER ?? "devnet";
 const RPC = process.env.RPC_URL ?? (CLUSTER === "devnet" ? "https://api.devnet.solana.com" : "http://127.0.0.1:8899");
-export const GATE = new PublicKey(process.env.GATE_PROGRAM ?? "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
+export const GATE = new PublicKey(process.env.GATE_PROGRAM ?? "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX");
 export const TOKEN_ACL = new PublicKey("TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP");
 export const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
