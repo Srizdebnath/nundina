@@ -69,6 +69,18 @@ PAYER="$TMP/stranger.json" npx tsx wire.ts thaw "$TA" --mint "$MINT" >/dev/null
 PAYER="$TMP/stranger.json" npx tsx wire.ts thaw "$TM" --mint "$MINT" >/dev/null 2>&1 && fail "unattested wallet thawed"
 [ "$(state "$TM")" = true ] || fail "unattested account changed state"
 
+# #171/#172: primary issuance to the thawed investor + its CG-P3 lot.
+spl-token mint -u "$URL" "$MINT" 1 "$TA" --mint-authority "$TMP/issuer.json" --fee-payer "$TMP/issuer.json" >/dev/null
+npx tsx wire.ts append-lot "$ALICE" --authority "$TMP/gov.json" --mint "$MINT" --qty 1000000 >/dev/null
+LOTS=$(npx tsx -e 'import { seeds } from "./wire.ts"; import { PublicKey } from "@solana/web3.js";
+  console.log(seeds.lots(new PublicKey(process.argv[1]), new PublicKey(process.argv[2])).toBase58())' "$MINT" "$ALICE")
+solana account -u "$URL" "$LOTS" --output json | node -e '
+  const d = Buffer.from(JSON.parse(require("fs").readFileSync(0)).account.data[0], "base64");
+  if (d[84] !== 1 || d.readBigUInt64LE(85 + 4) !== 1000000n) { console.error("lot not recorded", d[84]); process.exit(1); }' \
+  || fail "append-lot did not record the lot"
+npx tsx wire.ts append-lot "$ALICE" --authority "$TMP/stranger.json" --mint "$MINT" --qty 1 >/dev/null 2>&1 \
+  && fail "append-lot accepted a non-authority"
+
 # The issuer's old freeze key is no longer the freeze authority.
 spl-token freeze -u "$URL" "$TA" --freeze-authority "$TMP/issuer.json" --fee-payer "$TMP/issuer.json" \
   >/dev/null 2>&1 && fail "old freeze key still freezes"

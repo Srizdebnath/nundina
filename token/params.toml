@@ -35,11 +35,11 @@ cadence = "weekly"
 rounding = "floor-against-initiator"
 
 [treasury]
-# #120/#173: there is no treasury. No vault, no venue, no deposit path and no
-# mint-on-deposit script exists; I1 holds only because supply is 0. No venue
+# #120/#173: there is no treasury program. No venue, no deposit path and no
+# mint-on-deposit script exists; I1 holds by a recorded manual deposit (#171). No venue
 # is chosen, so none is named here — adding one needs a real adapter + a
 # recorded devnet deposit→mint tx, not a label.
-status = "UNBACKED, process-only: no treasury, no venue, no deposit or mint-on-deposit path; supply 0"
+status = "UNBACKED, process-only: no venue, no deposit or mint-on-deposit code; devnet supply 1.000000 = 1 USDC deposited by hand to the Squads vault sleeve account"
 backing = "none on-chain; I1 is a process rule (runbook.md § Treasury), not code"
 supply_cap_rule = "supply_base == confirmed_deposits_usdc * 10^6"
 

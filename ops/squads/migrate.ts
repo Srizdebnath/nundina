@@ -114,6 +114,17 @@ export async function upgradeAuthority(conn: Connection, program: PublicKey): Pr
   return a.data[12] === 1 ? new PublicKey(a.data.subarray(13, 45)).toBase58() : null;
 }
 
+/** Token ACL (sRFC37). Once a mint is wired to credit-gate (ops/gate
+ * `wire.ts acl`), its freeze authority is this program's MintConfig PDA,
+ * not a wallet: that is the target state, so a move leaves it there. */
+export const TOKEN_ACL = new PublicKey("TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP");
+export const aclMintConfig = (mint: PublicKey) =>
+  PublicKey.findProgramAddressSync([Buffer.from("MINT_CONFIG"), mint.toBuffer()], TOKEN_ACL)[0].toBase58();
+
+/** Is `holder` where authority `k` of `mint` should end up after a move? */
+export const custodied = (k: string, holder: string | null, vault: string, mint: PublicKey) =>
+  k === "hasMetadataPointer" || holder === null || holder === vault || (k === "freeze" && holder === aclMintConfig(mint));
+
 /** Every authority on an NPCS-shaped Token-2022 mint. */
 export async function mintAuthorities(conn: Connection, mint: PublicKey) {
   const m = await getMint(conn, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
@@ -215,6 +226,7 @@ async function moveMint(conn: Connection, mint: PublicKey, authority: Keypair): 
   ];
   for (const [holder, add, name] of held) {
     if (holder === null) continue;
+    if (name === "freeze" && holder === aclMintConfig(mint)) continue; // already with Token ACL
     if (holder !== me) throw new Error(`${name} authority is ${holder}, not the signer ${me}`);
     add();
   }
@@ -222,7 +234,7 @@ async function moveMint(conn: Connection, mint: PublicKey, authority: Keypair): 
   const sig = await send(conn, ixs, [authority]);
   const after = await mintAuthorities(conn, mint);
   for (const [k, v] of Object.entries(after)) {
-    if (k !== "hasMetadataPointer" && v !== null && v !== r.vault) throw new Error(`after move ${k} authority is ${v}`);
+    if (!custodied(k, v as string | null, r.vault, mint)) throw new Error(`after move ${k} authority is ${v}`);
   }
   r.moves.push({ kind: "mint-authorities", target: mint.toBase58(), from: me, signature: sig, at: new Date().toISOString() });
   writeRecord(r);
@@ -311,8 +323,9 @@ export async function verify(conn: Connection, r: Record): Promise<string[]> {
       const a = await upgradeAuthority(conn, new PublicKey(mv.target));
       if (a !== r.vault) problems.push(`${mv.target} upgrade authority is ${a}`);
     } else {
-      for (const [k, v] of Object.entries(await mintAuthorities(conn, new PublicKey(mv.target)))) {
-        if (k !== "hasMetadataPointer" && v !== null && v !== r.vault) problems.push(`${mv.target} ${k} authority is ${v}`);
+      const mint = new PublicKey(mv.target);
+      for (const [k, v] of Object.entries(await mintAuthorities(conn, mint))) {
+        if (!custodied(k, v as string | null, r.vault, mint)) problems.push(`${mv.target} ${k} authority is ${v}`);
       }
     }
   }
