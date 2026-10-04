@@ -14,7 +14,7 @@ to match.
 | Program | Cluster | Program ID | Slot | Deploy signature | Build SHA-256 | Upgrade authority |
 |---|---|---|---|---|---|---|
 | payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
-| credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507271972 | `wBS5W8CZ3qmyPv9rduw2wEtpaGAHUGqC2HdqLB58xQzrhaSzYr2A6CrMKoRK8okNwvc2BxriY8bxbY4gvbf4nNQ` | `7668a862b60f4d1602aa0dbf8a8c29a6da56658c82a7a9caf6dd27266dfe2270` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer, single key — Squads hand-over pending, Squads row 4 below) |
+| credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507271972 | `wBS5W8CZ3qmyPv9rduw2wEtpaGAHUGqC2HdqLB58xQzrhaSzYr2A6CrMKoRK8okNwvc2BxriY8bxbY4gvbf4nNQ` | `7668a862b60f4d1602aa0dbf8a8c29a6da56658c82a7a9caf6dd27266dfe2270` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2, 48h timelock (#171; was `9WH1…2uDZ`) |
 
 **Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
 `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
@@ -29,7 +29,8 @@ Configs created against the old program are not trusted (#26).
 
 | Asset | Cluster | Mint | Details |
 |---|---|---|---|
-| NPCS — NUNDINA Pilot Credit Sleeve | devnet | `Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i` | 6dp · DefaultAccountState=Frozen · MetadataPointer(self, TLV metadata in mint, 581B) · PermanentDelegate · all authorities = `2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh` (bootstrap, Squads 2-of-2 at P1) · `verify.ts`: every manifest check passes; the #121 on-chain `status` marker is not written yet (`token/runbook.md` § On-chain status marker) |
+| NPCS — NUNDINA Pilot Credit Sleeve (#171) | devnet | `6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4` | 6dp · DefaultAccountState=Frozen · MetadataPointer(self) · PermanentDelegate · TLV metadata incl. on-chain `status` · **freeze authority = Token ACL MintConfig `3AccB1giyy9Jcc9GZXJKKEqLyNHdY1SPcw1jreX9NRDS` → credit-gate** (permissionless thaw + freeze on) · mint, permanent delegate, metadata pointer + update = Squads vault `8wj1EfUy…LCV` · supply 1.000000 against 1 USDC in the vault's sleeve account `B78WTdsY4MYhAvT757xtdb6KZ61pkBTPzKCtohK3NKAz` (I1) · `cd token && CLUSTER=devnet npm run verify` → ALL CHECKS PASSED (§2.1 included) |
+| ~~NPCS (superseded)~~ | devnet | `Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i` | Dead record: every authority is `2xhjfAdr…6sRXMh`, whose key and seed phrase are lost, so it can never be minted, wired or handed over. Supply 0. Replaced by the row above (#171) |
 
 ## Verification procedure
 
@@ -119,8 +120,8 @@ cd token && CLUSTER=devnet npm run verify
   | 0 | Squads v4 multisig, threshold **2-of-2**, timelock **48h**, no config authority (only a 2-of-2 vote changes members) | — | `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7` · vault `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV` | ✅ 2026-10-03 · `5dyaTmrZ…b1aWH` |
   | 1 | `payment-rails` upgrade authority | `9WH1…2uDZ` | vault | ✅ 2026-10-03 · `519n9Dw2…VstjP9`; `verify.sh` passes against the new row in `payment-rails/DEPLOYMENTS.md` |
   | 2 | Vault answers to 2-of-2 | — | proposal #1 approved by both members | ✅ approvals 2026-10-03; execute opens 2026-10-05 10:00 UTC (timelock) — `npx tsx migrate.ts prove` |
-  | 3 | NPCS mint, freeze, permanent delegate, metadata pointer, metadata update | `2xhjfAdr…6sRXMh` | vault (freeze moves on to the Token ACL `MintConfig` when the gate wires in) | ☐ **key holder runs** `CLUSTER=devnet npx tsx migrate.ts move-mint Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i --authority <2xhj….json>` (the same command passed on an NPCS-shaped mint in `test-localnet.sh`) |
-  | 4 | `credit-gate` upgrade authority (new id `5ycY…X6XX`, #170; the old `7yRE…Qa9c` / `Bprm…` program is superseded) | `9WH1…2uDZ` | vault | ☐ **pending** `CLUSTER=devnet npx tsx migrate.ts move-program 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX --authority ~/.config/solana/turbine-devnet.json`; then the gate root and each config per #50 above (accept signed by the vault through a Squads proposal) |
+  | 3 | NPCS mint, permanent delegate, metadata pointer, metadata update (new mint `6vt1wHVQ…VKL4`, #171) | `7Udt…5EEbuh` (bootstrap) | vault; **freeze → Token ACL `MintConfig`** (not the vault) | ✅ 2026-10-04 · `38a9LS93…eE8YF` (`move-mint` leaves a Token ACL freeze authority in place). Pending: the MintConfig's own authority (manual Token ACL freeze/thaw) is still `7Udt…` — payment-rails' session vault accounts are born frozen and need it for the #172 DvP; it moves to the vault right after that fill |
+  | 4 | `credit-gate` upgrade authority (`5ycY…X6XX`, #170) | `9WH1…2uDZ` | vault | ✅ 2026-10-04 · `47v3X6D8…avnmuCi`; `programs/credit-gate/scripts/verify.sh` passes against the updated row. The gate root (`EPCf…BavSK`) and the NPCS `MarketConfig` authority stay with the devnet governance key: `append_lot` for primary issuance needs it (#50 hand-over when that path is an auction-engine CPI) |
 
   **Custody caveat (devnet only):** both member keys were generated on one
   machine (`~/.config/nundina/squads-devnet/`, mode 600, outside the repo).

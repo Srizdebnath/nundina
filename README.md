@@ -32,7 +32,7 @@ today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
 | Next.js 16 app | shell only (one static page; no wallet, no routes) | `app/` |
 | CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ✅ green | `.github/workflows/ci.yml` |
 | SAS attester (credential + 3 schemas) | ✅ **live devnet** (#122) | `ops/gate/deployment-devnet.json` · `npm run sas -- verify` |
-| Token ACL wiring of NPCS | ⏳ tool tested end to end; gate v0.2.0 live on devnet with its root seeded (#170); market + ACL wiring of the NPCS mint is #171 | `ops/gate/` |
+| Token ACL wiring of NPCS | ✅ devnet (#171): new mint `6vt1wHVQ…VKL4` thaws only through credit-gate; mint/delegate/metadata authority = Squads vault | `ops/gate/`, `token/` |
 | mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
 
 ### Programs: as built vs roadmap

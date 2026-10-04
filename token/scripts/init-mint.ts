@@ -59,7 +59,7 @@ const DECIMALS = 6;
 const URI = "https://nundina.com/npcs/metadata.json";
 const LABEL = "PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL";
 const STATUS =
-  "TARGET-STATE: backing, Token ACL/credit-gate gating and Squads custody are NOT in force; one bootstrap key holds every authority";
+  "TARGET-STATE: USDC 1:1 backing is a process rule, not enforced on-chain. IN FORCE: thaw/freeze through Token ACL to credit-gate; mint, permanent-delegate and metadata authority = Squads 2-of-2 vault";
 const LABELS: [string, string][] = [
   ["label", LABEL],
   ["asset_class", "pilot_credit_sleeve"],

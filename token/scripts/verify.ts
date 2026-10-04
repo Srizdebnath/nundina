@@ -20,6 +20,7 @@ import {
   fetchMint,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 const TOKEN_ACL = address("TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP");
@@ -51,11 +52,19 @@ function asPairs(v: unknown): [string, string][] {
 }
 
 async function main(): Promise<void> {
-  const deployment = JSON.parse(
-    await readFile(`keys/deployment-${CLUSTER}.json`, "utf8"),
-  ) as { mint: string; admin_authority: string };
+  // The committed public record (#171) wins; keys/ is the minting machine's
+  // private copy and only a fallback.
+  const record = existsSync(`deployment-${CLUSTER}.json`) ? `deployment-${CLUSTER}.json` : `keys/deployment-${CLUSTER}.json`;
+  const deployment = JSON.parse(await readFile(record, "utf8")) as {
+    mint: string;
+    admin_authority: string;
+    custodian?: string;
+  };
   const mintAddress = process.env.MINT ?? deployment.mint;
-  const admin = deployment.admin_authority;
+  // Who must hold mint / permanent-delegate / metadata authority: the Squads
+  // vault once the hand-over is recorded, else the bootstrap admin.
+  const admin = deployment.custodian ?? deployment.admin_authority;
+  const who = deployment.custodian ? "Squads vault" : "bootstrap admin";
 
   const rpc = createSolanaRpc(RPC_URL);
   console.log(`\nverify: ${mintAddress} on ${CLUSTER}\n`);
@@ -67,7 +76,7 @@ async function main(): Promise<void> {
 
   const mintAuth = unwrapOpt(mint.data.mintAuthority);
   const freezeAuth = unwrapOpt(mint.data.freezeAuthority);
-  check(mintAuth === admin, "mint authority == admin", mintAuth ?? "none");
+  check(mintAuth === admin, `mint authority == ${who}`, mintAuth ?? "none");
 
   const extOpt = mint.data.extensions;
   const exts = (extOpt && extOpt.__option === "Some" ? extOpt.value : []) as unknown as Array<{
@@ -83,7 +92,7 @@ async function main(): Promise<void> {
 
   const pd = byKind("PermanentDelegate") as { delegate?: { toString(): string } } | undefined;
   check(!!pd, "extension: PermanentDelegate present");
-  check(pd?.delegate?.toString() === admin, "delegate == admin", pd?.delegate?.toString());
+  check(pd?.delegate?.toString() === admin, `delegate == ${who}`, pd?.delegate?.toString());
 
   const mp = byKind("MetadataPointer") as { metadataAddress?: unknown } | undefined;
   check(!!mp, "extension: MetadataPointer present");
@@ -101,7 +110,7 @@ async function main(): Promise<void> {
     | undefined;
   check(!!tm, "extension: TokenMetadata present");
   if (tm) {
-    check(unwrapOpt(tm.updateAuthority) === admin, "metadata.updateAuthority == admin", unwrapOpt(tm.updateAuthority) ?? "none");
+    check(unwrapOpt(tm.updateAuthority) === admin, `metadata.updateAuthority == ${who}`, unwrapOpt(tm.updateAuthority) ?? "none");
     check((tm.name ?? "").includes("NUNDINA Pilot Credit Sleeve"), "name ok", tm.name);
     check(tm.symbol === "NPCS", "symbol ok", tm.symbol);
     check((tm.uri ?? "").length > 0, "uri present", tm.uri);
@@ -166,6 +175,10 @@ async function main(): Promise<void> {
     check(ok && bs58(d.subarray(68, 100)) === CREDIT_GATE, "gating program == credit-gate", ok ? bs58(d.subarray(68, 100)) : "");
     check(d[2] === 1, "permissionless thaw enabled (investors thaw through the gate)");
     check(d[3] === 1, "permissionless freeze enabled (revocation is enforceable)");
+    // Informational: the MintConfig authority can still freeze/thaw by hand
+    // through Token ACL (protocol vault accounts need it, #171).
+    const mca = ok ? bs58(d.subarray(36, 68)) : "?";
+    console.log(`  ℹ MintConfig authority (manual Token ACL freeze/thaw): ${mca}${mca === admin ? ` (${who})` : ""}`);
   }
 
   console.log(`\nresult: ${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);

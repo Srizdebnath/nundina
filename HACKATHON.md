@@ -15,7 +15,7 @@
 
 | Program | Status (as built) | What it does (target) |
 |---|---|---|
-| `credit-gate` | ✅ **live on devnet** at `5ycY…X6XX` (#170): CG-P1..P7: SAS attestation read, holder governor, block-list, lot ledger, `validate`, `settle_check` and the Token ACL thaw/freeze hooks, tested against the real SAS and Token ACL programs (#122). Not yet wired to the NPCS mint (#171) | Gate Program for Token ACL (sRFC37) that reads SAS attestations. Enforces eligibility, Rule 144 per-lot seasoning, a 12(g) holder cap and jurisdiction checks **when an account is activated**, not on every transfer |
+| `credit-gate` | ✅ **live on devnet** at `5ycY…X6XX` (#170): CG-P1..P7: SAS attestation read, holder governor, block-list, lot ledger, `validate`, `settle_check` and the Token ACL thaw/freeze hooks, tested against the real SAS and Token ACL programs (#122). Wired to the devnet NPCS mint through Token ACL (#171) | Gate Program for Token ACL (sRFC37) that reads SAS attestations. Enforces eligibility, Rule 144 per-lot seasoning, a 12(g) holder cap and jurisdiction checks **when an account is activated**, not on every transfer |
 | `auction-engine` | 🗺 **roadmap**: no crate, IDL, test or crank | Sealed-bid, periodic, uniform-price batch auction (commit → reveal → clear → pro-rata → DvP settle → print). It has no passive LP, so there is nothing to pick off |
 | `mark-engine` | 🗺 **roadmap**: no crate, IDL, test or crank | Turns a stale NAV into a usable mark: discount curve, haircuts, and Fresh/Warned/Stale/Suspended states. **It never liquidates on a stale mark** |
 | `queue-claim` | 🗺 **roadmap**: no crate, IDL, test or crank | **The novel primitive.** A tokenized, pro-rated redemption request that can be sold in an auction or pledged for a loan |
@@ -25,7 +25,7 @@
 | `credit-math` | ✅ built, tested | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
 
 - **v1 go-to-market:** an issuer-sponsored liquidity window, meaning the issuer runs the auction on its own securities as a buyback tool.
-- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#120): supply is 0 and nothing backs it on-chain.** There is no deposit or mint-on-deposit path, no treasury vault of any kind, no NAV publisher and no SAS attester; invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). The treasury is graded **unbacked, process-only** (#173): no venue is chosen or integrated. *Target:* minted 1:1 against deposited USDC, with NAV computed from the sleeve and published through our own SAS attester.
+- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#171): new devnet mint `6vt1wHVQ…VKL4`, gated through Token ACL → credit-gate and Squads-owned; supply 1.000000 matched by 1 USDC deposited by hand, nothing backs it by code.** There is no deposit or mint-on-deposit code, no treasury program and no NAV publisher (the SAS attester is live, #122); invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). The treasury is graded **unbacked, process-only** (#173): no venue is chosen or integrated. *Target:* minted 1:1 against deposited USDC, with NAV computed from the sleeve and published through our own SAS attester.
 
 Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-Pilot-Rails.md`, `preresearch/research/12-Validation-2026-Reality-Check.md`.
 

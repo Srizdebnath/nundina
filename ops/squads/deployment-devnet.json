@@ -18,6 +18,20 @@
       "from": "9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ",
       "signature": "519n9Dw2dr3sNMYBz98hVfFzU5mLgchVh3DmrNFUsuDR64sFKNeA3ZeX9iWeFfqWXu8JNHVSTaFi7NbQE9VstjP9",
       "at": "2026-10-03T10:00:13.553Z"
+    },
+    {
+      "kind": "mint-authorities",
+      "target": "6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4",
+      "from": "7UdtTMgH4v8YSG8mWX2r8uASgJwAkxyo4h8yb5UEEbuh",
+      "signature": "38a9LS93fqy4AkEzQ7SHPNCa3xdB9PkkSFrdPXWV8Zx7wgTEVZcQLsRHypyjz36w7e6s3H8Hd6EgDUXJAfSeE8YF",
+      "at": "2026-10-04T07:54:01.344Z"
+    },
+    {
+      "kind": "program-upgrade-authority",
+      "target": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX",
+      "from": "9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ",
+      "signature": "47v3X6D8YY6L5KNbgEyA1F6jEVn5wkGzJpDDb4zGndfkDfvLzhuyciuNZFGQJGzbGLnEcDriqEAvciVSBavnmuCi",
+      "at": "2026-10-04T07:54:21.818Z"
     }
   ],
   "proofs": [

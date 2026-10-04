@@ -1,27 +1,30 @@
 # NPCS operations runbook
 
 The pilot asset: a real, USDC 1:1-backed Token-2022 sleeve. Spec: doc 09.
-Parameters: `params.toml`. Status: **mint live on devnet.** Since #121, `verify` fails on the devnet mint until the key holder writes the on-chain status marker below (one command); every other check passes.
+Parameters: `params.toml`. Status: **mint `6vt1wHVQ…VKL4` live on devnet, gated through Token ACL → credit-gate and Squads-owned (#171).** `CLUSTER=devnet npm run verify` → ALL CHECKS PASSED.
 
 ## Keys (gitignored — `token/keys/`)
 
-**Custody status (2026-09, #57, #99): ⚠️ single key, no recorded backup.**
-`freeze-authority.json` (`2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh`)
-is the highest-privilege key in the repo: confirmed on-chain
-(`spl-token display <mint> -u devnet`) as mint, freeze, permanent-delegate
-and metadata-update authority. No offline backup of it is recorded, and it
-is not under Squads. The backup policy below is the plan, not a record that
-it was executed. Loss: no minting, no thaw of new holders, no seizure path,
-no metadata fix. Theft: unlimited mint, arbitrary freeze and seizure.
-Recovery: none on this mint, only a fresh mint with a new key ceremony
-(doc 09 §10). Custodian: recorded in the team's private ops notes, never in
-this repo (same rule as [`payment-rails/README.md` § Keys](../payment-rails/README.md#keys)).
+**Custody status (2026-10-04, #171): Squads 2-of-2 vault** `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`
+(multisig `CHiMWD3q…B39z7`, 48h timelock; devnet members generated on one
+machine, see DEPLOYMENTS.md § Squads) holds mint, permanent-delegate,
+metadata-pointer and metadata-update authority, confirmed on-chain by
+`verify`. The freeze authority is the Token ACL `MintConfig` PDA
+`3AccB1giyy9Jcc9GZXJKKEqLyNHdY1SPcw1jreX9NRDS`, which routes thaws to
+credit-gate. **One single key remains:** `freeze-authority.json`
+(`7UdtTMgH4v8YSG8mWX2r8uASgJwAkxyo4h8yb5UEEbuh`) is still the MintConfig's
+authority (manual Token ACL freeze/thaw), needed to thaw payment-rails'
+session vault accounts for the #172 DvP; it moves to the vault right after.
+The superseded mint `Dy1VW2…dx2i` and its key `2xhj…` (lost) are a dead
+record. Keys of the new mint: `token/keys/` on the minting machine, backed
+up in `~/.config/nundina/npcs-devnet/` there (devnet only; mainnet gets a
+fresh key ceremony, doc 09 §10).
 
 | File | Role | Notes |
 |---|---|---|
 | `mint.json` | mint account keypair | Only needed at init; may be discarded after (authorities are what matter). **Back up before `cargo clean`** if you ever want to re-init at this address. |
-| `freeze-authority.json` | admin authority | Holds mint authority + freeze authority + permanent delegate + metadata update authority until Squads 2-of-2 takes over at P1 (08 §8). **Back this up — it is irreplaceable.** |
-| `deployment-<cluster>.json` | audit record | Mint address, extensions, sizes, timestamp. |
+| `freeze-authority.json` | bootstrap admin | Created the mint; every mint authority it held is now with the Squads vault (#171). Still the Token ACL MintConfig authority until that moves. |
+| `deployment-<cluster>.json` | audit record | Private copy; the public record is `token/deployment-<cluster>.json` (committed, read first by `verify`). |
 
 ### Backup and verification
 
@@ -51,22 +54,19 @@ CLUSTER=devnet MINT=<address> npm run verify
 
 ## On-chain status marker (#121)
 
-The mint's TLV metadata carries `backing = USDC_1to1` and the off-chain
-`metadata.json` names the Token ACL → `credit-gate` model. Neither is in
-force. Mints made by `init-mint.ts` after #121 also carry a `status` pair
-that says so; `verify` requires it. The devnet mint predates #121, so the
-holder of `freeze-authority.json` (the metadata update authority) adds it
-once:
+The mint's TLV metadata carries a `status` pair saying what is and is not in
+force; `verify` requires it to start with `TARGET-STATE`. The devnet mint
+`6vt1wHVQ…VKL4` (#171) was created with:
 
-```bash
-spl-token update-metadata Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i status \
-  "TARGET-STATE: backing, Token ACL/credit-gate gating and Squads custody are NOT in force; one bootstrap key holds every authority" \
-  --authority keys/freeze-authority.json --fee-payer keys/freeze-authority.json -u devnet
-CLUSTER=devnet npm run verify   # → ALL CHECKS PASSED
+```
+TARGET-STATE: USDC 1:1 backing is a process rule, not enforced on-chain. IN FORCE: thaw/freeze through Token ACL to credit-gate; mint, permanent-delegate and metadata authority = Squads 2-of-2 vault
 ```
 
-The value must equal `STATUS` in `scripts/init-mint.ts`. Replace it (same
-command) when the gate, backing or Squads custody actually land.
+The superseded mint `Dy1VW2…dx2i` never got the pair: its update authority
+`2xhj…` is lost.
+
+The value must equal `STATUS` in `scripts/init-mint.ts`. Changing it later
+is a metadata update signed by the Squads vault (a 2-of-2 proposal, 48h).
 
 ## Treasury (sleeve) — weekly checklist (treasury-agent, SRS 08 §6)
 
@@ -135,19 +135,16 @@ validator with the real Token ACL and SAS programs (`npm test` there).
 2. **Gate root** — ✅ done in the same session:
    `npm run wire -- root --upgrade-authority <turbine-devnet.json> --root EPCf8gbRaQNqyetsnDxrctgaJjwSzSbxDUSyNBxBavSK`
    (tx `4ZBcLVnc…RYDg1Mc`).
-3. **Market** (the root/governance key): `npm run wire -- market --authority <kp> --mint Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i`
-   (config, policy US / KYC ≥ 1 / accreditation required, block-list, Token ACL extra metas).
-4. **Freeze authority → Token ACL** (holder of `2xhjfAdr…6sRXMh`):
-   `npm run wire -- acl --freeze-authority <2xhj.json> --mint Dy1VW2…dx2i`.
-   From this transaction on, no wallet can freeze or thaw NPCS by hand:
-   investors thaw through the gate, anyone can freeze a holder the gate no
-   longer admits. Do this **before** moving the remaining NPCS authorities to
-   Squads (`DEPLOYMENTS.md` § Squads row 3): the freeze authority goes to
-   Token ACL, not to the vault.
-5. **Check:** `npm run wire -- verify --mint Dy1VW2…dx2i` and
-   `CLUSTER=devnet npm run verify` here: the §2.1 provenance check is
-   REQUIRED and passes only when the freeze authority is Token ACL's
-   `MintConfig` routing to `credit-gate` with permissionless thaw and freeze on.
+3. **Market** — ✅ 2026-10-04 (#171), governance key `EPCf…BavSK`:
+   `npm run wire -- market --authority <governance.json> --mint 6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4 --jurisdictions US --min-kyc 1`
+   (txs `2hATiD6o…91Mxwn`, `3t1SFSCN…d9xV`; policy US / KYC ≥ 1 / accreditation
+   required, holder cap 8, seasoning 7 days).
+4. **Freeze authority → Token ACL** — ✅ (bootstrap admin `7Udt…`):
+   `npm run wire -- acl --freeze-authority <freeze-authority.json> --mint 6vt1wHVQ…VKL4`
+   (tx `4RLpWUYC…s41TG5`). Done **before** the Squads `move-mint`, which
+   leaves a Token ACL freeze authority in place.
+5. **Check** — ✅ `npm run wire -- verify --mint 6vt1wHVQ…VKL4` → OK, and
+   `CLUSTER=devnet npm run verify` here → ALL CHECKS PASSED (§2.1 REQUIRED).
 6. **Each investor:** `npm run sas -- attest <wallet> …` (registrar step),
    `npm run wire -- validate <wallet> --mint …`, then anyone runs
    `npm run wire -- thaw <token-account> --mint …`.

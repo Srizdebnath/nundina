@@ -1,19 +1,19 @@
 {
   "name": "NUNDINA Pilot Credit Sleeve",
   "symbol": "NPCS",
-  "description": "Pilot asset for the NUNDINA mechanism, used to prove gated, NAV-priced private-credit rails. AS-BUILT: supply 0, not backed on-chain, not gated by credit-gate; one bootstrap wallet key holds every authority. Backing, gating and Squads custody are TARGET-STATE, not in force. PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL. Not a protocol token; no distribution, no vesting, no emissions.",
+  "description": "Pilot asset for the NUNDINA mechanism, used to prove gated, NAV-priced private-credit rails. AS-BUILT (devnet): thaws route through Token ACL to credit-gate; mint, permanent-delegate and metadata authority are a Squads 2-of-2 vault; supply is matched 1:1 by USDC deposited by hand. TARGET-STATE, not in force: backing enforced by code. PILOT-DEMO-ASSET — NOT AN OFFER — SYNTHETIC LABEL. Not a protocol token; no distribution, no vesting, no emissions.",
   "image": "https://nundina.com/npcs/icon.png",
   "external_url": "https://nundina.com",
   "extensions": {
     "standard": "token2022",
     "default_account_state": "frozen",
-    "permanent_delegate": "AS-BUILT: the bootstrap wallet key 2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh. TARGET-STATE (not in force): Squads 2-of-2",
+    "permanent_delegate": "AS-BUILT: Squads 2-of-2 vault 8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV (48h timelock). TARGET-STATE: same, with members on two people's hardware wallets (mainnet)",
     "metadata_pointer": "self (TLV metadata inside the mint)",
-    "permissioning": "AS-BUILT: no Token ACL extension, no SAS, no credit-gate CPI; every account is born frozen and the wallet-held freeze key thaws by hand. TARGET-STATE (not enforced): Token ACL (sRFC37) -> credit-gate",
-    "authority_model": "AS-BUILT: one wallet-held key (2xhjfAdrTrWHUiJrTFhGBa22U2zEYriEEr88Kc6sRXMh) is the mint, freeze, permanent-delegate and metadata-update authority. TARGET-STATE (not in force): Squads 2-of-2 for mint, delegate and metadata; freeze authority moves to the Token ACL MintConfig PDA",
+    "permissioning": "AS-BUILT: Token ACL (sRFC37) MintConfig is the freeze authority and routes permissionless thaw/freeze to credit-gate 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX (SAS attestations, holder cap, lot seasoning). TARGET-STATE (not yet): the MintConfig's own authority (manual freeze/thaw) moves from a bootstrap key to Squads",
+    "authority_model": "AS-BUILT: mint, permanent delegate and metadata update = Squads 2-of-2 vault; freeze = Token ACL MintConfig PDA; MintConfig authority = bootstrap key 7UdtTMgH4v8YSG8mWX2r8uASgJwAkxyo4h8yb5UEEbuh. TARGET-STATE (not yet): MintConfig authority = Squads vault",
     "nav_precision": "pico (1e12)",
-    "backing": "AS-BUILT: none (supply 0; no deposit or mint-on-deposit path, no treasury vault). TARGET-STATE (not enforced): USDC 1:1, invariant I1",
-    "seasoning": "7d compressed Rule-144 analog (pilot). AS-BUILT: stored in credit-gate config, read by nothing (no lot ledger). TARGET-STATE (not enforced): per-lot seasoning in credit-gate",
+    "backing": "AS-BUILT: process only — supply 1.000000 matched by 1 USDC deposited by hand to the vault sleeve account; no deposit or mint-on-deposit code. TARGET-STATE (not enforced): USDC 1:1, invariant I1, by code",
+    "seasoning": "7d compressed Rule-144 analog (pilot). AS-BUILT: per-lot seasoning in credit-gate's lot ledger, checked at settle. TARGET-STATE: lots appended by auction-engine settle instead of the gate-config authority",
     "governor_cap": 8
   }
 }

@@ -24,6 +24,7 @@ solana-keygen new --no-bip39-passphrase --silent --force -o "$TMP/npcs-admin.jso
 
 solana-test-validator --reset --quiet --ledger "$TMP/ledger" --rpc-port "$PORT" -u devnet \
   --clone-upgradeable-program "$SQUADS" --clone "$CONFIG_PDA" --clone "$TREASURY" \
+  --clone-upgradeable-program TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP \
   --upgradeable-program "$PROGRAM" "$TMP/memo.so" "$TMP/upgrade.json" >"$TMP/validator.log" 2>&1 &
 VPID=$!
 trap 'kill $VPID 2>/dev/null || true; wait $VPID 2>/dev/null || true; rm -rf "$TMP"' EXIT
@@ -48,6 +49,22 @@ npx tsx migrate.ts create
 npx tsx migrate.ts move-program "$PROGRAM" --authority "$TMP/upgrade.json"
 npx tsx migrate.ts move-mint "$MINT" --authority "$TMP/npcs-admin.json"
 npx tsx migrate.ts verify
+
+# #171: a mint already wired to credit-gate (freeze authority = Token ACL
+# MintConfig) moves everything else and leaves the freeze authority there.
+MINT2=$(spl-token create-token -u "$URL" --program-2022 --decimals 6 --enable-freeze \
+  --default-account-state frozen --enable-permanent-delegate --enable-metadata \
+  --mint-authority "$TMP/npcs-admin.json" --fee-payer "$TMP/npcs-admin.json" --output json \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).commandOutput.address')
+spl-token initialize-metadata -u "$URL" "$MINT2" NPCS NPCS https://example.invalid \
+  --mint-authority "$TMP/npcs-admin.json" --update-authority "$(solana-keygen pubkey "$TMP/npcs-admin.json")" \
+  --fee-payer "$TMP/npcs-admin.json" >/dev/null
+MC=$(npx tsx testkit.ts acl-config "$MINT2" "$TMP/npcs-admin.json")
+npx tsx migrate.ts move-mint "$MINT2" --authority "$TMP/npcs-admin.json"
+npx tsx migrate.ts verify
+spl-token display -u "$URL" "$MINT2" | grep -q "Freeze authority: $MC" || fail "freeze authority left Token ACL"
+spl-token display -u "$URL" "$MINT2" | grep -q "Mint authority: $(node -pe 'JSON.parse(require("fs").readFileSync(process.env.RECORD)).vault')" \
+  || fail "mint authority not with the vault"
 
 # The old keys lost every power they had.
 solana program set-upgrade-authority -u "$URL" "$PROGRAM" --upgrade-authority "$TMP/upgrade.json" \

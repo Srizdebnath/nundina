@@ -1,0 +1,18 @@
+{
+  "cluster": "devnet",
+  "mint": "6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4",
+  "metadata_layout": "token2022-tlv-self-pointer",
+  "admin_authority": "7UdtTMgH4v8YSG8mWX2r8uASgJwAkxyo4h8yb5UEEbuh",
+  "extensions": [
+    "DefaultAccountState:Frozen",
+    "MetadataPointer:self",
+    "PermanentDelegate",
+    "TokenMetadata"
+  ],
+  "pod_space": 275,
+  "final_space": 793,
+  "created": "2026-10-04",
+  "status_label_signature": "3aKX7dMJ51stjfngGvCr7qmKKp3xY7snKQrwMwuddZojpafM5TvucWd8wNezNuxMR3hhj1yxqdB9ipbhkMJvqfR",
+  "supersedes": "Dy1VW2uC8G3PxDkfmJya1tRrzSTWQ18GkbN3qh3mdx2i",
+  "custodian": "8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV"
+}
