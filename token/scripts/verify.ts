@@ -23,7 +23,7 @@ import {
 import { readFile } from "node:fs/promises";
 
 const TOKEN_ACL = address("TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP");
-const CREDIT_GATE = "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c";
+const CREDIT_GATE = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX";
 const bs58 = (b: Uint8Array): string => getAddressDecoder().decode(b);
 const CLUSTER = (process.env.CLUSTER ?? "devnet") as "devnet" | "mainnet";
 const RPC_URL =

@@ -23,8 +23,8 @@ use anchor_lang::solana_program::program::{get_return_data, invoke_signed};
 use crate::error::RailsError;
 use crate::events::{ExemptionPath, LotRef};
 
-/// The credit-gate program (7yRE…Qa9c).
-pub const CREDIT_GATE_ID: Pubkey = pubkey!("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
+/// The credit-gate program (5ycY…X6XX).
+pub const CREDIT_GATE_ID: Pubkey = pubkey!("5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX");
 /// Seed of the settlement PDA that signs the gate CPI. credit-gate pins
 /// the derived address (`SETTLEMENT_AUTHORITY`).
 pub const GATE_SETTLE_SEED: &[u8] = b"gate_settle";

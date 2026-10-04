@@ -12,13 +12,13 @@ skip-lint = false
 members = ["programs/credit-gate"]
 
 [programs.localnet]
-credit-gate = "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
 
 [programs.devnet]
-credit-gate = "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
 
 [programs.mainnet]
-credit-gate = "7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c"
+credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
 
 [registry]
 url = "https://api.apr.dev"

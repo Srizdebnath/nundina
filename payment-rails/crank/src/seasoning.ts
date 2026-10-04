@@ -15,7 +15,7 @@ import { clockNow, type R } from "./chain.ts";
 import type { Outcome } from "./crank.ts";
 import { send, type Ctx } from "./send.ts";
 
-export const CREDIT_GATE = address("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
+export const CREDIT_GATE = address("5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX");
 export const HOLDER_LOTS_LEN = 582;
 const MINT_AT = 8;
 const COUNT_AT = 84;

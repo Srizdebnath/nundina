@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 PROGRAM_ID=GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn
 SO=../target/deploy/payment_rails.so
-GATE_ID=7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c
+GATE_ID=5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX
 GATE_SO=../../target/deploy/credit_gate.so
 SAS_ID=22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG
 SAS_SO=../../programs/credit-gate/tests-svm/fixtures/sas.so

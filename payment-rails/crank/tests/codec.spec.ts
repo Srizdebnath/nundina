@@ -4,7 +4,7 @@ import { AccountRole, address, generateKeyPairSigner } from "@solana/kit";
 import { accountDiscriminator, decodeAccount, decodeAt, decodeEvent, encode, errorCode, errorName, idl, ix } from "../src/idl.ts";
 
 const A = address("GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn");
-const B = address("7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c");
+const B = address("5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX");
 
 test("settle_fill data = discriminator + u32 + u64 + u64 + [u8;32]", async () => {
   const op = await generateKeyPairSigner();

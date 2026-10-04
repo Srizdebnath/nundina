@@ -8,7 +8,7 @@
 # Needs: `anchor build` at the repo root, solana-cli + spl-token, devnet access.
 set -euo pipefail
 cd "$(dirname "$0")"
-GATE=7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c
+GATE=5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX
 SO=../../target/deploy/credit_gate.so
 [ -f "$SO" ] || { echo "missing $SO — run 'anchor build' at the repo root" >&2; exit 1; }
 PORT=${PORT:-8899}
