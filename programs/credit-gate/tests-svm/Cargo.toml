@@ -3,7 +3,7 @@
 # Deliberately its OWN workspace (not a member of the root Cargo.toml):
 # litesvm pulls a large solana runtime tree, and sharing a lockfile with the
 # program would let it bump crates the SBF build depends on. Mirrors
-# payment-rails/tests-svm. Run after `anchor build` at the repo root:
+# payment-rails/tests-svm. build.rs builds the program from source (#169):
 #   cargo test --manifest-path programs/credit-gate/tests-svm/Cargo.toml
 [package]
 name = "credit-gate-svm-tests"

@@ -19,7 +19,9 @@
 //! it cannot read as empty.
 //!
 //! Revocation = this list + attestation expiry (SRS 08 §5). The expiry half
-//! lands with the SAS read (CG-P6, #52).
+//! is `eligibility::evaluate`: an attestation that expires inside the
+//! settlement horizon, or was closed in SAS, fails `validate` and
+//! `settle_check`.
 
 use anchor_lang::prelude::*;
 

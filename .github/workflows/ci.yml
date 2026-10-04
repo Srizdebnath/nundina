@@ -118,8 +118,21 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
+      # build.rs builds the program from source into its OUT_DIR (#169), so
+      # no stale target/deploy .so can be what the tests load.
       - name: Tests (LiteSVM)
         run: cargo test --locked --manifest-path programs/credit-gate/tests-svm/Cargo.toml
+      - name: Tested .so == anchor build .so
+        run: |
+          want=$(sha256sum target/deploy/credit_gate.so | cut -d' ' -f1)
+          found=0
+          for so in $(find programs/credit-gate/tests-svm/target -path '*/out/credit_gate.so'); do
+            found=1
+            got=$(sha256sum "$so" | cut -d' ' -f1)
+            echo "$so $got (anchor build: $want)"
+            [ "$got" = "$want" ] || { echo "::error::the LiteSVM suite ran a different credit_gate.so than anchor build produced"; exit 1; }
+          done
+          [ "$found" = 1 ] || { echo "::error::no build.rs credit_gate.so found"; exit 1; }
 
   app:
     name: app — lint · typecheck · build

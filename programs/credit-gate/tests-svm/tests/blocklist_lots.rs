@@ -1,5 +1,5 @@
 //! #122: the CG-P5 block-list and the CG-P3 lot ledger, against the real
-//! `anchor build` artifact.
+//! SBF build of the current source (build.rs).
 //!
 //! - Only the gate-config authority edits the list; a blocked wallet fails
 //!   `check_blocklist`, cannot open a lot ledger and cannot receive a lot,
