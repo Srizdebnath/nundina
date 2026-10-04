@@ -14,8 +14,12 @@ TMP=$(mktemp -d)
 CONFIG_PDA=$(npx tsx testkit.ts config-pda)
 TREASURY=$(npx tsx testkit.ts treasury)
 
-# A tiny real program to stand in for payment-rails / credit-gate.
+# A tiny real program (SPL noop) to stand in for payment-rails /
+# credit-gate, and a larger real one (memo) to upgrade to, so the upgrade
+# also has to extend ProgramData. ExtendProgramChecked is deactivated to
+# match devnet, where the permissionless ExtendProgram still works.
 solana program dump -u devnet MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr "$TMP/memo.so" >/dev/null
+solana program dump -u devnet noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV "$TMP/noop.so" >/dev/null
 solana-keygen new --no-bip39-passphrase --silent --force -o "$TMP/program.json" >/dev/null
 PROGRAM=$(solana-keygen pubkey "$TMP/program.json")
 solana-keygen new --no-bip39-passphrase --silent --force -o "$TMP/payer.json" >/dev/null
@@ -25,7 +29,8 @@ solana-keygen new --no-bip39-passphrase --silent --force -o "$TMP/npcs-admin.jso
 solana-test-validator --reset --quiet --ledger "$TMP/ledger" --rpc-port "$PORT" -u devnet \
   --clone-upgradeable-program "$SQUADS" --clone "$CONFIG_PDA" --clone "$TREASURY" \
   --clone-upgradeable-program TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP \
-  --upgradeable-program "$PROGRAM" "$TMP/memo.so" "$TMP/upgrade.json" >"$TMP/validator.log" 2>&1 &
+  --deactivate-feature 2oMRZEDWT2tqtYMofhmmfQ8SsjqUFzT6sYXppQDavxwz \
+  --upgradeable-program "$PROGRAM" "$TMP/noop.so" "$TMP/upgrade.json" >"$TMP/validator.log" 2>&1 &
 VPID=$!
 trap 'kill $VPID 2>/dev/null || true; wait $VPID 2>/dev/null || true; rm -rf "$TMP"' EXIT
 URL="http://127.0.0.1:$PORT"
@@ -62,8 +67,9 @@ spl-token initialize-metadata -u "$URL" "$MINT2" NPCS NPCS https://example.inval
 MC=$(npx tsx testkit.ts acl-config "$MINT2" "$TMP/npcs-admin.json")
 npx tsx migrate.ts move-mint "$MINT2" --authority "$TMP/npcs-admin.json"
 npx tsx migrate.ts verify
-spl-token display -u "$URL" "$MINT2" | grep -q "Freeze authority: $MC" || fail "freeze authority left Token ACL"
-spl-token display -u "$URL" "$MINT2" | grep -q "Mint authority: $(node -pe 'JSON.parse(require("fs").readFileSync(process.env.RECORD)).vault')" \
+SHOWN=$(spl-token display -u "$URL" "$MINT2")
+grep -q "Freeze authority: $MC" <<<"$SHOWN" || fail "freeze authority left Token ACL"
+grep -q "Mint authority: $(node -pe 'JSON.parse(require("fs").readFileSync(process.env.RECORD)).vault')" <<<"$SHOWN" \
   || fail "mint authority not with the vault"
 
 # The old keys lost every power they had.
@@ -82,6 +88,28 @@ node -e '
 const r = JSON.parse(require("fs").readFileSync(process.env.RECORD, "utf8"));
 const p = r.proofs[0];
 if (!p || p.approvals.length !== 2 || !p.executeSignature) { console.error("proof incomplete", p); process.exit(1); }'
+
+# #172: the vault upgrades the program from a buffer it controls.
+VAULT=$(node -pe 'JSON.parse(require("fs").readFileSync(process.env.RECORD)).vault')
+pd_sha() { solana program dump -u "$URL" "$PROGRAM" "$TMP/pd.so" >/dev/null && sha256sum "$TMP/pd.so" | cut -d' ' -f1; }
+BEFORE=$(pd_sha)
+BUF=$(solana program write-buffer -u "$URL" "$TMP/memo.so" --keypair "$TMP/payer.json" --output json \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).buffer')
+npx tsx migrate.ts propose-upgrade "$PROGRAM" --buffer "$BUF" >/dev/null 2>&1 \
+  && fail "propose-upgrade accepted a buffer the vault does not control"
+solana program set-buffer-authority -u "$URL" "$BUF" --buffer-authority "$TMP/payer.json" \
+  --new-buffer-authority "$VAULT" --keypair "$TMP/payer.json" >/dev/null
+npx tsx migrate.ts propose-upgrade "$PROGRAM" --buffer "$BUF"
+AFTER=$(pd_sha)
+[ "$AFTER" != "$BEFORE" ] || fail "program bytes unchanged after the vault upgrade"
+# Compare the new build's length; anything after it must be zero padding.
+N=$(stat -c %s "$TMP/memo.so")
+cmp -n "$N" "$TMP/pd.so" "$TMP/memo.so" >/dev/null || fail "upgraded program is not the buffer's build"
+[ -z "$(tail -c +$((N + 1)) "$TMP/pd.so" | tr -d '\0')" ] || fail "bytes after the new build are not zero padding"
+node -e '
+const r = JSON.parse(require("fs").readFileSync(process.env.RECORD, "utf8"));
+const u = r.upgrades?.[0];
+if (!u || u.approvals.length !== 2 || !u.executeSignature) { console.error("upgrade record incomplete", u); process.exit(1); }'
 
 # One approval is not enough: a second proposal with only member-1 stays unexecutable.
 npx tsx testkit.ts single-approval

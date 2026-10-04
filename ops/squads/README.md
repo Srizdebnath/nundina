@@ -12,6 +12,8 @@ in the root [`DEPLOYMENTS.md`](../../DEPLOYMENTS.md).
 | `move-program <id> --authority <kp>` | Loader v3 `SetAuthority` → vault. Refuses unless the signer is the current authority; re-reads ProgramData and fails unless the vault now holds it |
 | `move-mint <mint> --authority <kp>` | Token-2022: mint, freeze, permanent delegate, metadata pointer **and** metadata update authority → vault, in one transaction. Refuses if any of them is held by a key other than the signer (no silent partial custody) |
 | `prove` | Vault transaction (0-lamport self-transfer), proposal, approval by **both** members, then execute once the timelock allows (re-run to resume) |
+| `propose-upgrade <program> --buffer <buf> [--spill <addr>]` | A program upgrade signed by the vault (#172). The buffer must already hold the new build with the vault as its authority (`solana program write-buffer` + `set-buffer-authority`). Extends ProgramData first if the build is larger, using the loader's permissionless `ExtendProgram` paid by `PAYER` (a Squads CPI can grow an account by only 10 KiB). Then the proposal and both approvals, with the buffer's SHA-256 in the record. Execution waits for the timelock |
+| `execute-upgrade <program>` | Executes the pending upgrade once the timelock allows (simulated first, so a failure prints the program logs) |
 | `verify` | Keyless: re-reads the multisig (2-of-2, members, timelock, no config authority), the vault address and every recorded move from chain |
 
 Env: `CLUSTER` (`devnet` / `localnet`), `RPC_URL`, `PAYER` (fee and rent
