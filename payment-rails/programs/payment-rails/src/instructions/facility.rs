@@ -28,7 +28,9 @@ use crate::error::RailsError;
 use crate::events::{FacilityAction, FacilityEvent, PayoutKind, PayoutMade};
 use crate::instructions::payout::load_destination;
 use crate::instructions::token;
-use crate::state::{Advance, Facility, RailsConfig, Repayment, MAX_RATE_BPS};
+use crate::state::{
+    require_operator_role, Advance, EngineGrant, Facility, RailsConfig, Repayment, MAX_RATE_BPS,
+};
 
 fn payout_event(
     kind: PayoutKind,
@@ -75,6 +77,12 @@ pub fn process_open_facility(
     facility_id: u64,
     rate_bps: u64,
 ) -> Result<()> {
+    require_operator_role(
+        &ctx.accounts.config,
+        &ctx.accounts.operator.key(),
+        ctx.remaining_accounts,
+        EngineGrant::ROLE_FACILITY,
+    )?;
     require!(rate_bps <= MAX_RATE_BPS, RailsError::RateTooHigh);
     let curator = ctx.accounts.operator.key();
     let facility_key = ctx.accounts.facility.key();
@@ -326,7 +334,6 @@ pub struct OpenFacility<'info> {
     #[account(
         seeds = [RailsConfig::SEED],
         bump = config.bump,
-        has_one = operator @ RailsError::NotOperator,
         has_one = usdc_mint @ RailsError::MintMismatch
     )]
     pub config: Box<Account<'info, RailsConfig>>,
@@ -349,7 +356,9 @@ pub struct OpenFacility<'info> {
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
-    /// Config operator (facility-engine signer); becomes the curator.
+    /// Config operator, or an engine granted `ROLE_FACILITY` (its
+    /// `EngineGrant` is the first remaining account, #136); becomes the
+    /// curator.
     #[account(mut)]
     pub operator: Signer<'info>,
     pub token_program: Interface<'info, TokenInterface>,

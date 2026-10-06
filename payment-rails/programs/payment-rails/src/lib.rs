@@ -87,6 +87,17 @@ pub mod payment_rails {
         instructions::admin::process_set_registrar(ctx, registrar)
     }
 
+    /// #136: admit an engine signer PDA as operator for `roles`
+    /// (`EngineGrant::ROLE_*`). Authority only.
+    pub fn grant_engine(ctx: Context<GrantEngine>, engine: Pubkey, roles: u8) -> Result<()> {
+        instructions::admin::process_grant_engine(ctx, engine, roles)
+    }
+
+    /// #136: change or revoke (`roles = 0`) an engine grant. Authority only.
+    pub fn set_engine_roles(ctx: Context<SetEngineRoles>, roles: u8) -> Result<()> {
+        instructions::admin::process_set_engine_roles(ctx, roles)
+    }
+
     /// AE-P1/P3: open a cash session with snapshotted parameters (operator).
     pub fn open_session(
         ctx: Context<OpenSession>,
