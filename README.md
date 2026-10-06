@@ -100,6 +100,7 @@ nundina/
 │   ├── liquidity-facility/   ← advances at MARK_PROTECTIVE + liquidation ladder (#139)
 │   ├── queue-claim/          ← redemption-queue claims: sell or pledge (#138)
 │   ├── tranche-engine/       ← senior/junior tranching, three-book accounting (#140)
+│   ├── npcs-treasury/        ← I1 mint-on-deposit treasury: the only NPCS mint path (#148)
 │   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical

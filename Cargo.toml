@@ -15,6 +15,8 @@ members = [
     "programs/queue-claim",
     # P5: senior/junior tranching, three-book accounting (#140).
     "programs/tranche-engine",
+    # I1 mint-on-deposit treasury (#148).
+    "programs/npcs-treasury",
 ]
 
 [workspace.package]
