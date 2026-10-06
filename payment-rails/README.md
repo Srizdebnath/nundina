@@ -51,15 +51,15 @@ to_seller  = gross − fee − to_reserve                → seller's own USDC a
 qty                                                  → buyer's own asset account (same instruction)
 ```
 
-> **Fee posture: open legal item (#59).** doc 07 AE-3 requires *no
-> protocol-collected per-trade fee*. The rails take `fee_bps` (≤ 200) and
-> `reserve_bps` (≤ 200) on every fill, into accounts held by the rails
-> authority wallet, and nothing binds the fee to an operator or licensee
-> identity. doc 07 L2 names this fact pattern as broker-indicia risk. The
-> caps bound the *size*, not the *recipient*. Until counsel answers Q2, keep
-> `fee_bps` at pilot level and treat any change to it as a legal decision,
-> not a parameter tweak. Every fill's `FillSettled` event already discloses
-> `fee` and `to_reserve`.
+> **Fee posture: resolved in code (#147, #59).** doc 07 AE-3 requires *no
+> protocol-collected per-trade fee*, so `MAX_FEE_BPS` is **0**: `set_fees`
+> refuses any fee, `open_session` refuses a config that still carries one
+> (the pre-#147 devnet config's 10 bps must be reset with
+> `set_fees(0, reserve_bps)` at the upgrade), and every split's `fee` line
+> is 0. The `reserve_bps` cut (≤ 200) stays: it funds the protocol reserve
+> that absorbs forfeitures and shortfalls, is never revenue, and is
+> disclosed on every `FillSettled`. Reintroducing a fee is a legal decision
+> (doc 07 L2), not a parameter change.
 
 `to_seller + fee + to_reserve == gross` always holds. That's checked by a
 360-combination sweep in the unit tests (not exhaustive over `u64`) and

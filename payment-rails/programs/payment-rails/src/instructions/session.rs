@@ -7,7 +7,8 @@ use anchor_spl::token_interface::Mint;
 use crate::error::RailsError;
 use crate::events::{EscrowAction, EscrowEvent, SessionAction, SessionEvent};
 use crate::state::{
-    require_operator_role, CashSession, EngineGrant, Escrow, RailsConfig, SessionStatus,
+    fee_within_cap, require_operator_role, CashSession, EngineGrant, Escrow, RailsConfig,
+    SessionStatus,
 };
 
 /// Operator-chosen session parameters, snapshotted at open (AE-P1, L5).
@@ -43,6 +44,9 @@ pub fn process_open_session(
         EngineGrant::ROLE_SESSIONS,
     )?;
     cfg.ensure_accepting()?;
+    // AE-3 (#147): a config written before the fee was removed (devnet:
+    // 10 bps) can never snapshot a fee into a session.
+    require!(fee_within_cap(cfg.fee_bps), RailsError::FeeTooHigh);
     let now = Clock::get()?.unix_timestamp;
     let SessionParams {
         commit_end,

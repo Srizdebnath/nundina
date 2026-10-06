@@ -7,7 +7,7 @@ use crate::error::RailsError;
 use crate::events::{
     Breaker, BreakerChanged, ConfigChange, EngineGrantChanged, RailsConfigUpdated,
 };
-use crate::state::{EngineGrant, RailsConfig, MAX_FEE_BPS, MAX_RESERVE_BPS};
+use crate::state::{fee_within_cap, EngineGrant, RailsConfig, MAX_RESERVE_BPS};
 
 pub fn process_set_operator(ctx: Context<AdminConfig>, operator: Pubkey) -> Result<()> {
     let authority_key = ctx.accounts.authority.key();
@@ -40,7 +40,7 @@ pub fn process_set_registrar(ctx: Context<AdminConfig>, registrar: Pubkey) -> Re
 /// snapshot these at open, so a change never re-prices a live session.
 pub fn process_set_fees(ctx: Context<AdminConfig>, fee_bps: u16, reserve_bps: u16) -> Result<()> {
     require!(
-        fee_bps <= MAX_FEE_BPS && reserve_bps <= MAX_RESERVE_BPS,
+        fee_within_cap(fee_bps) && reserve_bps <= MAX_RESERVE_BPS,
         RailsError::FeeTooHigh
     );
     let authority_key = ctx.accounts.authority.key();

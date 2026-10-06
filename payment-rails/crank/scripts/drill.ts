@@ -80,7 +80,7 @@ async function waitUntil(ctx: Ctx, t: bigint): Promise<void> {
 function split(qty: bigint, price: bigint) {
   const n = qty * price;
   const gross = n / UNIT + (n % UNIT ? 1n : 0n);
-  const fee = (gross * 10n) / 10_000n;
+  const fee = 0n; // no protocol per-trade fee (AE-3, #147)
   const res = (gross * 5n) / 10_000n;
   return { gross, fee, res, seller: gross - fee - res };
 }
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
       program_data: programData, token_program: TOKEN_PROGRAM_ADDRESS,
     }),
   ]);
-  await must(ops, "set_fees", [ix("set_fees", { config, authority }, { fee_bps: 10, reserve_bps: 5 })]);
+  await must(ops, "set_fees", [ix("set_fees", { config, authority }, { fee_bps: 0, reserve_bps: 5 })]);
 
   // #127: a bonded keeper (its own wallet, not the operator's).
   const [KEEPER_BOND, REWARD, SLA] = [10n * USDC, 1n * USDC, 4n];
