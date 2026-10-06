@@ -1,0 +1,29 @@
+[package]
+name = "tranche-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "SPV-configured senior/junior tranching over NPCS collateral: three-book accounting, cash waterfall through payment-rails, loss/recovery waterfalls, subordination invariant (SRS 08 §4.6, TE-P1..P7)."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "tranche_engine"
+
+[features]
+default = []
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "payment-rails/idl-build", "mark-engine/idl-build"]
+
+[dependencies]
+# Exact pins: SRS locks anchor 1.1.x (see credit-gate/Cargo.toml).
+anchor-lang = { version = "=1.1.2" }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022", "token_2022_extensions"] }
+credit-math = { path = "../credit-math" }
+# TE-P4 coupon cash (distribute_coupon, EngineGrant role COUPON).
+payment-rails = { path = "../../payment-rails/programs/payment-rails", features = ["cpi"] }
+# TE-P3 MARK book at MARK_PROTECTIVE.
+mark-engine = { path = "../mark-engine", features = ["cpi"] }
+
+[dev-dependencies]

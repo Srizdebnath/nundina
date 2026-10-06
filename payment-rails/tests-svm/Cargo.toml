@@ -19,6 +19,13 @@ publish = false
 payment-rails = { path = "../programs/payment-rails", features = ["no-entrypoint"] }
 # The gate every fill CPIs (#133): its account types and instruction builders.
 credit-gate = { path = "../../programs/credit-gate", features = ["no-entrypoint"] }
+# The engines that drive the rails (#136–#140), loaded from the root
+# workspace's `anchor build` like credit-gate.
+mark-engine = { path = "../../programs/mark-engine", features = ["no-entrypoint"] }
+auction-engine = { path = "../../programs/auction-engine", features = ["no-entrypoint"] }
+liquidity-facility = { path = "../../programs/liquidity-facility", features = ["no-entrypoint"] }
+queue-claim = { path = "../../programs/queue-claim", features = ["no-entrypoint"] }
+tranche-engine = { path = "../../programs/tranche-engine", features = ["no-entrypoint"] }
 # Read-only: the H1 ceiling the facility tests bound advances by (#94).
 credit-math = { path = "../../programs/credit-math" }
 anchor-lang = { version = "=1.1.2" }

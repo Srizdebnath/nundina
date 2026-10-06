@@ -41,15 +41,15 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | AC | Grade | What exists / what blocks it |
 |---|---|---|
 | AC-1 | ⚠️ passes off-chain-of-record | SAS credential + 3 schemas live on devnet; `validate` + Token ACL hooks thaw an attested wallet and reject an ineligible one with a typed reason, on a validator with the real SAS and Token ACL programs (`ops/gate/test-localnet.sh`, `tests-svm/tests/sas_token_acl.rs`). Not yet on the NPCS mint: needs the gate redeploy (`Bprm…`, #45) and the freeze authority handed to Token ACL (`2xhj…`) |
-| AC-2 | 🗺 | `mark-engine` and `nav-publisher` have no code; NAV math is in `credit-math` (`nav.rs`) with no consumer |
-| AC-3 | ⚠️ cash leg only | `payment-rails` escrow + one-fill DvP cash leg (live devnet, R5 on a manifest mint, not live NPCS). `auction-engine` has no code |
-| AC-4 | 🗺 | needs `auction-engine` + `mark-engine` |
-| AC-5 | ⚠️ cash leg only | `payment-rails` ROFR cash path; no session state machine around it |
+| AC-2 | ⚠️ program only | `mark-engine` (#137): publisher-set `publish_nav`, Fresh→Warned→Stale→Fresh by age with evented transitions, explicit Suspended (LiteSVM `tests-svm/tests/mark.rs`). No `nav-publisher` and no devnet feed yet, so no 4-week record |
+| AC-3 | ⚠️ code, LiteSVM | `auction-engine` (#136): 3 bidders + a seller commit with rails escrow, reveal, clear at one uniform price, split the margin pro-rata, settle per fill through rails `settle_fill` (credit-gate `settle_check` on each), print into `mark-engine` (`payment-rails/tests-svm/tests/auction.rs`). Not deployed; no devnet session |
+| AC-4 | ⚠️ code, LiteSVM | the same session clears at 0.95 against a Fresh 1.00 NAV (reserve 0.90 = NAV_effective × (1 − 10%)); the eligible print moves `MARK_PROTECTIVE` to 0.95 (#136, #137) |
+| AC-5 | ⚠️ code, LiteSVM | `exercise_rofr` takes part of a fill at the clearing price through rails `settle_rofr_fill`; `close_rofr` declines/ends the window (#136). The multisig as ROFR authority is a devnet step |
 | AC-6 | ⚠️ ledger only | `credit-gate` lot ledger (#122): lots season by the config's `seasoning_seconds`, splits keep seasoning, permissionless `merge_expired` into FREE (LiteSVM). No auction session sells against it, and no fee pays the merge crank |
 | AC-7 | ⚠️ gate side | holder governor counts attested `investor_id`s against `holder_cap` (a second wallet of one investor counts once; `release_holder` frees the slot; `project_and_check` for allocation). No auction session yet to reallocate a rejected bid |
-| AC-8 | ⚠️ cash leg only | facility advance/repay/sweep in `payment-rails`; `queue-claim` has no code, so neither the sell path nor the pledge path exists. **The headline demo is unshipped** |
-| AC-9 | 🗺 **re-graded (#124)** | No liquidation instruction and no ladder (ROFR → backstop → forced sale → workout) anywhere; no `mark-engine`, so "no liquidation on a stale mark" (H4, LF-P4) has no implementation and no test. What exists: the H1 advance-rate ceiling on `payment-rails` advances |
-| AC-10 | ⚠️ cash leg only | exact-conservation cash waterfall in `payment-rails` + `credit-math`; no `tranche-engine` (no tranches, no subordination check) |
+| AC-8 | ⚠️ code, LiteSVM (#138) | a real request is attested into a claim token; **sell path**: the claim clears at 9.50 in an `auction-engine` session (own gate market + mark feed from `quote_pv`), the next window pays the buyer; **pledge path**: the claim backs a `liquidity-facility` advance, window fills sweep facility-first through rails `sweep_proceeds`, the advance closes and the claim is released. Not deployed |
+| AC-9 | ⚠️ code, LiteSVM (#139) | `liquidity-facility`: a drill mark (`publish_drill_nav`, evented `admin_drill`) breaches a position; grace, then the ladder: issuer ROFR at `MARK_PROTECTIVE` → backstop at its haircut (shortfall booked) → forced-sale `auction-engine` session (flagged print, excluded from marks) → workout of the unsold rest. Stale and Suspended marks refuse every step (H4). `payment-rails/tests-svm/tests/facility.rs`. Not deployed |
+| AC-10 | ⚠️ code, LiteSVM (#140) | `tranche-engine`: pool needs `legal_doc_hash` + `waterfall_version`; 100 NPCS → 80 senior / 20 junior; one 30-day period of 2 USDC runs fees → senior coupon → reserve → junior coupon → residual through rails `distribute_coupon` with exact conservation; a junior exit that would breach 20% is rejected; mark-down impairs without touching principal; loss junior → reserve → senior, recovery senior first. Not deployed |
 | AC-11 | ✅ devnet | permissionless never-pausable refunds + kill-the-crank drill (CI and devnet) |
 | AC-12 | ⚠️ payment-rails only | `crank export` bundles payment-rails events with a SHA-256 manifest; no marks to reproduce (no `mark-engine`) |
 
@@ -59,9 +59,9 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | Item | Grade | Detail |
 |---|---|---|
 | H1 max advance rate 50% | ⚠️ | enforced by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ mark × rate. The **mark is curator-stated**: no `mark-engine` exists to verify it |
-| H2 min subordination floor | 🗺 | no value in the plan of record; no `tranche-engine` |
-| H3 max discount / reserve bound | 🗺 | no value in the plan of record; no `auction-engine` reserve check |
-| H4 no liquidation on a stale mark | 🗺 | no `mark-engine`, no liquidation instruction (#124) |
+| H2 min subordination floor | ⚠️ | `tranche-engine` enforces each pool's attachment point (TE-P5), bounded below by an **interim** hard floor `MIN_ATTACHMENT_BPS` = 5% (#140); the plan-of-record value still needs sign-off |
+| H3 max discount / reserve bound | ⚠️ | `auction-engine` enforces the reserve floor `NAV_effective × (1 − max_discount_bps)` per session, bounded by an **interim** hard ceiling `MAX_DISCOUNT_BPS` = 50% (#136). The plan-of-record value still needs sign-off |
+| H4 no liquidation on a stale mark | ⚠️ code | `liquidity-facility` `start_liquidation`, `ladder_buy` and `open_forced_sale` require `Feed::allows_liquidation` (Fresh/Warned); tested Suspended and Stale-by-age (#139). Not deployed |
 | H5 timeout refund path | ✅ | `payment-rails` refunds (AC-11) |
 
 H2 and H3 need a dated value decision before any constant lands
@@ -212,7 +212,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.2 `auction-engine` (Anchor; audit-scope-critical for escrow paths)
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The escrow, refund and DvP *cash* legs exist in `payment-rails` (§4.7).
+> **As built (2026-10, #136): program built, not deployed** (`programs/auction-engine`, id `Cw6w…Sod7`). It never holds a token: every escrow, fill, ROFR fill, failure and finish is a `payment-rails` CPI signed by its operator PDA `["rails_operator"]`, admitted on the rails by an `EngineGrant` (`grant_engine`, role SESSIONS). AE-P1 snapshot at open (forced-sale sessions only from the venue's `forced_sale_opener`); AE-P2 phases Commit → Reveal → Allocating → IssuerRofr → Settling → Printed / Failed, every transition evented; AE-P3 `sha256(side ‖ limit ‖ qty ‖ nonce ‖ owner)` + rails escrow in one instruction, 16-order book; AE-P4 preimage + escrow-budget check, then rails `mark_revealed`; AE-P5 `credit_math::find_uniform_clear_price` with reserve = NAV_effective × (1 − max_discount) and reference = `MARK_PROTECTIVE`; too few reveals / no cross / suspended mark ⇒ Failed; AE-P6 `allocate_pro_rata` on the long side and chunked, resumable pairing (governor headroom is enforced by the gate at admission and re-checked by `settle_check`); AE-P7 `exercise_rofr` / `close_rofr`; AE-P8 permissionless `settle(fill_index)`; AE-P9 `finish` → rails `finish_session` + `ClearingPrint` and mark-engine `record_print` (`n_investor_ids` counts distinct wallets); AE-P10 `expire` + the rails' permissionless refunds; AE-P11 forced-sale flag excluded by mark-engine. Tests: `payment-rails/tests-svm/tests/auction.rs`.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -232,7 +232,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.3 `mark-engine`
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** NAV and haircut math exist in `credit-math` with no program consumer.
+> **As built (2026-10, #137): program built, not deployed** (`programs/mark-engine`, id `79yp…x4LH`). ME-P1 publisher-set `publish_nav` storing `model_version` + `inputs_hash` (the SAS attestation is signed off-chain by the same publisher key; on-chain it is the publisher-set check); ME-P2 states with permissionless `refresh`; ME-P3 haircuts bounded by `MAX_WARNED_HAIRCUT_BPS` / `MAX_STALE_HAIRCUT_BPS`; ME-P4 `record_print` from the configured print source only (auction-engine's print PDA), eligibility = not forced-sale, min volume, min investor_ids, outlier band; ME-P5 `Feed::mark_protective`; ME-P6 PUBLIC/BANDED/AGGREGATE_ONLY/DATA_ROOM disclosure; ME-P7 `BreakerLevel` + `allows_liquidation` / `allows_new_advance`. `publish_drill_nav` (devnet drills only) is evented `admin_drill`. Tests: unit + LiteSVM `payment-rails/tests-svm/tests/mark.rs`.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -248,7 +248,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.4 `queue-claim`
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The QC-P4 sweep order exists in `payment-rails` `sweep_proceeds`.
+> **As built (2026-10, #138): program built, not deployed** (`programs/queue-claim`, id `2EpA…red4`). QC-P1 `request_redemption` (NPCS into a request vault) + `attest` by the configured attester (rank + expected-fill schedule; the attester key is the issuer/TA bridge — an SAS `redemption_request` attestation read is not wired yet); QC-P2 claim position token = Token-2022 mint per request, supply 1, decimals 0, frozen until `set_flags` (issuer consent; transferable / pledgeable independent), states Requested → Attested → PartiallyFilled → Retired, Cancelled, Frozen, Restructured (`set_state`); QC-P3 `quote_pv` (`credit_math::pv_of_claim` × the asset's `MARK_PROTECTIVE`) — the claim trades in `auction-engine` with its own gate market and mark feed; QC-P4 `pledge` (→ `liquidity-facility`), `record_fill`, `collect`, `sweep_pledged` (rails `sweep_proceeds`), `discharge`; QC-P5 a separate mint, never counted in the NPCS governor. **Gaps:** each claim mint needs its gate market and mark feed set up by ops (the tests do it with the gate/feed authorities); the claim's first gate lot is appended by the gate authority, not by `attest`.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -262,7 +262,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.5 `liquidity-facility`
 
-> **As built (2026-10, #124): 🗺 roadmap for the engine.** `payment-rails` carries the cash leg (open/fund facility, advance under the H1 ceiling, repay, sweep). LF-P3 (health check), LF-P4 (no liquidation on a stale mark) and LF-P5 (the ladder) have no code; AC-9 is re-graded 🗺 in §1.1.
+> **As built (2026-10, #139): program built, not deployed** (`programs/liquidity-facility`, id `PTNC…7hY`). LF-P1 `pledge_and_advance`: collateral to a per-position vault, value at `MARK_PROTECTIVE`, rate ≤ curator rate ≤ H1, Fresh mark only, cash via rails `advance_funds` (signer PDA = rails curator through an `EngineGrant`, role FACILITY); LF-P2 rails facility fund; LF-P3 `check_health` (rails debt accrued to now vs maintenance LTV; breach ↔ cure), `add_collateral`; LF-P4 every liquidation step reads `allows_liquidation`; LF-P5 `start_liquidation` after grace → `ladder_buy` (issuer at MARK_PROTECTIVE / backstop at its haircut) → `pass_step` → `open_forced_sale` / `list_forced_sale` / `reveal_forced_sale` (auction-engine, forced flag) → `settle_forced_sale` (rails `repay` first, surplus to the borrower, shortfall booked, unsold collateral to the lender workout account); `release` after full repayment. **Gap:** a pledge does not move the borrower's gate lots to the custody PDA; the forced-sale seller (the PDA) must be admitted and hold seasoned lots (the test does this through the gate authority).
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -277,7 +277,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.6 `tranche-engine`
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The TE-P4 cash waterfall exists in `payment-rails` + `credit-math`.
+> **As built (2026-10, #140): program built, not deployed** (`programs/tranche-engine`, id `Cvca…cFAS`). TE-P1 `create_pool` requires `legal_doc_hash` + `waterfall_version`; TE-P2 `deposit` at `MARK_PROTECTIVE` (Fresh mark) mints senior/junior Token-2022 tranches, junior accounts frozen; TE-P3 `mark` (MARK book), `realise_loss` (`credit_math::apply_loss`), `record_recovery` (senior first); TE-P4 `distribute` accrues coupons/fees per second and moves the period's cash through rails `distribute_coupon` (signer PDA, `EngineGrant` role COUPON), booking reserve + amortization; TE-P5 `exit_junior` checks the post-exit invariant, marks/losses impair; TE-P6 `set_pool_state`; TE-P7 `human_override` with an authority-document hash. **Pilot limits:** one registered payee per tranche (rails pays one senior and one junior destination); wind-down through an auction session is not wired.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -302,6 +302,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 | AE-P3 / AE-P4 | pre-funded bid escrow + forfeitable bond; ask escrow (asset + bond) | ✅ R1/R2 |
 | AE-P7 | issuer ROFR cash-for-asset fill | ✅ R2 |
 | AE-P8 | one-fill-per-instruction atomic DvP; each fill CPIs credit-gate `settle_check` first (block-list both sides, buyer attestations re-read, seller's seasoned lots debited, buyer lot appended); `TransferInstruction` carries lots, exemption basis and `gate_check = Passed`, so evidence manifests count fills as `proven` (#133, #134) | ✅ R2 + gate (#133) |
+| Engine signers (#136) | `grant_engine` / `set_engine_roles` (authority only): an `EngineGrant` PDA lets an engine's signer PDA act as operator for `open_session` (SESSIONS), `open_facility` (FACILITY) or `distribute_coupon` (COUPON), presented as the first remaining account; the config `operator` still works unchanged | ✅ #136 |
 | AE-P10 | permissionless, never-pausable refunds; PDA-only escrow; completes even on a delegate-drained vault and books the shortfall (#89); frozen destinations fail typed (#90) | ✅ R1 (+#62, #89, #90) |
 | LF-P1 (H1 only) | `advance_rate_bps ≤ 50%` hard ceiling and `amount ≤ collateral mark × rate`, recorded on the `Advance`; the mark is curator-supplied; maintenance ratio, state and health are not built | ⚠️ R3 + #94 |
 | LF-P2 / LF-P6 | facility fund, advances to registered destinations, simple-interest accrual, repayment | ✅ R3 |
@@ -366,7 +367,7 @@ in contradiction.
 | api | ❌ no route handlers | P6 (#10) |
 | nav-publisher | ❌ no cron, key, publisher set or `publish_nav` (no mark-engine) | P2 (#6); the arithmetic exists in `credit-math` |
 | treasury-agent | 🟡 manual checklist in `token/runbook.md` § Treasury (sleeve reconciliation) | No Kamino integration; backup mode is a plain USDC account |
-| crank-runner | 🟡 settlement pagination + refunds, idempotent on on-chain state; **escalating priority fee (×1.5 per retry from a floor) + ±10% jitter on fee and backoff (D11)**; kill-switch drill in CI | **Bonded keepers (#127):** USDC bond in a PDA vault, per-session SLA, `refund_escalated` pays any caller from the bond past the SLA (doc 06 §8), in the drill. **Seasoning crank** for credit-gate `merge_expired`. Still no phase-deadline or distribution cranks: `auction-engine` and `tranche-engine` don't exist (#136, #140) |
+| crank-runner | 🟡 settlement pagination + refunds, idempotent on on-chain state; **escalating priority fee (×1.5 per retry from a floor) + ±10% jitter on fee and backoff (D11)**; kill-switch drill in CI | **Bonded keepers (#127):** USDC bond in a PDA vault, per-session SLA, `refund_escalated` pays any caller from the bond past the SLA (doc 06 §8), in the drill. **Seasoning crank** for credit-gate `merge_expired`. **Phase-deadline crank** (#149): `crank phases --session` plans and sends `clear` / `allocate` / `close_rofr` / `settle` / `finish` / `expire` for auction-engine sessions (planner + IDL decoder unit-tested; not yet run on a validator, the engines are not deployed). Distribution is tranche-engine's permissionless `distribute`, run by whoever pays the period cash |
 | evidence-exporter | 🟡 program-scoped JSONL of the rails' own events + SHA-256 manifest, **ed25519-signed** by the exporting key; `crank verify-export` checks hash, count and signature offline (#127) | Not session-scoped, no marks or model versions yet |
 
 ---

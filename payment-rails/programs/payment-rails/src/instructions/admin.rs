@@ -4,8 +4,10 @@
 use anchor_lang::prelude::*;
 
 use crate::error::RailsError;
-use crate::events::{Breaker, BreakerChanged, ConfigChange, RailsConfigUpdated};
-use crate::state::{fee_within_cap, RailsConfig, MAX_RESERVE_BPS};
+use crate::events::{
+    Breaker, BreakerChanged, ConfigChange, EngineGrantChanged, RailsConfigUpdated,
+};
+use crate::state::{fee_within_cap, EngineGrant, RailsConfig, MAX_RESERVE_BPS};
 
 pub fn process_set_operator(ctx: Context<AdminConfig>, operator: Pubkey) -> Result<()> {
     let authority_key = ctx.accounts.authority.key();
@@ -87,5 +89,76 @@ pub struct AdminConfig<'info> {
     )]
     pub config: Account<'info, RailsConfig>,
     /// Squads 2-of-2 authority (checked by `has_one`).
+    pub authority: Signer<'info>,
+}
+
+/// #136: admit `engine` (an engine program's signer PDA) to act as operator
+/// for `roles`. Authority only, evented.
+pub fn process_grant_engine(ctx: Context<GrantEngine>, engine: Pubkey, roles: u8) -> Result<()> {
+    require!(
+        roles != 0 && roles & !EngineGrant::ALL_ROLES == 0,
+        RailsError::EngineNotGranted
+    );
+    ctx.accounts.grant.set_inner(EngineGrant {
+        engine,
+        roles,
+        bump: ctx.bumps.grant,
+    });
+    emit!(EngineGrantChanged {
+        engine,
+        roles,
+        authority: ctx.accounts.authority.key(),
+    });
+    Ok(())
+}
+
+/// #136: change or revoke (`roles = 0`) an engine grant. Authority only.
+pub fn process_set_engine_roles(ctx: Context<SetEngineRoles>, roles: u8) -> Result<()> {
+    require!(
+        roles & !EngineGrant::ALL_ROLES == 0,
+        RailsError::EngineNotGranted
+    );
+    let grant = &mut ctx.accounts.grant;
+    grant.roles = roles;
+    emit!(EngineGrantChanged {
+        engine: grant.engine,
+        roles,
+        authority: ctx.accounts.authority.key(),
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(engine: Pubkey)]
+pub struct GrantEngine<'info> {
+    #[account(
+        seeds = [RailsConfig::SEED],
+        bump = config.bump,
+        has_one = authority @ RailsError::Unauthorized
+    )]
+    pub config: Account<'info, RailsConfig>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + EngineGrant::INIT_SPACE,
+        seeds = [EngineGrant::SEED, engine.as_ref()],
+        bump
+    )]
+    pub grant: Account<'info, EngineGrant>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetEngineRoles<'info> {
+    #[account(
+        seeds = [RailsConfig::SEED],
+        bump = config.bump,
+        has_one = authority @ RailsError::Unauthorized
+    )]
+    pub config: Account<'info, RailsConfig>,
+    #[account(mut, seeds = [EngineGrant::SEED, grant.engine.as_ref()], bump = grant.bump)]
+    pub grant: Account<'info, EngineGrant>,
     pub authority: Signer<'info>,
 }

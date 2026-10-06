@@ -1,0 +1,30 @@
+[package]
+name = "auction-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "Sealed-bid uniform-price batch auction: commit, reveal, clear, pro-rata allocation, issuer ROFR, per-fill DvP through payment-rails, print into mark-engine (SRS 08 §4.2, AE-P1..P11). Audit-scope-critical."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "auction_engine"
+
+[features]
+default = []
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build", "payment-rails/idl-build", "mark-engine/idl-build"]
+
+[dependencies]
+# Exact pin: SRS locks anchor 1.1.x (see credit-gate/Cargo.toml).
+anchor-lang = { version = "=1.1.2" }
+credit-math = { path = "../credit-math" }
+# Every cash and asset movement is a payment-rails CPI (SRS §4.7).
+payment-rails = { path = "../../payment-rails/programs/payment-rails", features = ["cpi"] }
+# Reserve floor and reference mark (AE-P5); the print (AE-P9).
+mark-engine = { path = "../mark-engine", features = ["cpi"] }
+# Commitment preimage hash (same crate and pin as credit-gate).
+solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }
+
+[dev-dependencies]

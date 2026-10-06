@@ -1,0 +1,31 @@
+[package]
+name = "liquidity-facility"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "NAV-collateralized advances underwritten at MARK_PROTECTIVE, maintenance health checks, no liquidation on a stale mark, and the liquidation ladder issuer ROFR -> backstop -> forced-sale auction -> workout (SRS 08 §4.5, LF-P1..P6). Audit-scope-critical."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "liquidity_facility"
+
+[features]
+default = []
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "payment-rails/idl-build", "mark-engine/idl-build", "auction-engine/idl-build"]
+
+[dependencies]
+# Exact pins: SRS locks anchor 1.1.x (see credit-gate/Cargo.toml).
+anchor-lang = { version = "=1.1.2" }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022"] }
+credit-math = { path = "../credit-math" }
+# Cash: advances, repayments (SRS §4.7).
+payment-rails = { path = "../../payment-rails/programs/payment-rails", features = ["cpi"] }
+# MARK_PROTECTIVE and the H4 / LF-P4 state gate.
+mark-engine = { path = "../mark-engine", features = ["cpi"] }
+# Ladder step 3: the forced-sale session (AE-P11).
+auction-engine = { path = "../auction-engine", features = ["cpi"] }
+
+[dev-dependencies]

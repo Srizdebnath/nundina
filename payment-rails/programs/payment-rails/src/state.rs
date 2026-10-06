@@ -1184,3 +1184,58 @@ mod tests {
         }
     }
 }
+
+/// #136: an engine program's signer PDA admitted by the config authority to
+/// act as operator for some roles, next to `RailsConfig.operator`. Several
+/// engines (auction-engine sessions, liquidity-facility facilities,
+/// tranche-engine coupons) can then drive the rails at once without
+/// re-pointing the single operator. Presented as the first remaining
+/// account of the instruction that needs it, so existing clients that sign
+/// as the config operator are unchanged.
+#[account]
+#[derive(InitSpace)]
+pub struct EngineGrant {
+    /// The engine's signer (a PDA of the engine program).
+    pub engine: Pubkey,
+    /// Bitmask of `EngineGrant::ROLE_*`; 0 = revoked.
+    pub roles: u8,
+    pub bump: u8,
+}
+
+impl EngineGrant {
+    pub const SEED: &'static [u8] = b"engine";
+    /// `open_session` (auction-engine).
+    pub const ROLE_SESSIONS: u8 = 1;
+    /// `open_facility` (liquidity-facility).
+    pub const ROLE_FACILITY: u8 = 2;
+    /// `distribute_coupon` (tranche-engine).
+    pub const ROLE_COUPON: u8 = 4;
+    pub const ALL_ROLES: u8 = Self::ROLE_SESSIONS | Self::ROLE_FACILITY | Self::ROLE_COUPON;
+}
+
+/// Accept `signer` as the operator for `role`: either it is the config
+/// operator, or `remaining[0]` is its live `EngineGrant` carrying `role`.
+pub fn require_operator_role(
+    cfg: &RailsConfig,
+    signer: &Pubkey,
+    remaining: &[AccountInfo],
+    role: u8,
+) -> Result<()> {
+    if *signer == cfg.operator {
+        return Ok(());
+    }
+    // No grant presented: the pre-#136 answer, unchanged for old clients.
+    let ai = remaining.first().ok_or(RailsError::NotOperator)?;
+    require_keys_eq!(*ai.owner, crate::ID, RailsError::EngineNotGranted);
+    let grant = EngineGrant::try_deserialize(&mut &ai.try_borrow_data()?[..])
+        .map_err(|_| error!(RailsError::EngineNotGranted))?;
+    let expected = Pubkey::create_program_address(
+        &[EngineGrant::SEED, signer.as_ref(), &[grant.bump]],
+        &crate::ID,
+    )
+    .map_err(|_| error!(RailsError::EngineNotGranted))?;
+    require_keys_eq!(ai.key(), expected, RailsError::EngineNotGranted);
+    require_keys_eq!(grant.engine, *signer, RailsError::EngineNotGranted);
+    require!(grant.roles & role != 0, RailsError::EngineNotGranted);
+    Ok(())
+}

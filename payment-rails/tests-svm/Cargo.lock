@@ -596,6 +596,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eab1c04a571841102f5345a8fc0f6bb3d31c315dec879b5c6e42e40ce7ffa34e"
 
 [[package]]
+name = "auction-engine"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "credit-math",
+ "mark-engine",
+ "payment-rails",
+ "solana-sha256-hasher",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1678,6 +1689,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "liquidity-facility"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "auction-engine",
+ "credit-math",
+ "mark-engine",
+ "payment-rails",
+]
+
+[[package]]
 name = "litesvm"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1758,6 +1781,14 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "mark-engine"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "credit-math",
+]
 
 [[package]]
 name = "memchr"
@@ -1976,11 +2007,15 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "auction-engine",
  "base64 0.22.1",
  "credit-gate",
  "credit-math",
+ "liquidity-facility",
  "litesvm",
+ "mark-engine",
  "payment-rails",
+ "queue-claim",
  "solana-account",
  "solana-instruction-error",
  "solana-keypair",
@@ -1988,6 +2023,7 @@ dependencies = [
  "solana-signer",
  "solana-transaction",
  "solana-transaction-error",
+ "tranche-engine",
 ]
 
 [[package]]
@@ -2087,6 +2123,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "queue-claim"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "credit-math",
+ "liquidity-facility",
+ "mark-engine",
+ "payment-rails",
 ]
 
 [[package]]
@@ -4348,6 +4396,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
 dependencies = [
  "winnow",
+]
+
+[[package]]
+name = "tranche-engine"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "credit-math",
+ "mark-engine",
+ "payment-rails",
 ]
 
 [[package]]

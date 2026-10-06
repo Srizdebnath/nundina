@@ -48,11 +48,15 @@ decisions and on a payout registry that only admits attested wallets.
 
 ## 4 · From `auction-engine` (caller of the rails)
 
-❓ Q1: who builds the auction state machine is still open. The rails expose
-**cash primitives**. The engine owns phases, clearing and reveal checking.
-Until it exists, the rails keep their own minimal `CashSession` holding the
-deadlines, and the **operator** (`RailsConfig.operator`, re-pointable with
-`set_operator`) stands in for the engine.
+Q1 is answered (#136): `programs/auction-engine` is the engine. The rails
+expose **cash primitives**; the engine owns phases, clearing and reveal
+checking. Its signer PDA `["rails_operator"]` (program `Cw6w…Sod7`) is
+admitted by an **`EngineGrant`** (`grant_engine(engine, roles)`, authority
+only; PDA `["engine", engine]`) with role `ROLE_SESSIONS`, passed as the
+first remaining account of `open_session`. Several engines can hold grants
+at once (`ROLE_FACILITY` for `open_facility`, `ROLE_COUPON` for
+`distribute_coupon`), so the single `RailsConfig.operator` no longer has to
+be re-pointed between them; it still works exactly as before.
 
 | The engine provides | The rails do | Phase |
 |---|---|---|

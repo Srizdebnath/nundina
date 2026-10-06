@@ -1,0 +1,2473 @@
+{
+  "address": "Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7",
+  "metadata": {
+    "name": "auction_engine",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Sealed-bid uniform-price batch auction: commit, reveal, clear, pro-rata allocation, issuer ROFR, per-fill DvP through payment-rails, print into mark-engine (SRS 08 §4.2, AE-P1..P11). Audit-scope-critical."
+  },
+  "instructions": [
+    {
+      "name": "allocate",
+      "docs": [
+        "AE-P6: pair allocated buyers and sellers into at most `max_fills`",
+        "new fills, in order-book order (deterministic, resumable). Moves to",
+        "IssuerRofr (ROFR configured) or Settling when every allocation is",
+        "paired. Permissionless."
+      ],
+      "discriminator": [
+        64,
+        38,
+        189,
+        129,
+        24,
+        157,
+        82,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "max_fills",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "clear",
+      "docs": [
+        "AE-P5 + AE-P6 (margin): compute the uniform clearing price and each",
+        "order's allocation. Permissionless once reveals close. A session",
+        "with too few reveals, no cross at or above the reserve floor, or a",
+        "suspended mark fails (rails `fail_session`; all escrow refundable).",
+        "Remaining accounts: rails session, operator."
+      ],
+      "discriminator": [
+        250,
+        39,
+        28,
+        213,
+        123,
+        163,
+        133,
+        5
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "operator",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rails_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_rofr",
+      "docs": [
+        "AE-P7: end the ROFR window — the issuer declines (or is done), or",
+        "anyone once `rofr_end` has passed."
+      ],
+      "discriminator": [
+        15,
+        49,
+        83,
+        203,
+        109,
+        238,
+        233,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commit_ask",
+      "docs": [
+        "AE-P3 sell side: record a sealed ask and escrow `qty` of the asset",
+        "(+ the bond). The rails asset vault must already exist and, for a",
+        "default-frozen asset, be gate-thawed. Remaining accounts: the rails",
+        "`DepositAsk` list."
+      ],
+      "discriminator": [
+        30,
+        63,
+        84,
+        0,
+        233,
+        247,
+        91,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rails_program",
+          "address": "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn"
+        }
+      ],
+      "args": [
+        {
+          "name": "commitment_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "commit_bid",
+      "docs": [
+        "AE-P3 buy side: record a sealed bid and escrow `cash` (+ the bond)",
+        "in the rails. Remaining accounts: the rails `Deposit` list."
+      ],
+      "discriminator": [
+        149,
+        237,
+        198,
+        113,
+        53,
+        66,
+        70,
+        76
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rails_program",
+          "address": "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn"
+        }
+      ],
+      "args": [
+        {
+          "name": "commitment_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "cash",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "exercise_rofr",
+      "docs": [
+        "AE-P7: the issuer takes `qty` of fill `fill_index` at the clearing",
+        "price, paid from its own account and settled at once (rails",
+        "`settle_rofr_fill`). The buyer's allocation shrinks by `qty`; their",
+        "unused cash is refundable after `finish`. Remaining accounts: the",
+        "rails `SettleRofrFill` list for the new fill index."
+      ],
+      "discriminator": [
+        250,
+        255,
+        48,
+        209,
+        20,
+        71,
+        238,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "issuer",
+          "docs": [
+            "The session's ROFR authority; pays cash and the receipt rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_index",
+          "type": "u32"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "expire",
+      "docs": [
+        "AE-P10: past `settle_deadline` (or past `reveal_end` while still in",
+        "Commit/Reveal and uncleared for the whole settle window), the session",
+        "fails; the rails then refund every escrow permissionlessly.",
+        "Remaining accounts: rails session, operator."
+      ],
+      "discriminator": [
+        243,
+        83,
+        205,
+        58,
+        57,
+        201,
+        247,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "operator",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rails_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finish",
+      "docs": [
+        "AE-P9: every fill settled → rails `finish_session` (unfilled escrow",
+        "refundable at once), then the clearing print into mark-engine.",
+        "Permissionless; the caller pays the print record's rent.",
+        "Remaining accounts: rails session, operator."
+      ],
+      "discriminator": [
+        67,
+        74,
+        170,
+        132,
+        125,
+        233,
+        182,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed",
+          "writable": true
+        },
+        {
+          "name": "print_record",
+          "writable": true
+        },
+        {
+          "name": "print_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  105,
+                  110,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "mark_program",
+          "address": "79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_venue",
+      "docs": [
+        "Create the venue. The signer is the venue operator authority (a",
+        "Squads vault on devnet/mainnet); `forced_sale_opener` is the only",
+        "key allowed to open forced-sale sessions (liquidity-facility's",
+        "PDA, AE-P11). Seeds the operator PDA with its rent float."
+      ],
+      "discriminator": [
+        213,
+        205,
+        214,
+        10,
+        231,
+        115,
+        171,
+        35
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "forced_sale_opener",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "open_session",
+      "docs": [
+        "AE-P1: open a session. Remaining accounts: the rails `OpenSession`",
+        "list (config, cash session, asset mint, operator, system program)",
+        "followed by the operator's rails `EngineGrant`."
+      ],
+      "discriminator": [
+        130,
+        54,
+        124,
+        7,
+        236,
+        20,
+        104,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed",
+          "docs": [
+            "The asset's mark-engine feed (reserve + reference + print target)."
+          ]
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "opener",
+          "docs": [
+            "Venue authority, or the forced-sale opener for a forced sale."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "SessionParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "reveal",
+      "docs": [
+        "AE-P4: reveal the preimage; checked against the commitment and the",
+        "escrowed amount, then reported to the rails (`mark_revealed`).",
+        "Remaining accounts: rails session, the owner's escrow, operator."
+      ],
+      "discriminator": [
+        9,
+        35,
+        59,
+        190,
+        167,
+        249,
+        76,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "operator",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rails_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "limit",
+          "type": "u64"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "nonce",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_forced_sale_opener",
+      "docs": [
+        "Re-point the forced-sale opener (venue authority)."
+      ],
+      "discriminator": [
+        138,
+        29,
+        131,
+        20,
+        10,
+        63,
+        131,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "venue"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "opener",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "settle",
+      "docs": [
+        "AE-P8: settle one fill through rails `settle_fill` (atomic DvP +",
+        "credit-gate `settle_check`). Permissionless; the caller funds the",
+        "fill receipt's rent. Remaining accounts: the rails `SettleFill` list."
+      ],
+      "discriminator": [
+        175,
+        42,
+        185,
+        87,
+        144,
+        131,
+        102,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "venue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  110,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "venue"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Crank: funds the rails fill receipt."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_index",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Session",
+      "discriminator": [
+        243,
+        81,
+        72,
+        115,
+        214,
+        188,
+        72,
+        144
+      ]
+    },
+    {
+      "name": "Venue",
+      "discriminator": [
+        8,
+        155,
+        85,
+        226,
+        234,
+        173,
+        42,
+        242
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Cleared",
+      "discriminator": [
+        47,
+        147,
+        107,
+        125,
+        87,
+        47,
+        3,
+        100
+      ]
+    },
+    {
+      "name": "ClearingPrint",
+      "discriminator": [
+        64,
+        112,
+        92,
+        188,
+        72,
+        26,
+        213,
+        18
+      ]
+    },
+    {
+      "name": "FillAllocated",
+      "discriminator": [
+        17,
+        40,
+        41,
+        96,
+        103,
+        214,
+        118,
+        165
+      ]
+    },
+    {
+      "name": "FillSettled",
+      "discriminator": [
+        47,
+        107,
+        42,
+        146,
+        115,
+        71,
+        20,
+        119
+      ]
+    },
+    {
+      "name": "OrderCommitted",
+      "discriminator": [
+        120,
+        115,
+        67,
+        82,
+        131,
+        215,
+        13,
+        83
+      ]
+    },
+    {
+      "name": "OrderRevealed",
+      "discriminator": [
+        241,
+        84,
+        202,
+        173,
+        0,
+        48,
+        108,
+        91
+      ]
+    },
+    {
+      "name": "PhaseChanged",
+      "discriminator": [
+        178,
+        201,
+        67,
+        222,
+        208,
+        36,
+        213,
+        219
+      ]
+    },
+    {
+      "name": "RofrClosed",
+      "discriminator": [
+        124,
+        221,
+        29,
+        104,
+        5,
+        99,
+        68,
+        239
+      ]
+    },
+    {
+      "name": "RofrExercised",
+      "discriminator": [
+        53,
+        39,
+        40,
+        255,
+        237,
+        42,
+        209,
+        70
+      ]
+    },
+    {
+      "name": "SessionFailed",
+      "discriminator": [
+        103,
+        232,
+        4,
+        103,
+        254,
+        254,
+        62,
+        253
+      ]
+    },
+    {
+      "name": "VenueConfigured",
+      "discriminator": [
+        253,
+        30,
+        208,
+        13,
+        53,
+        46,
+        192,
+        146
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotVenueAuthority",
+      "msg": "signer is not the venue authority"
+    },
+    {
+      "code": 6001,
+      "name": "NotForcedSaleOpener",
+      "msg": "only the forced-sale opener may open a forced-sale session"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidSchedule",
+      "msg": "session schedule or minimums invalid"
+    },
+    {
+      "code": 6003,
+      "name": "DiscountAboveCeiling",
+      "msg": "reserve discount above the hard ceiling"
+    },
+    {
+      "code": 6004,
+      "name": "ZeroAmount",
+      "msg": "amount must be positive"
+    },
+    {
+      "code": 6005,
+      "name": "RailsAccounts",
+      "msg": "payment-rails accounts do not match the session"
+    },
+    {
+      "code": 6006,
+      "name": "FeedMismatch",
+      "msg": "feed does not belong to the session's asset"
+    },
+    {
+      "code": 6007,
+      "name": "AssetMismatch",
+      "msg": "asset mint does not match the feed"
+    },
+    {
+      "code": 6008,
+      "name": "OutsideWindow",
+      "msg": "instruction outside its time window"
+    },
+    {
+      "code": 6009,
+      "name": "WrongPhase",
+      "msg": "instruction not allowed in this phase"
+    },
+    {
+      "code": 6010,
+      "name": "BookFull",
+      "msg": "order book or fill list is full"
+    },
+    {
+      "code": 6011,
+      "name": "DuplicateOrder",
+      "msg": "this wallet already has an order in the session"
+    },
+    {
+      "code": 6012,
+      "name": "NoOrder",
+      "msg": "no order for this wallet"
+    },
+    {
+      "code": 6013,
+      "name": "AlreadyRevealed",
+      "msg": "order already revealed"
+    },
+    {
+      "code": 6014,
+      "name": "CommitmentMismatch",
+      "msg": "preimage does not match the commitment"
+    },
+    {
+      "code": 6015,
+      "name": "BidExceedsEscrow",
+      "msg": "revealed bid costs more than the escrowed cash"
+    },
+    {
+      "code": 6016,
+      "name": "AskExceedsEscrow",
+      "msg": "revealed ask exceeds the escrowed asset"
+    },
+    {
+      "code": 6017,
+      "name": "NotRofrAuthority",
+      "msg": "signer is not the session's ROFR authority"
+    },
+    {
+      "code": 6018,
+      "name": "NoFill",
+      "msg": "no such fill (or not eligible)"
+    },
+    {
+      "code": 6019,
+      "name": "RofrExceedsFill",
+      "msg": "ROFR quantity exceeds the fill"
+    },
+    {
+      "code": 6020,
+      "name": "FillSettled",
+      "msg": "fill already settled"
+    },
+    {
+      "code": 6021,
+      "name": "FillsPending",
+      "msg": "fills still pending settlement"
+    },
+    {
+      "code": 6022,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Cleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "volume",
+            "type": "u64"
+          },
+          {
+            "name": "reserve",
+            "type": "u64"
+          },
+          {
+            "name": "reference",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClearingPrint",
+      "docs": [
+        "AE-P9: the session's aggregate print (mark-engine stores its own copy,",
+        "disclosed per the market's print policy)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "volume",
+            "type": "u64"
+          },
+          {
+            "name": "n_investor_ids",
+            "type": "u16"
+          },
+          {
+            "name": "forced_sale",
+            "type": "bool"
+          },
+          {
+            "name": "print_policy_class",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FailReason",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "TooFewReveals"
+          },
+          {
+            "name": "NoCross"
+          },
+          {
+            "name": "MarkUnavailable"
+          },
+          {
+            "name": "Deadline"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Feed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "docs": [
+              "auction-engine's print PDA (the only `record_print` signer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "n_publishers",
+            "type": "u8"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          },
+          {
+            "name": "nav_pico",
+            "docs": [
+              "Latest official NAV at [`NAV_SCALE`] (0 = never published)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "docs": [
+              "When the NAV was written on-chain; ages are measured from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "publications",
+            "type": "u64"
+          },
+          {
+            "name": "last_drill",
+            "docs": [
+              "The latest NAV came from `publish_drill_nav`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "suspended",
+            "type": "bool"
+          },
+          {
+            "name": "suspend_reason",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_state",
+            "docs": [
+              "Last evented state (transitions are evented once)."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "docs": [
+              "Implied NAV from the latest eligible print (0 = none)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "implied_ts",
+            "type": "i64"
+          },
+          {
+            "name": "prints_accepted",
+            "type": "u32"
+          },
+          {
+            "name": "prints_rejected",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "warn_after",
+            "docs": [
+              "Age at which a Fresh mark becomes Warned."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stale_after",
+            "docs": [
+              "Age at which the mark becomes Stale."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "warned_haircut_bps",
+            "docs": [
+              "Haircut applied while Warned (≤ `MAX_WARNED_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stale_haircut_bps",
+            "docs": [
+              "Haircut applied while Stale or Suspended (≤ `MAX_STALE_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "print_policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "band_bps",
+            "docs": [
+              "BANDED width, bps of price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_volume",
+            "docs": [
+              "Minimum print volume (base units) to enter the implied curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_investors",
+            "docs": [
+              "Minimum distinct investor_ids on a print (G2)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "outlier_band_bps",
+            "docs": [
+              "Maximum |print − NAV| / NAV for an eligible print."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drills_enabled",
+            "docs": [
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Fill",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "rofr",
+            "docs": [
+              "Issuer ROFR fill (settled at exercise)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillAllocated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "type": "u32"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "type": "u32"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkState",
+      "docs": [
+        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fresh"
+          },
+          {
+            "name": "Warned"
+          },
+          {
+            "name": "Stale"
+          },
+          {
+            "name": "Suspended"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Order",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "escrowed",
+            "docs": [
+              "Cash (buy) or asset (sell) escrowed in the rails at commit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "revealed",
+            "type": "bool"
+          },
+          {
+            "name": "limit",
+            "type": "u64"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "alloc",
+            "docs": [
+              "Allocation at the clearing price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "alloc_left",
+            "docs": [
+              "Allocation not yet paired into a fill (AE-P6 cursor)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderCommitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "escrowed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderRevealed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "type": "u64"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "AE-P2 phases (06 §2)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Commit"
+          },
+          {
+            "name": "Reveal"
+          },
+          {
+            "name": "Allocating"
+          },
+          {
+            "name": "IssuerRofr"
+          },
+          {
+            "name": "Settling"
+          },
+          {
+            "name": "Printed"
+          },
+          {
+            "name": "Failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PhaseChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Phase"
+                }
+              }
+            }
+          },
+          {
+            "name": "to",
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintPolicy",
+      "docs": [
+        "ME-P6 print policy classes."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Public"
+          },
+          {
+            "name": "Banded"
+          },
+          {
+            "name": "AggregateOnly"
+          },
+          {
+            "name": "DataRoom"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RofrClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "exercised_qty",
+            "type": "u64"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RofrExercised",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "type": "u32"
+          },
+          {
+            "name": "rofr_fill_index",
+            "type": "u32"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Session",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "venue",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_id",
+            "type": "u64"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "feed",
+            "docs": [
+              "mark-engine feed of the asset."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rails_session",
+            "docs": [
+              "payment-rails `CashSession` (operator = this program's PDA)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "SessionParams"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "reserve_price",
+            "type": "u64"
+          },
+          {
+            "name": "reference_mark",
+            "type": "u64"
+          },
+          {
+            "name": "clear_price",
+            "type": "u64"
+          },
+          {
+            "name": "cleared_volume",
+            "type": "u64"
+          },
+          {
+            "name": "rofr_qty",
+            "type": "u64"
+          },
+          {
+            "name": "fills_settled",
+            "type": "u32"
+          },
+          {
+            "name": "orders",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Order"
+                }
+              }
+            }
+          },
+          {
+            "name": "fills",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Fill"
+                }
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionFailed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": {
+              "defined": {
+                "name": "FailReason"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionParams",
+      "docs": [
+        "AE-P1: everything snapshotted at open; immutable afterwards."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commit_end",
+            "type": "i64"
+          },
+          {
+            "name": "reveal_end",
+            "type": "i64"
+          },
+          {
+            "name": "rofr_window",
+            "docs": [
+              "ROFR window length after `reveal_end` (0 with no ROFR authority)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "settle_deadline",
+            "docs": [
+              "Hard deadline: settlement closes, every escrow refundable."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Forfeitable bond per order (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_cash",
+            "docs": [
+              "Per-investor cash cap (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_reveals",
+            "docs": [
+              "Fewer revealed orders than this ⇒ Failed (G13)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_discount_bps",
+            "docs": [
+              "Reserve floor = NAV_effective × (1 − max_discount_bps)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "forced_sale",
+            "docs": [
+              "AE-P11: opened by the facility; no reserve; flagged print."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "rofr_authority",
+            "docs": [
+              "Issuer ROFR authority; `Pubkey::default()` disables ROFR."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "disclosure_hash",
+            "docs": [
+              "Hash of the session disclosure, carried on every transfer record."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Side",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Buy"
+          },
+          {
+            "name": "Sell"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Venue",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "forced_sale_opener",
+            "type": "pubkey"
+          },
+          {
+            "name": "sessions",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "operator_bump",
+            "type": "u8"
+          },
+          {
+            "name": "print_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VenueConfigured",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "forced_sale_opener",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}

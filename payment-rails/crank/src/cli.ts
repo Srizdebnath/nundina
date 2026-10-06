@@ -9,6 +9,7 @@
  *   npm run crank -- keeper release  --session <addr>         # anyone
  *   npm run crank -- keeper withdraw --token <usdc>
  *   npm run crank -- seasoning --mint <gated mint>          # credit-gate merge_expired (#127)
+ *   npm run crank -- phases --session <auction-engine session> # phase-deadline steps (#149)
  *   npm run crank -- settle    --session <addr> --plan fills.json [--max-sends N]
  *   npm run crank -- finish    --session <addr>
  *   npm run crank -- reconcile --session <addr> | --facility <addr>
@@ -28,6 +29,7 @@ import { finish, refundAll, settlePlan, type FillPlan, type Outcome } from "./cr
 import { loadKeypair, makeCtx } from "./ctx.ts";
 import { exportEvidence, verifyEvidence } from "./evidence.ts";
 import { assignKeeper, registerKeeper, releaseAssignment, topUpKeeper, withdrawKeeper } from "./keeper.ts";
+import { runPhases } from "./phases.ts";
 import { seasonAll } from "./seasoning.ts";
 import { formatReport, reconcileFacility, reconcileSession } from "./ledger.ts";
 
@@ -111,6 +113,8 @@ async function main(): Promise<boolean> {
     }
     case "seasoning":
       return summarize(await seasonAll(ctx, address(need("mint"))));
+    case "phases":
+      return summarize(await runPhases(ctx, address(need("session")), ctx.payer));
     case "settle": {
       const plan = parsePlan(readFileSync(need("plan"), "utf8"));
       const maxSends = values["max-sends"] ? Number(values["max-sends"]) : undefined;
@@ -132,7 +136,7 @@ async function main(): Promise<boolean> {
       return true;
     }
     default:
-      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export|keeper|seasoning> [options] — see src/cli.ts");
+      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export|keeper|seasoning|phases> [options] — see src/cli.ts");
       return false;
   }
 }

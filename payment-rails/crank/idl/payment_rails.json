@@ -810,13 +810,11 @@
         {
           "name": "operator",
           "docs": [
-            "Tranche-engine signer (config operator); pays the receipt rent."
+            "Tranche-engine signer: the config operator, or an engine granted",
+            "`ROLE_COUPON` (first remaining account, #136); pays the receipt rent."
           ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "config"
-          ]
+          "signer": true
         },
         {
           "name": "token_program"
@@ -1103,6 +1101,94 @@
         {
           "name": "amount",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "grant_engine",
+      "docs": [
+        "#136: admit an engine signer PDA as operator for `roles`",
+        "(`EngineGrant::ROLE_*`). Authority only."
+      ],
+      "discriminator": [
+        50,
+        24,
+        8,
+        101,
+        15,
+        99,
+        219,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "engine"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "engine",
+          "type": "pubkey"
+        },
+        {
+          "name": "roles",
+          "type": "u8"
         }
       ]
     },
@@ -1624,13 +1710,12 @@
         {
           "name": "operator",
           "docs": [
-            "Config operator (facility-engine signer); becomes the curator."
+            "Config operator, or an engine granted `ROLE_FACILITY` (its",
+            "`EngineGrant` is the first remaining account, #136); becomes the",
+            "curator."
           ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "config"
-          ]
+          "signer": true
         },
         {
           "name": "token_program"
@@ -1734,13 +1819,11 @@
         {
           "name": "operator",
           "docs": [
-            "Config operator; pays rent."
+            "Config operator, or an engine granted `ROLE_SESSIONS` (its",
+            "`EngineGrant` is the first remaining account, #136); pays rent."
           ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "config"
-          ]
+          "signer": true
         },
         {
           "name": "system_program",
@@ -3186,6 +3269,85 @@
       ]
     },
     {
+      "name": "set_engine_roles",
+      "docs": [
+        "#136: change or revoke (`roles = 0`) an engine grant. Authority only."
+      ],
+      "discriminator": [
+        137,
+        145,
+        79,
+        130,
+        216,
+        78,
+        150,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant.engine",
+                "account": "EngineGrant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "roles",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "set_fees",
       "docs": [
         "Set fee / reserve bps within the hard ceilings (authority; evented)."
@@ -4341,6 +4503,19 @@
       ]
     },
     {
+      "name": "EngineGrant",
+      "discriminator": [
+        173,
+        149,
+        74,
+        97,
+        113,
+        130,
+        27,
+        82
+      ]
+    },
+    {
       "name": "Escrow",
       "discriminator": [
         31,
@@ -4470,6 +4645,19 @@
         101,
         32,
         141
+      ]
+    },
+    {
+      "name": "EngineGrantChanged",
+      "discriminator": [
+        47,
+        29,
+        51,
+        144,
+        93,
+        205,
+        72,
+        169
       ]
     },
     {
@@ -4857,6 +5045,11 @@
       "code": 6055,
       "name": "GateOutcomeInvalid",
       "msg": "Gate outcome missing or malformed"
+    },
+    {
+      "code": 6056,
+      "name": "EngineNotGranted",
+      "msg": "Signer is not an operator or granted engine for this role"
     }
   ],
   "types": [
@@ -5505,6 +5698,64 @@
             "docs": [
               "Registrar that performed it."
             ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EngineGrant",
+      "docs": [
+        "#136: an engine program's signer PDA admitted by the config authority to",
+        "act as operator for some roles, next to `RailsConfig.operator`. Several",
+        "engines (auction-engine sessions, liquidity-facility facilities,",
+        "tranche-engine coupons) can then drive the rails at once without",
+        "re-pointing the single operator. Presented as the first remaining",
+        "account of the instruction that needs it, so existing clients that sign",
+        "as the config operator are unchanged."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "docs": [
+              "The engine's signer (a PDA of the engine program)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "roles",
+            "docs": [
+              "Bitmask of `EngineGrant::ROLE_*`; 0 = revoked."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EngineGrantChanged",
+      "docs": [
+        "#136: an engine grant was written (roles 0 = revoked)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "type": "pubkey"
+          },
+          {
+            "name": "roles",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
             "type": "pubkey"
           }
         ]
