@@ -1689,6 +1689,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "liquidity-facility"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "auction-engine",
+ "credit-math",
+ "mark-engine",
+ "payment-rails",
+]
+
+[[package]]
 name = "litesvm"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1999,6 +2011,7 @@ dependencies = [
  "base64 0.22.1",
  "credit-gate",
  "credit-math",
+ "liquidity-facility",
  "litesvm",
  "mark-engine",
  "payment-rails",

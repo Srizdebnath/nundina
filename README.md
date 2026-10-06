@@ -49,7 +49,7 @@ repo that describes them is the target, not a shipped feature.
 | `auction-engine` | ✅ | ✅ | ✅ unit + LiteSVM (real rails, gate, SAS, mark) | ⚠️ crankable (permissionless settle/expire), no runner yet (#141) | AE-P1..P11 on `main` (#136); not deployed |
 | `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | ME-P1..P7 on `main` (#137); not deployed; no nav-publisher yet (#141) |
 | `queue-claim` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); "sell a claim in an auction" is the unshipped headline demo |
-| `liquidity-facility` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); cash leg only, no liquidation ladder (#124) |
+| `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps, no runner yet (#141) | LF-P1..P6 on `main` (#139); not deployed |
 | `tranche-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P5); cash waterfall only |
 
 Per-AC grades: [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
@@ -97,6 +97,7 @@ nundina/
 │   ├── credit-gate/          ← Gate Program for Token ACL (sRFC37) — audit-scope-critical
 │   ├── mark-engine/          ← NAV feeds, mark states, prints, MARK_PROTECTIVE (#137)
 │   ├── auction-engine/       ← sealed-bid uniform-price sessions over payment-rails (#136)
+│   ├── liquidity-facility/   ← advances at MARK_PROTECTIVE + liquidation ladder (#139)
 │   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical

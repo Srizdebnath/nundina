@@ -48,7 +48,7 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | AC-6 | ⚠️ ledger only | `credit-gate` lot ledger (#122): lots season by the config's `seasoning_seconds`, splits keep seasoning, permissionless `merge_expired` into FREE (LiteSVM). No auction session sells against it, and no fee pays the merge crank |
 | AC-7 | ⚠️ gate side | holder governor counts attested `investor_id`s against `holder_cap` (a second wallet of one investor counts once; `release_holder` frees the slot; `project_and_check` for allocation). No auction session yet to reallocate a rejected bid |
 | AC-8 | ⚠️ cash leg only | facility advance/repay/sweep in `payment-rails`; `queue-claim` has no code, so neither the sell path nor the pledge path exists. **The headline demo is unshipped** |
-| AC-9 | 🗺 **re-graded (#124)** | No liquidation instruction and no ladder (ROFR → backstop → forced sale → workout) anywhere; no `mark-engine`, so "no liquidation on a stale mark" (H4, LF-P4) has no implementation and no test. What exists: the H1 advance-rate ceiling on `payment-rails` advances |
+| AC-9 | ⚠️ code, LiteSVM (#139) | `liquidity-facility`: a drill mark (`publish_drill_nav`, evented `admin_drill`) breaches a position; grace, then the ladder: issuer ROFR at `MARK_PROTECTIVE` → backstop at its haircut (shortfall booked) → forced-sale `auction-engine` session (flagged print, excluded from marks) → workout of the unsold rest. Stale and Suspended marks refuse every step (H4). `payment-rails/tests-svm/tests/facility.rs`. Not deployed |
 | AC-10 | ⚠️ cash leg only | exact-conservation cash waterfall in `payment-rails` + `credit-math`; no `tranche-engine` (no tranches, no subordination check) |
 | AC-11 | ✅ devnet | permissionless never-pausable refunds + kill-the-crank drill (CI and devnet) |
 | AC-12 | ⚠️ payment-rails only | `crank export` bundles payment-rails events with a SHA-256 manifest; no marks to reproduce (no `mark-engine`) |
@@ -61,7 +61,7 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | H1 max advance rate 50% | ⚠️ | enforced by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ mark × rate. The **mark is curator-stated**: no `mark-engine` exists to verify it |
 | H2 min subordination floor | 🗺 | no value in the plan of record; no `tranche-engine` |
 | H3 max discount / reserve bound | ⚠️ | `auction-engine` enforces the reserve floor `NAV_effective × (1 − max_discount_bps)` per session, bounded by an **interim** hard ceiling `MAX_DISCOUNT_BPS` = 50% (#136). The plan-of-record value still needs sign-off |
-| H4 no liquidation on a stale mark | 🗺 | no `mark-engine`, no liquidation instruction (#124) |
+| H4 no liquidation on a stale mark | ⚠️ code | `liquidity-facility` `start_liquidation`, `ladder_buy` and `open_forced_sale` require `Feed::allows_liquidation` (Fresh/Warned); tested Suspended and Stale-by-age (#139). Not deployed |
 | H5 timeout refund path | ✅ | `payment-rails` refunds (AC-11) |
 
 H2 and H3 need a dated value decision before any constant lands
@@ -262,7 +262,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.5 `liquidity-facility`
 
-> **As built (2026-10, #124): 🗺 roadmap for the engine.** `payment-rails` carries the cash leg (open/fund facility, advance under the H1 ceiling, repay, sweep). LF-P3 (health check), LF-P4 (no liquidation on a stale mark) and LF-P5 (the ladder) have no code; AC-9 is re-graded 🗺 in §1.1.
+> **As built (2026-10, #139): program built, not deployed** (`programs/liquidity-facility`, id `PTNC…7hY`). LF-P1 `pledge_and_advance`: collateral to a per-position vault, value at `MARK_PROTECTIVE`, rate ≤ curator rate ≤ H1, Fresh mark only, cash via rails `advance_funds` (signer PDA = rails curator through an `EngineGrant`, role FACILITY); LF-P2 rails facility fund; LF-P3 `check_health` (rails debt accrued to now vs maintenance LTV; breach ↔ cure), `add_collateral`; LF-P4 every liquidation step reads `allows_liquidation`; LF-P5 `start_liquidation` after grace → `ladder_buy` (issuer at MARK_PROTECTIVE / backstop at its haircut) → `pass_step` → `open_forced_sale` / `list_forced_sale` / `reveal_forced_sale` (auction-engine, forced flag) → `settle_forced_sale` (rails `repay` first, surplus to the borrower, shortfall booked, unsold collateral to the lender workout account); `release` after full repayment. **Gap:** a pledge does not move the borrower's gate lots to the custody PDA; the forced-sale seller (the PDA) must be admitted and hold seasoned lots (the test does this through the gate authority).
 
 | ID | Requirement | Ref |
 |---|---|---|
