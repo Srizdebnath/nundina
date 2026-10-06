@@ -1,0 +1,26 @@
+[package]
+name = "mark-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "NAV feeds, Fresh/Warned/Stale/Suspended mark states, NAV_effective haircuts, auction print ingestion and MARK_PROTECTIVE (SRS 08 §4.3, ME-P1..P7)."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "mark_engine"
+
+[features]
+default = []
+# Consumers (auction-engine, liquidity-facility, tranche-engine, tests-svm)
+# link the crate to read `Feed` and build `record_print` CPIs.
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+# Exact pin: SRS locks anchor 1.1.x (see credit-gate/Cargo.toml).
+anchor-lang = { version = "=1.1.2" }
+credit-math = { path = "../credit-math" }
+
+[dev-dependencies]

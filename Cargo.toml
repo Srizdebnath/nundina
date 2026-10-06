@@ -5,6 +5,8 @@ members = [
     "programs/credit-math",
     # P0: gate program skeleton (CG-P2 anchor; CG-P1..P6 land in P1).
     "programs/credit-gate",
+    # P2: NAV feeds, mark states, prints, MARK_PROTECTIVE (#137).
+    "programs/mark-engine",
 ]
 
 [workspace.package]

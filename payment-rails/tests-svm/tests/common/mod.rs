@@ -5,7 +5,10 @@
 
 #![allow(dead_code)]
 
+mod engines;
 mod gate;
+#[allow(unused_imports)]
+pub use engines::*;
 pub use gate::*;
 
 use anchor_lang::prelude::{Clock, Pubkey};
