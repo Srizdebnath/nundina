@@ -2015,6 +2015,7 @@ dependencies = [
  "litesvm",
  "mark-engine",
  "payment-rails",
+ "queue-claim",
  "solana-account",
  "solana-instruction-error",
  "solana-keypair",
@@ -2121,6 +2122,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "queue-claim"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "credit-math",
+ "liquidity-facility",
+ "mark-engine",
+ "payment-rails",
 ]
 
 [[package]]

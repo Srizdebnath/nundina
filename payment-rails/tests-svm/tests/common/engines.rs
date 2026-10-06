@@ -686,8 +686,8 @@ impl Env {
 
     /// Auction setup + the facility signer granted FACILITY on the rails,
     /// made the venue's forced-sale opener, and facility `id` opened.
-    pub fn setup_facility(&mut self, id: u64, params: FacilityParams) {
-        self.setup_auction();
+    pub fn setup_facility(&mut self, id: u64, params: FacilityParams) -> Keypair {
+        let publisher = self.setup_auction();
         load_root_program(self, liquidity_facility::ID, "liquidity_facility");
         let signer = lf_signer().0;
         self.grant_engine(&signer, EngineGrant::ROLE_FACILITY)
@@ -735,9 +735,15 @@ impl Env {
         rails.push(AccountMeta::new_readonly(grant_pda(&signer), false));
         ix.accounts.extend(forwarded_lf(rails));
         self.send(&[ix], &[&auth]).expect("open facility");
+        publisher
     }
 
     pub fn pledge(&mut self, id: u64, borrower: &Party, qty: u64, amount: u64) -> Res {
+        let ix = self.pledge_ix(id, borrower, qty, amount);
+        self.send(&[ix], &[&borrower.key])
+    }
+
+    pub fn pledge_ix(&self, id: u64, borrower: &Party, qty: u64, amount: u64) -> Instruction {
         let cfg = lf_config_pda(id);
         let b = borrower.key.pubkey();
         let position = position_pda(&cfg, &b);
@@ -780,7 +786,7 @@ impl Env {
             }
             .to_account_metas(None),
         ));
-        self.send(&[ix], &[&borrower.key])
+        ix
     }
 
     fn health_ix(&self, id: u64, borrower: &Pubkey, data: Vec<u8>) -> Instruction {

@@ -246,8 +246,11 @@ checksum = "2f698a45d424351ff695df413adcb3fa603f2c791a0b4a937ebcd2e93a052c77"
 dependencies = [
  "anchor-lang",
  "spl-associated-token-account-interface",
+ "spl-pod",
  "spl-token-2022-interface",
+ "spl-token-group-interface",
  "spl-token-interface",
+ "spl-token-metadata-interface",
 ]
 
 [[package]]
@@ -1127,6 +1130,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d464fae65fff2680baf48019211ce37aaec0c78e9264c84a3e484717f965104e"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "queue-claim"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "credit-math",
+ "liquidity-facility",
+ "mark-engine",
+ "payment-rails",
 ]
 
 [[package]]

@@ -11,6 +11,8 @@ members = [
     "programs/auction-engine",
     # P4: advances, health, liquidation ladder (#139).
     "programs/liquidity-facility",
+    # P4: redemption-queue claims, sell + pledge paths (#138).
+    "programs/queue-claim",
 ]
 
 [workspace.package]
