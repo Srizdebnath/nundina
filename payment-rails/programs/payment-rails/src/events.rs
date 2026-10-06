@@ -484,3 +484,11 @@ mod tests {
         assert!(usdc.iter().all(|a| a.unit() == AmountUnit::MicroUsdc));
     }
 }
+
+/// #136: an engine grant was written (roles 0 = revoked).
+#[event]
+pub struct EngineGrantChanged {
+    pub engine: Pubkey,
+    pub roles: u8,
+    pub authority: Pubkey,
+}

@@ -42,9 +42,9 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 |---|---|---|
 | AC-1 | ⚠️ passes off-chain-of-record | SAS credential + 3 schemas live on devnet; `validate` + Token ACL hooks thaw an attested wallet and reject an ineligible one with a typed reason, on a validator with the real SAS and Token ACL programs (`ops/gate/test-localnet.sh`, `tests-svm/tests/sas_token_acl.rs`). Not yet on the NPCS mint: needs the gate redeploy (`Bprm…`, #45) and the freeze authority handed to Token ACL (`2xhj…`) |
 | AC-2 | ⚠️ program only | `mark-engine` (#137): publisher-set `publish_nav`, Fresh→Warned→Stale→Fresh by age with evented transitions, explicit Suspended (LiteSVM `tests-svm/tests/mark.rs`). No `nav-publisher` and no devnet feed yet, so no 4-week record |
-| AC-3 | ⚠️ cash leg only | `payment-rails` escrow + one-fill DvP cash leg (live devnet, R5 on a manifest mint, not live NPCS). `auction-engine` has no code |
-| AC-4 | 🗺 | needs `auction-engine` + `mark-engine` |
-| AC-5 | ⚠️ cash leg only | `payment-rails` ROFR cash path; no session state machine around it |
+| AC-3 | ⚠️ code, LiteSVM | `auction-engine` (#136): 3 bidders + a seller commit with rails escrow, reveal, clear at one uniform price, split the margin pro-rata, settle per fill through rails `settle_fill` (credit-gate `settle_check` on each), print into `mark-engine` (`payment-rails/tests-svm/tests/auction.rs`). Not deployed; no devnet session |
+| AC-4 | ⚠️ code, LiteSVM | the same session clears at 0.95 against a Fresh 1.00 NAV (reserve 0.90 = NAV_effective × (1 − 10%)); the eligible print moves `MARK_PROTECTIVE` to 0.95 (#136, #137) |
+| AC-5 | ⚠️ code, LiteSVM | `exercise_rofr` takes part of a fill at the clearing price through rails `settle_rofr_fill`; `close_rofr` declines/ends the window (#136). The multisig as ROFR authority is a devnet step |
 | AC-6 | ⚠️ ledger only | `credit-gate` lot ledger (#122): lots season by the config's `seasoning_seconds`, splits keep seasoning, permissionless `merge_expired` into FREE (LiteSVM). No auction session sells against it, and no fee pays the merge crank |
 | AC-7 | ⚠️ gate side | holder governor counts attested `investor_id`s against `holder_cap` (a second wallet of one investor counts once; `release_holder` frees the slot; `project_and_check` for allocation). No auction session yet to reallocate a rejected bid |
 | AC-8 | ⚠️ cash leg only | facility advance/repay/sweep in `payment-rails`; `queue-claim` has no code, so neither the sell path nor the pledge path exists. **The headline demo is unshipped** |
@@ -60,7 +60,7 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 |---|---|---|
 | H1 max advance rate 50% | ⚠️ | enforced by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ mark × rate. The **mark is curator-stated**: no `mark-engine` exists to verify it |
 | H2 min subordination floor | 🗺 | no value in the plan of record; no `tranche-engine` |
-| H3 max discount / reserve bound | 🗺 | no value in the plan of record; no `auction-engine` reserve check |
+| H3 max discount / reserve bound | ⚠️ | `auction-engine` enforces the reserve floor `NAV_effective × (1 − max_discount_bps)` per session, bounded by an **interim** hard ceiling `MAX_DISCOUNT_BPS` = 50% (#136). The plan-of-record value still needs sign-off |
 | H4 no liquidation on a stale mark | 🗺 | no `mark-engine`, no liquidation instruction (#124) |
 | H5 timeout refund path | ✅ | `payment-rails` refunds (AC-11) |
 
@@ -212,7 +212,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.2 `auction-engine` (Anchor; audit-scope-critical for escrow paths)
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The escrow, refund and DvP *cash* legs exist in `payment-rails` (§4.7).
+> **As built (2026-10, #136): program built, not deployed** (`programs/auction-engine`, id `Cw6w…Sod7`). It never holds a token: every escrow, fill, ROFR fill, failure and finish is a `payment-rails` CPI signed by its operator PDA `["rails_operator"]`, admitted on the rails by an `EngineGrant` (`grant_engine`, role SESSIONS). AE-P1 snapshot at open (forced-sale sessions only from the venue's `forced_sale_opener`); AE-P2 phases Commit → Reveal → Allocating → IssuerRofr → Settling → Printed / Failed, every transition evented; AE-P3 `sha256(side ‖ limit ‖ qty ‖ nonce ‖ owner)` + rails escrow in one instruction, 16-order book; AE-P4 preimage + escrow-budget check, then rails `mark_revealed`; AE-P5 `credit_math::find_uniform_clear_price` with reserve = NAV_effective × (1 − max_discount) and reference = `MARK_PROTECTIVE`; too few reveals / no cross / suspended mark ⇒ Failed; AE-P6 `allocate_pro_rata` on the long side and chunked, resumable pairing (governor headroom is enforced by the gate at admission and re-checked by `settle_check`); AE-P7 `exercise_rofr` / `close_rofr`; AE-P8 permissionless `settle(fill_index)`; AE-P9 `finish` → rails `finish_session` + `ClearingPrint` and mark-engine `record_print` (`n_investor_ids` counts distinct wallets); AE-P10 `expire` + the rails' permissionless refunds; AE-P11 forced-sale flag excluded by mark-engine. Tests: `payment-rails/tests-svm/tests/auction.rs`.
 
 | ID | Requirement | Ref |
 |---|---|---|
@@ -302,6 +302,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 | AE-P3 / AE-P4 | pre-funded bid escrow + forfeitable bond; ask escrow (asset + bond) | ✅ R1/R2 |
 | AE-P7 | issuer ROFR cash-for-asset fill | ✅ R2 |
 | AE-P8 | one-fill-per-instruction atomic DvP; each fill CPIs credit-gate `settle_check` first (block-list both sides, buyer attestations re-read, seller's seasoned lots debited, buyer lot appended); `TransferInstruction` carries lots, exemption basis and `gate_check = Passed`, so evidence manifests count fills as `proven` (#133, #134) | ✅ R2 + gate (#133) |
+| Engine signers (#136) | `grant_engine` / `set_engine_roles` (authority only): an `EngineGrant` PDA lets an engine's signer PDA act as operator for `open_session` (SESSIONS), `open_facility` (FACILITY) or `distribute_coupon` (COUPON), presented as the first remaining account; the config `operator` still works unchanged | ✅ #136 |
 | AE-P10 | permissionless, never-pausable refunds; PDA-only escrow; completes even on a delegate-drained vault and books the shortfall (#89); frozen destinations fail typed (#90) | ✅ R1 (+#62, #89, #90) |
 | LF-P1 (H1 only) | `advance_rate_bps ≤ 50%` hard ceiling and `amount ≤ collateral mark × rate`, recorded on the `Advance`; the mark is curator-supplied; maintenance ratio, state and health are not built | ⚠️ R3 + #94 |
 | LF-P2 / LF-P6 | facility fund, advances to registered destinations, simple-interest accrual, repayment | ✅ R3 |

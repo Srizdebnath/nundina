@@ -46,7 +46,7 @@ repo that describes them is the target, not a shipped feature.
 | `payment-rails` | ✅ | ✅ | ✅ LiteSVM + drill | ✅ | live devnet |
 | `credit-gate` | ✅ | ✅ | ✅ LiteSVM + real SAS/Token ACL | — | CG-P1..P7 on `main`; devnet redeploy pending (#45) |
 | `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 4 functions consumed by `payment-rails` |
-| `auction-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P3) |
+| `auction-engine` | ✅ | ✅ | ✅ unit + LiteSVM (real rails, gate, SAS, mark) | ⚠️ crankable (permissionless settle/expire), no runner yet (#141) | AE-P1..P11 on `main` (#136); not deployed |
 | `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | ME-P1..P7 on `main` (#137); not deployed; no nav-publisher yet (#141) |
 | `queue-claim` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); "sell a claim in an auction" is the unshipped headline demo |
 | `liquidity-facility` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); cash leg only, no liquidation ladder (#124) |
@@ -78,7 +78,7 @@ substantive P0 exit (HACKATHON §4) is open:
 | 8 | An investor thaws **through** `credit-gate` (Token ACL) | ⚠️ | ✅ on a validator with the real programs (`ops/gate/test-localnet.sh`); on devnet NPCS's freeze authority is still the `2xhj…` wallet and the gate is the pre-#26 build (#45) |
 | 9 | SAS attestation read by the gate | ✅ | credential + schemas live on devnet (`ops/gate/deployment-devnet.json`); CG-P6 read tested against the real SAS program (#122) |
 | 10 | R5 settles **live NPCS** | ❌ | R5 ran against a manifest mint (`payment-rails/PHASES.md`); waits on row 8 |
-| 11 | Auction session + queue-claim sale | ❌ | `auction-engine` and `queue-claim` have no code (#128) |
+| 11 | Auction session + queue-claim sale | ⚠️ | `auction-engine` built and tested end to end in LiteSVM against the real rails, gate and SAS (#136); not deployed. `queue-claim` (#138) |
 
 ## Repo structure
 
@@ -96,6 +96,7 @@ nundina/
 ├── programs/                 ← Anchor workspace (solana programs + shared math)
 │   ├── credit-gate/          ← Gate Program for Token ACL (sRFC37) — audit-scope-critical
 │   ├── mark-engine/          ← NAV feeds, mark states, prints, MARK_PROTECTIVE (#137)
+│   ├── auction-engine/       ← sealed-bid uniform-price sessions over payment-rails (#136)
 │   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical

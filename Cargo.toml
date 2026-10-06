@@ -7,6 +7,8 @@ members = [
     "programs/credit-gate",
     # P2: NAV feeds, mark states, prints, MARK_PROTECTIVE (#137).
     "programs/mark-engine",
+    # P3: sealed-bid uniform-price sessions over payment-rails (#136).
+    "programs/auction-engine",
 ]
 
 [workspace.package]
