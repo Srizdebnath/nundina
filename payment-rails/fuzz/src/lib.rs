@@ -28,8 +28,8 @@ use anchor_lang::prelude::Pubkey;
 use arbitrary::Arbitrary;
 use credit_math::{MathError, Order, WaterfallParams};
 use payment_rails::state::{
-    Advance, BondRoute, CashSession, CouponParams, CouponSplit, FillSplit, SessionStatus,
-    VaultDrain, BPS, MAX_FEE_BPS, MAX_RESERVE_BPS,
+    fee_within_cap, Advance, BondRoute, CashSession, CouponParams, CouponSplit, FillSplit,
+    SessionStatus, VaultDrain, BPS, MAX_FEE_BPS, MAX_RESERVE_BPS,
 };
 
 // ── settle_fill ────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ pub fn check_settle_fill(mut i: SettleFillInput) -> bool {
     let gross = unit.map(|u| notional.div_ceil(u));
     let valid = i.qty > 0
         && i.price > 0
-        && i.fee_bps <= MAX_FEE_BPS
+        && fee_within_cap(i.fee_bps)
         && i.reserve_bps <= MAX_RESERVE_BPS
         && gross.is_some_and(|g| g <= u128::from(u64::MAX));
     let s = match (valid, got) {
