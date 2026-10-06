@@ -5,6 +5,8 @@ members = [
     "programs/credit-math",
     # P0: gate program skeleton (CG-P2 anchor; CG-P1..P6 land in P1).
     "programs/credit-gate",
+    # I1 mint-on-deposit treasury (#148).
+    "programs/npcs-treasury",
 ]
 
 [workspace.package]

@@ -19,6 +19,8 @@ publish = false
 payment-rails = { path = "../programs/payment-rails", features = ["no-entrypoint"] }
 # The gate every fill CPIs (#133): its account types and instruction builders.
 credit-gate = { path = "../../programs/credit-gate", features = ["no-entrypoint"] }
+# The I1 mint-on-deposit treasury (#148), from the root workspace build.
+npcs-treasury = { path = "../../programs/npcs-treasury", features = ["no-entrypoint"] }
 # Read-only: the H1 ceiling the facility tests bound advances by (#94).
 credit-math = { path = "../../programs/credit-math" }
 anchor-lang = { version = "=1.1.2" }

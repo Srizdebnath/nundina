@@ -35,12 +35,15 @@ cadence = "weekly"
 rounding = "floor-against-initiator"
 
 [treasury]
-# #120/#173: there is no treasury program. No venue, no deposit path and no
-# mint-on-deposit script exists; I1 holds by a recorded manual deposit (#171). No venue
-# is chosen, so none is named here — adding one needs a real adapter + a
-# recorded devnet deposit→mint tx, not a label.
+# #148: programs/npcs-treasury is the mint-on-deposit path (SRS 08 §3.1 backup
+# mode: USDC in a program-controlled vault PDA, NAV flat). It enforces I1
+# (supply == vault USDC) on every mint and burn — but only once the mint
+# authority is handed to its PDA. On devnet it is not (Squads vault), so I1
+# still holds by a recorded manual deposit (#171). No yield venue is
+# integrated, so none is named here (#173).
 status = "UNBACKED, process-only: no venue, no deposit or mint-on-deposit code; devnet supply 1.000000 = 1 USDC deposited by hand to the Squads vault sleeve account"
-backing = "none on-chain; I1 is a process rule (runbook.md § Treasury), not code"
+backing = "none on-chain on devnet yet; I1 is a process rule (runbook.md § Treasury) until the mint authority moves to the npcs-treasury PDA"
+program = "programs/npcs-treasury (#148): deposit -> 1:1 mint, issuer redeem burns against the vault, I1 checked before and after; built + LiteSVM-tested, not deployed"
 supply_cap_rule = "supply_base == confirmed_deposits_usdc * 10^6"
 
 [clusters]

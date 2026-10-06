@@ -9,16 +9,19 @@ skip-lint = false
 # dependency crate (no #[program]), and anchor's IDL pass would otherwise
 # try to extract an IDL from it and fail.
 [workspace]
-members = ["programs/credit-gate"]
+members = ["programs/credit-gate", "programs/npcs-treasury"]
 
 [programs.localnet]
 credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+npcs-treasury = "4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y"
 
 [programs.devnet]
 credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+npcs-treasury = "4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y"
 
 [programs.mainnet]
 credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+npcs-treasury = "4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y"
 
 [registry]
 url = "https://api.apr.dev"

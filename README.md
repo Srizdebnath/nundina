@@ -95,7 +95,8 @@ nundina/
 │   └── keys/                 ← gitignored keypairs + deployment records
 ├── programs/                 ← Anchor workspace (solana programs + shared math)
 │   ├── credit-gate/          ← Gate Program for Token ACL (sRFC37) — audit-scope-critical
-│   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
+│   ├── credit-math/          ← shared fixed-point arithmetic — every money path routes here
+│   └── npcs-treasury/        ← I1 mint-on-deposit treasury: the only NPCS mint path (#148)
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical
 │   ├── tests-svm/            ← LiteSVM integration tests (own workspace + lockfile)
