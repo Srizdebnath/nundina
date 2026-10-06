@@ -63,7 +63,17 @@ export type Struct = { [k: string]: Value };
 
 const IDL_PATH = new URL("../idl/payment_rails.json", import.meta.url);
 export const idl: Idl = JSON.parse(readFileSync(IDL_PATH, "utf8"));
-export const PROGRAM_ID: Address = address(idl.address);
+
+/** An account argument: a plain address, or a signer for signing slots. */
+export type AccountArg = Address | TransactionSigner | { [name: string]: AccountArg };
+
+/**
+ * A codec bound to one program's IDL. The module's own exports are the
+ * payment-rails codec; the engine cranks (#149) build theirs from
+ * `idl/auction_engine.json` etc. with the same rules.
+ */
+export function makeCodec(idl: Idl) {
+const PROGRAM_ID: Address = address(idl.address);
 
 const typeDefs = new Map(idl.types.map((t) => [t.name, t]));
 const addrEnc = getAddressEncoder();
@@ -114,7 +124,7 @@ function pushLe(n: bigint, bytes: number, out: number[]): void {
   for (let i = 0; i < bytes; i++) out.push(Number((n >> BigInt(8 * i)) & 0xffn));
 }
 
-export function encode(t: IdlType, v: Value): Uint8Array {
+function encode(t: IdlType, v: Value): Uint8Array {
   const out: number[] = [];
   encodeInto(t, v, out);
   return Uint8Array.from(out);
@@ -129,7 +139,7 @@ function readLe(b: Uint8Array, o: number, bytes: number): bigint {
   return n;
 }
 
-export function decodeAt(t: IdlType, b: Uint8Array, o: number): [Value, number] {
+function decodeAt(t: IdlType, b: Uint8Array, o: number): [Value, number] {
   switch (t) {
     case "u8": return [Number(readLe(b, o, 1)), o + 1];
     case "bool": return [readLe(b, o, 1) !== 0n, o + 1];
@@ -181,21 +191,21 @@ export function decodeAt(t: IdlType, b: Uint8Array, o: number): [Value, number] 
 const eqDisc = (b: Uint8Array, d: number[]) => d.every((x, i) => b[i] === x);
 
 /** Decode a program account; `null` if the discriminator isn't `name`'s. */
-export function decodeAccount<T = Struct>(name: string, data: Uint8Array): T | null {
+function decodeAccount<T = Struct>(name: string, data: Uint8Array): T | null {
   const acc = idl.accounts.find((a) => a.name === name);
   if (!acc) throw new Error(`unknown account ${name}`);
   if (data.length < 8 || !eqDisc(data, acc.discriminator)) return null;
   return decodeAt({ defined: { name } }, data, 8)[0] as T;
 }
 
-export function accountDiscriminator(name: string): Uint8Array {
+function accountDiscriminator(name: string): Uint8Array {
   const acc = idl.accounts.find((a) => a.name === name);
   if (!acc) throw new Error(`unknown account ${name}`);
   return Uint8Array.from(acc.discriminator);
 }
 
 /** Decode one `Program data:` payload into `{ name, data }`, or `null`. */
-export function decodeEvent(payload: Uint8Array): { name: string; data: Struct } | null {
+function decodeEvent(payload: Uint8Array): { name: string; data: Struct } | null {
   for (const ev of idl.events) {
     if (payload.length >= 8 && eqDisc(payload, ev.discriminator)) {
       return { name: ev.name, data: decodeAt({ defined: { name: ev.name } }, payload, 8)[0] as Struct };
@@ -204,11 +214,11 @@ export function decodeEvent(payload: Uint8Array): { name: string; data: Struct }
   return null;
 }
 
-export function errorName(code: number): string | undefined {
+function errorName(code: number): string | undefined {
   return idl.errors.find((e) => e.code === code)?.name;
 }
 
-export function errorCode(name: string): number {
+function errorCode(name: string): number {
   const e = idl.errors.find((x) => x.name === name);
   if (!e) throw new Error(`unknown error ${name}`);
   return e.code;
@@ -216,8 +226,6 @@ export function errorCode(name: string): number {
 
 // ── instructions ─────────────────────────────────────────────────────────
 
-/** An account argument: a plain address, or a signer for signing slots. */
-export type AccountArg = Address | TransactionSigner | { [name: string]: AccountArg };
 const isSigner = (a: AccountArg): a is TransactionSigner =>
   typeof a === "object" && isTransactionSigner(a as TransactionSigner);
 
@@ -227,7 +235,7 @@ const isSigner = (a: AccountArg): a is TransactionSigner =>
  * come from the IDL's `writable` / `signer` flags, so a caller can't get
  * them wrong.
  */
-export function ix(name: string, accounts: Record<string, AccountArg>, args: Struct = {}): Instruction {
+function ix(name: string, accounts: Record<string, AccountArg>, args: Struct = {}): Instruction {
   const def = idl.instructions.find((i) => i.name === name);
   if (!def) throw new Error(`unknown instruction ${name}`);
   // Composite fields nest: `{ refund: { caller, … }, keeper: { … } }`,
@@ -256,4 +264,34 @@ export function ix(name: string, accounts: Record<string, AccountArg>, args: Str
     encodeInto(arg.type, v, data);
   }
   return { programAddress: PROGRAM_ID, accounts: metas, data: Uint8Array.from(data) };
+}
+
+return {
+  idl,
+  programId: PROGRAM_ID,
+  encode,
+  decodeAt,
+  decodeAccount,
+  accountDiscriminator,
+  decodeEvent,
+  errorName,
+  errorCode,
+  ix,
+};
+}
+
+const rails = makeCodec(idl);
+export const PROGRAM_ID: Address = rails.programId;
+export const encode = rails.encode;
+export const decodeAt = rails.decodeAt;
+export const decodeAccount: <T = Struct>(name: string, data: Uint8Array) => T | null = rails.decodeAccount;
+export const accountDiscriminator = rails.accountDiscriminator;
+export const decodeEvent = rails.decodeEvent;
+export const errorName = rails.errorName;
+export const errorCode = rails.errorCode;
+export const ix = rails.ix;
+
+/** Load another program's IDL from `idl/<name>.json`. */
+export function loadIdl(name: string): Idl {
+  return JSON.parse(readFileSync(new URL(`../idl/${name}.json`, import.meta.url), "utf8"));
 }

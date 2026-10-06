@@ -1,0 +1,31 @@
+[package]
+name = "queue-claim"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["NUNDINA"]
+description = "Tokenized redemption-queue claims: attested request -> claim position token, issuer consent flags, sell in an auction session or pledge into the liquidity facility, window fills swept facility-first (SRS 08 §4.4, QC-P1..P5)."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "queue_claim"
+
+[features]
+default = []
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "payment-rails/idl-build", "mark-engine/idl-build", "liquidity-facility/idl-build"]
+
+[dependencies]
+# Exact pins: SRS locks anchor 1.1.x (see credit-gate/Cargo.toml).
+anchor-lang = { version = "=1.1.2" }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022", "token_2022_extensions"] }
+credit-math = { path = "../credit-math" }
+# QC-P4 sweep (facility repayment first, then holder).
+payment-rails = { path = "../../payment-rails/programs/payment-rails", features = ["cpi"] }
+# QC-P3 PV quote from the asset's protective mark.
+mark-engine = { path = "../mark-engine", features = ["cpi"] }
+# QC-P4 pledge path.
+liquidity-facility = { path = "../liquidity-facility", features = ["cpi"] }
+
+[dev-dependencies]

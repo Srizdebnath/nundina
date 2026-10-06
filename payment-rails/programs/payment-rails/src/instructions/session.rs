@@ -6,7 +6,10 @@ use anchor_spl::token_interface::Mint;
 
 use crate::error::RailsError;
 use crate::events::{EscrowAction, EscrowEvent, SessionAction, SessionEvent};
-use crate::state::{CashSession, Escrow, RailsConfig, SessionStatus};
+use crate::state::{
+    fee_within_cap, require_operator_role, CashSession, EngineGrant, Escrow, RailsConfig,
+    SessionStatus,
+};
 
 /// Operator-chosen session parameters, snapshotted at open (AE-P1, L5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
@@ -34,7 +37,16 @@ pub fn process_open_session(
     params: SessionParams,
 ) -> Result<()> {
     let cfg = &ctx.accounts.config;
+    require_operator_role(
+        cfg,
+        &ctx.accounts.operator.key(),
+        ctx.remaining_accounts,
+        EngineGrant::ROLE_SESSIONS,
+    )?;
     cfg.ensure_accepting()?;
+    // AE-3 (#147): a config written before the fee was removed (devnet:
+    // 10 bps) can never snapshot a fee into a session.
+    require!(fee_within_cap(cfg.fee_bps), RailsError::FeeTooHigh);
     let now = Clock::get()?.unix_timestamp;
     let SessionParams {
         commit_end,
@@ -178,8 +190,7 @@ pub struct OpenSession<'info> {
     /// Global config: operator check + mint/reserve snapshot source.
     #[account(
         seeds = [RailsConfig::SEED],
-        bump = config.bump,
-        has_one = operator @ RailsError::NotOperator
+        bump = config.bump
     )]
     pub config: Account<'info, RailsConfig>,
     /// New session PDA.
@@ -193,7 +204,8 @@ pub struct OpenSession<'info> {
     pub session: Account<'info, CashSession>,
     /// Traded asset mint (any token program); snapshotted with its decimals.
     pub asset_mint: InterfaceAccount<'info, Mint>,
-    /// Config operator; pays rent.
+    /// Config operator, or an engine granted `ROLE_SESSIONS` (its
+    /// `EngineGrant` is the first remaining account, #136); pays rent.
     #[account(mut)]
     pub operator: Signer<'info>,
     pub system_program: Program<'info, System>,

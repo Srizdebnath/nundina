@@ -200,6 +200,10 @@ pub enum RailsError {
     /// program, or not a well-formed outcome (#133).
     #[msg("Gate outcome missing or malformed")]
     GateOutcomeInvalid,
+    /// The signer is neither the config operator nor an engine granted the
+    /// role this instruction needs (#136: `grant_engine`).
+    #[msg("Signer is not an operator or granted engine for this role")]
+    EngineNotGranted,
 }
 
 impl From<MathError> for RailsError {

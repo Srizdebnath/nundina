@@ -224,7 +224,7 @@ fn deposit_ask_into_unthawed_vault_is_refused_typed() {
 fn npcs_dvp_end_to_end_after_gate_thaw() {
     for tp in Tp::ALL {
         let mut n = Npcs::new(tp);
-        n.env.set_fees(10, 5).unwrap();
+        n.env.set_fees(0, 5).unwrap();
         let s = n.env.open_session(1);
         let seller = n.party(BOND, 2 * UNIT);
         let buyer = n.party(300_000_000 + BOND, 0);

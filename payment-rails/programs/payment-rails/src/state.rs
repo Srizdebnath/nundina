@@ -4,9 +4,18 @@ use anchor_lang::prelude::*;
 
 use crate::error::RailsError;
 
-/// Hard ceiling on the protocol fee (bps of fill gross). Governance can set
-/// anything up to this, never above it (06 §11 HARD set).
-pub const MAX_FEE_BPS: u16 = 200;
+/// Hard ceiling on the protocol fee (bps of fill gross): **zero** (#147).
+/// doc 07 AE-3 forbids a protocol-collected per-trade fee, so no
+/// governance action can set one; the `fee` line of every split is 0.
+/// Changing this is a legal decision (doc 07 L2), not a parameter tweak.
+pub const MAX_FEE_BPS: u16 = 0;
+
+/// `fee_bps` within [`MAX_FEE_BPS`] (one place, so the ceiling can move
+/// without rewriting every check; clippy sees `x <= 0` as degenerate).
+#[allow(clippy::absurd_extreme_comparisons)]
+pub const fn fee_within_cap(fee_bps: u16) -> bool {
+    fee_bps <= MAX_FEE_BPS
+}
 /// Hard ceiling on the reserve cut (bps of fill gross).
 pub const MAX_RESERVE_BPS: u16 = 200;
 /// Basis-point denominator.
@@ -371,7 +380,7 @@ impl FillSplit {
     ) -> Result<FillSplit> {
         require!(qty > 0 && price > 0, RailsError::ZeroAmount);
         require!(
-            fee_bps <= MAX_FEE_BPS && reserve_bps <= MAX_RESERVE_BPS,
+            fee_within_cap(fee_bps) && reserve_bps <= MAX_RESERVE_BPS,
             RailsError::FeeTooHigh
         );
         let unit = 10u128
@@ -946,11 +955,13 @@ mod tests {
     #[test]
     fn fill_split_exact_values() {
         // 1.5 NPCS (6dp) at 98.123456 USDC → 147.185184 USDC.
-        let f = FillSplit::compute(1_500_000, 98_123_456, 6, 10, 5).unwrap();
+        let f = FillSplit::compute(1_500_000, 98_123_456, 6, 0, 5).unwrap();
         assert_eq!(f.gross, 147_185_184);
-        assert_eq!(f.fee, 147_185); // floor(147185184 × 10 / 10⁴)
+        assert_eq!(f.fee, 0); // AE-3: no per-trade fee (#147)
         assert_eq!(f.to_reserve, 73_592); // floor(147185184 × 5 / 10⁴)
-        assert_eq!(f.to_seller, 147_185_184 - 147_185 - 73_592);
+        assert_eq!(f.to_seller, 147_185_184 - 73_592);
+        // Any fee at all is refused.
+        assert!(FillSplit::compute(1_500_000, 98_123_456, 6, 1, 5).is_err());
     }
 
     #[test]
@@ -976,7 +987,7 @@ mod tests {
         let prices = [1u64, 3, 999_999, 1_000_000, 98_765_432];
         for &qty in &qtys {
             for &price in &prices {
-                for (fee, res) in [(0, 0), (1, 1), (10, 5), (MAX_FEE_BPS, MAX_RESERVE_BPS)] {
+                for (fee, res) in [(0, 0), (0, 1), (0, 5), (MAX_FEE_BPS, MAX_RESERVE_BPS)] {
                     for dec in [0u8, 6, 9] {
                         let Ok(f) = FillSplit::compute(qty, price, dec, fee, res) else {
                             continue; // only overflow may fail; checked below
@@ -1172,4 +1183,59 @@ mod tests {
             );
         }
     }
+}
+
+/// #136: an engine program's signer PDA admitted by the config authority to
+/// act as operator for some roles, next to `RailsConfig.operator`. Several
+/// engines (auction-engine sessions, liquidity-facility facilities,
+/// tranche-engine coupons) can then drive the rails at once without
+/// re-pointing the single operator. Presented as the first remaining
+/// account of the instruction that needs it, so existing clients that sign
+/// as the config operator are unchanged.
+#[account]
+#[derive(InitSpace)]
+pub struct EngineGrant {
+    /// The engine's signer (a PDA of the engine program).
+    pub engine: Pubkey,
+    /// Bitmask of `EngineGrant::ROLE_*`; 0 = revoked.
+    pub roles: u8,
+    pub bump: u8,
+}
+
+impl EngineGrant {
+    pub const SEED: &'static [u8] = b"engine";
+    /// `open_session` (auction-engine).
+    pub const ROLE_SESSIONS: u8 = 1;
+    /// `open_facility` (liquidity-facility).
+    pub const ROLE_FACILITY: u8 = 2;
+    /// `distribute_coupon` (tranche-engine).
+    pub const ROLE_COUPON: u8 = 4;
+    pub const ALL_ROLES: u8 = Self::ROLE_SESSIONS | Self::ROLE_FACILITY | Self::ROLE_COUPON;
+}
+
+/// Accept `signer` as the operator for `role`: either it is the config
+/// operator, or `remaining[0]` is its live `EngineGrant` carrying `role`.
+pub fn require_operator_role(
+    cfg: &RailsConfig,
+    signer: &Pubkey,
+    remaining: &[AccountInfo],
+    role: u8,
+) -> Result<()> {
+    if *signer == cfg.operator {
+        return Ok(());
+    }
+    // No grant presented: the pre-#136 answer, unchanged for old clients.
+    let ai = remaining.first().ok_or(RailsError::NotOperator)?;
+    require_keys_eq!(*ai.owner, crate::ID, RailsError::EngineNotGranted);
+    let grant = EngineGrant::try_deserialize(&mut &ai.try_borrow_data()?[..])
+        .map_err(|_| error!(RailsError::EngineNotGranted))?;
+    let expected = Pubkey::create_program_address(
+        &[EngineGrant::SEED, signer.as_ref(), &[grant.bump]],
+        &crate::ID,
+    )
+    .map_err(|_| error!(RailsError::EngineNotGranted))?;
+    require_keys_eq!(ai.key(), expected, RailsError::EngineNotGranted);
+    require_keys_eq!(grant.engine, *signer, RailsError::EngineNotGranted);
+    require!(grant.roles & role != 0, RailsError::EngineNotGranted);
+    Ok(())
 }

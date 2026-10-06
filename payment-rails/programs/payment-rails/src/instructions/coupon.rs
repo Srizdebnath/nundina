@@ -10,7 +10,9 @@ use crate::error::RailsError;
 use crate::events::{PayoutKind, PayoutMade};
 use crate::instructions::payout::load_destination;
 use crate::instructions::token;
-use crate::state::{CouponParams, CouponReceipt, CouponSplit, RailsConfig};
+use crate::state::{
+    require_operator_role, CouponParams, CouponReceipt, CouponSplit, EngineGrant, RailsConfig,
+};
 
 /// Distribute `cash` for `period_id`. The distributor (tranche-engine
 /// signer = config operator) pays from its own USDC account.
@@ -21,6 +23,12 @@ pub fn process_distribute_coupon(
     params: CouponParams,
     period_ref_hash: [u8; 32],
 ) -> Result<()> {
+    require_operator_role(
+        &ctx.accounts.config,
+        &ctx.accounts.operator.key(),
+        ctx.remaining_accounts,
+        EngineGrant::ROLE_COUPON,
+    )?;
     require!(cash > 0, RailsError::ZeroAmount);
     let now = Clock::get()?.unix_timestamp;
     let split = CouponSplit::compute(cash, &params)?;
@@ -81,7 +89,6 @@ pub struct DistributeCoupon<'info> {
     #[account(
         seeds = [RailsConfig::SEED],
         bump = config.bump,
-        has_one = operator @ RailsError::NotOperator,
         has_one = fee_receiver @ RailsError::FeeReceiverMismatch,
         has_one = reserve @ RailsError::ReserveMismatch,
         has_one = usdc_mint @ RailsError::MintMismatch
@@ -112,7 +119,8 @@ pub struct DistributeCoupon<'info> {
     #[account(mut)]
     pub junior_token: Box<InterfaceAccount<'info, TokenAccount>>,
     pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
-    /// Tranche-engine signer (config operator); pays the receipt rent.
+    /// Tranche-engine signer: the config operator, or an engine granted
+    /// `ROLE_COUPON` (first remaining account, #136); pays the receipt rent.
     #[account(mut)]
     pub operator: Signer<'info>,
     pub token_program: Interface<'info, TokenInterface>,

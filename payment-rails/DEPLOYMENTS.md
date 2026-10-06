@@ -14,7 +14,7 @@ derives the Cluster from the genesis hash (never from the caller).
 
 ## R5 devnet demo (exit criterion: commit → settle → payout on devnet)
 
-Settlement mint: Circle devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` · config `HxQznN6P3NjKBkyi3UGz1ePJjop76mHNiWP9kFtKKYyc` · fees 10 bps + 5 bps reserve.
+Settlement mint: Circle devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` · config `HxQznN6P3NjKBkyi3UGz1ePJjop76mHNiWP9kFtKKYyc` · fees 10 bps + 5 bps reserve (pre-#147; the next upgrade must be followed by `set_fees(0, 5)` — AE-3 removes the per-trade fee and `open_session` refuses a config that still has one).
 Session `3HRgupL1CgpFEcQqVpQu8etzdKsgBL4V58o6ike7tmVN` · facility `9Hd7Sz3H5phosAEbduLDzJpKWXDnHrvfoi61cvVnmASv` · reconciliation clean (0 open escrows, 2 receipts, seller + fee + reserve = gross) · evidence: 47 events, manifest SHA-256 `fc1c7bc7586e9fafa0eb53339a0c2550794eaa312daeefdef7c163c3cc99ad53`.
 
 | Step | Transaction |

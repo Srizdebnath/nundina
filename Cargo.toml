@@ -5,6 +5,16 @@ members = [
     "programs/credit-math",
     # P0: gate program skeleton (CG-P2 anchor; CG-P1..P6 land in P1).
     "programs/credit-gate",
+    # P2: NAV feeds, mark states, prints, MARK_PROTECTIVE (#137).
+    "programs/mark-engine",
+    # P3: sealed-bid uniform-price sessions over payment-rails (#136).
+    "programs/auction-engine",
+    # P4: advances, health, liquidation ladder (#139).
+    "programs/liquidity-facility",
+    # P4: redemption-queue claims, sell + pledge paths (#138).
+    "programs/queue-claim",
+    # P5: senior/junior tranching, three-book accounting (#140).
+    "programs/tranche-engine",
     # I1 mint-on-deposit treasury (#148).
     "programs/npcs-treasury",
 ]

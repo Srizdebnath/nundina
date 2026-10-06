@@ -28,6 +28,7 @@ npm run crank -- finish    --session <addr>                    # operator
 npm run crank -- reconcile --session <addr>                    # or --facility <addr>
 npm run crank -- export    --out evidence/ [--limit N]       # signed by EVIDENCE_KEYPAIR (or KEYPAIR)
 npm run crank -- keeper …  /  seasoning …                    # see § Bonded keepers below
+npm run crank -- phases    --session <auction-engine session>  # phase-deadline steps (#149), any wallet
 npm run crank -- verify-export --dir evidence/ [--signer <addr>]   # keyless, offline
 ```
 
@@ -140,3 +141,25 @@ on the PATH. It deploys the built program as upgradeable, then:
    its signature (by a key of its own) re-verify.
 5. Finally, the CLI runs `reconcile`, `refunds`, `export` and
    `verify-export` against the final state.
+
+## Phase-deadline crank (#149)
+
+`phases --session <addr>` drives an **auction-engine** session: it reads the
+session (decoded with `idl/auction_engine.json` through the same IDL codec,
+`makeCodec`), asks the pure planner `planPhase` for the next permissionless
+step, sends it, and repeats until nothing is due:
+
+| Phase | Step sent |
+|---|---|
+| Commit / Reveal, `now ≥ reveal_end` | `clear` (fails the session if too few reveals or no cross) |
+| Allocating | `allocate` (8 fills per tx) |
+| IssuerRofr, `now ≥ reveal_end + rofr_window` | `close_rofr` |
+| Settling | `settle` for the first unsettled fill (rails `settle_fill` + gate accounts forwarded), then `finish` (rails `finish_session` + print into mark-engine) |
+| any live phase, `now ≥ settle_deadline` | `expire` |
+
+It keeps no state: a restarted or competing crank re-reads the session.
+Refunds after `finish` / `expire` are the rails' own (`refunds`). Seasoning
+merges are `seasoning --mint` (above); bonded keepers cover the SLA.
+`tests/phases.spec.ts` pins the planner to the program's guards and the
+decoder to the program's IDL. **Not yet run against a live validator**: the
+engines are not deployed (see SRS §6).
