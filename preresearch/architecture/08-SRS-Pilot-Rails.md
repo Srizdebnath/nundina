@@ -49,7 +49,7 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | AC-7 | ⚠️ gate side | holder governor counts attested `investor_id`s against `holder_cap` (a second wallet of one investor counts once; `release_holder` frees the slot; `project_and_check` for allocation). No auction session yet to reallocate a rejected bid |
 | AC-8 | ⚠️ code, LiteSVM (#138) | a real request is attested into a claim token; **sell path**: the claim clears at 9.50 in an `auction-engine` session (own gate market + mark feed from `quote_pv`), the next window pays the buyer; **pledge path**: the claim backs a `liquidity-facility` advance, window fills sweep facility-first through rails `sweep_proceeds`, the advance closes and the claim is released. Not deployed |
 | AC-9 | ⚠️ code, LiteSVM (#139) | `liquidity-facility`: a drill mark (`publish_drill_nav`, evented `admin_drill`) breaches a position; grace, then the ladder: issuer ROFR at `MARK_PROTECTIVE` → backstop at its haircut (shortfall booked) → forced-sale `auction-engine` session (flagged print, excluded from marks) → workout of the unsold rest. Stale and Suspended marks refuse every step (H4). `payment-rails/tests-svm/tests/facility.rs`. Not deployed |
-| AC-10 | ⚠️ cash leg only | exact-conservation cash waterfall in `payment-rails` + `credit-math`; no `tranche-engine` (no tranches, no subordination check) |
+| AC-10 | ⚠️ code, LiteSVM (#140) | `tranche-engine`: pool needs `legal_doc_hash` + `waterfall_version`; 100 NPCS → 80 senior / 20 junior; one 30-day period of 2 USDC runs fees → senior coupon → reserve → junior coupon → residual through rails `distribute_coupon` with exact conservation; a junior exit that would breach 20% is rejected; mark-down impairs without touching principal; loss junior → reserve → senior, recovery senior first. Not deployed |
 | AC-11 | ✅ devnet | permissionless never-pausable refunds + kill-the-crank drill (CI and devnet) |
 | AC-12 | ⚠️ payment-rails only | `crank export` bundles payment-rails events with a SHA-256 manifest; no marks to reproduce (no `mark-engine`) |
 
@@ -59,7 +59,7 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | Item | Grade | Detail |
 |---|---|---|
 | H1 max advance rate 50% | ⚠️ | enforced by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ mark × rate. The **mark is curator-stated**: no `mark-engine` exists to verify it |
-| H2 min subordination floor | 🗺 | no value in the plan of record; no `tranche-engine` |
+| H2 min subordination floor | ⚠️ | `tranche-engine` enforces each pool's attachment point (TE-P5), bounded below by an **interim** hard floor `MIN_ATTACHMENT_BPS` = 5% (#140); the plan-of-record value still needs sign-off |
 | H3 max discount / reserve bound | ⚠️ | `auction-engine` enforces the reserve floor `NAV_effective × (1 − max_discount_bps)` per session, bounded by an **interim** hard ceiling `MAX_DISCOUNT_BPS` = 50% (#136). The plan-of-record value still needs sign-off |
 | H4 no liquidation on a stale mark | ⚠️ code | `liquidity-facility` `start_liquidation`, `ladder_buy` and `open_forced_sale` require `Feed::allows_liquidation` (Fresh/Warned); tested Suspended and Stale-by-age (#139). Not deployed |
 | H5 timeout refund path | ✅ | `payment-rails` refunds (AC-11) |
@@ -277,7 +277,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.6 `tranche-engine`
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** The TE-P4 cash waterfall exists in `payment-rails` + `credit-math`.
+> **As built (2026-10, #140): program built, not deployed** (`programs/tranche-engine`, id `Cvca…cFAS`). TE-P1 `create_pool` requires `legal_doc_hash` + `waterfall_version`; TE-P2 `deposit` at `MARK_PROTECTIVE` (Fresh mark) mints senior/junior Token-2022 tranches, junior accounts frozen; TE-P3 `mark` (MARK book), `realise_loss` (`credit_math::apply_loss`), `record_recovery` (senior first); TE-P4 `distribute` accrues coupons/fees per second and moves the period's cash through rails `distribute_coupon` (signer PDA, `EngineGrant` role COUPON), booking reserve + amortization; TE-P5 `exit_junior` checks the post-exit invariant, marks/losses impair; TE-P6 `set_pool_state`; TE-P7 `human_override` with an authority-document hash. **Pilot limits:** one registered payee per tranche (rails pays one senior and one junior destination); wind-down through an auction session is not wired.
 
 | ID | Requirement | Ref |
 |---|---|---|

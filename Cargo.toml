@@ -13,6 +13,8 @@ members = [
     "programs/liquidity-facility",
     # P4: redemption-queue claims, sell + pledge paths (#138).
     "programs/queue-claim",
+    # P5: senior/junior tranching, three-book accounting (#140).
+    "programs/tranche-engine",
 ]
 
 [workspace.package]

@@ -9,7 +9,7 @@ skip-lint = false
 # dependency crate (no #[program]), and anchor's IDL pass would otherwise
 # try to extract an IDL from it and fail.
 [workspace]
-members = ["programs/credit-gate", "programs/mark-engine", "programs/auction-engine", "programs/liquidity-facility", "programs/queue-claim"]
+members = ["programs/credit-gate", "programs/mark-engine", "programs/auction-engine", "programs/liquidity-facility", "programs/queue-claim", "programs/tranche-engine"]
 
 [programs.localnet]
 credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
@@ -17,6 +17,7 @@ mark-engine = "79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH"
 auction-engine = "Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7"
 liquidity-facility = "PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY"
 queue-claim = "2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4"
+tranche-engine = "CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS"
 
 [programs.devnet]
 credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
@@ -24,6 +25,7 @@ mark-engine = "79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH"
 auction-engine = "Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7"
 liquidity-facility = "PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY"
 queue-claim = "2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4"
+tranche-engine = "CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS"
 
 [programs.mainnet]
 credit-gate = "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
@@ -31,6 +33,7 @@ mark-engine = "79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH"
 auction-engine = "Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7"
 liquidity-facility = "PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY"
 queue-claim = "2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4"
+tranche-engine = "CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS"
 
 [registry]
 url = "https://api.apr.dev"
