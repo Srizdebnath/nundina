@@ -50,7 +50,7 @@ repo that describes them is the target, not a shipped feature.
 | `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | ME-P1..P7 on `main` (#137); not deployed; no nav-publisher yet (#141) |
 | `queue-claim` | ✅ | ✅ | ✅ LiteSVM: sell path through `auction-engine`, pledge path through `liquidity-facility` | — | QC-P1..P5 on `main` (#138); not deployed |
 | `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps, no runner yet (#141) | LF-P1..P6 on `main` (#139); not deployed |
-| `tranche-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P5); cash waterfall only |
+| `tranche-engine` | ✅ | ✅ | ✅ unit + LiteSVM (waterfall through rails) | ⚠️ permissionless `mark` / `distribute`, no runner yet (#141) | TE-P1..P7 on `main` (#140); not deployed |
 
 Per-AC grades: [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
 
@@ -99,6 +99,7 @@ nundina/
 │   ├── auction-engine/       ← sealed-bid uniform-price sessions over payment-rails (#136)
 │   ├── liquidity-facility/   ← advances at MARK_PROTECTIVE + liquidation ladder (#139)
 │   ├── queue-claim/          ← redemption-queue claims: sell or pledge (#138)
+│   ├── tranche-engine/       ← senior/junior tranching, three-book accounting (#140)
 │   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical
