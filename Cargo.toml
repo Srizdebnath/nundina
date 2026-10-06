@@ -9,6 +9,8 @@ members = [
     "programs/mark-engine",
     # P3: sealed-bid uniform-price sessions over payment-rails (#136).
     "programs/auction-engine",
+    # P4: advances, health, liquidation ladder (#139).
+    "programs/liquidity-facility",
 ]
 
 [workspace.package]
