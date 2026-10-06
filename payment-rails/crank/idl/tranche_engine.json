@@ -1,0 +1,1733 @@
+{
+  "address": "CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS",
+  "metadata": {
+    "name": "tranche_engine",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SPV-configured senior/junior tranching over NPCS collateral: three-book accounting, cash waterfall through payment-rails, loss/recovery waterfalls, subordination invariant (SRS 08 §4.6, TE-P1..P7)."
+  },
+  "instructions": [
+    {
+      "name": "activate",
+      "docs": [
+        "Warehousing → Active (authority). Coupons accrue from here."
+      ],
+      "discriminator": [
+        194,
+        203,
+        35,
+        100,
+        151,
+        55,
+        170,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_pool",
+      "docs": [
+        "TE-P1: a pool exists only with its indenture hash and waterfall",
+        "version. The signer is the SPV authority (multisig)."
+      ],
+      "discriminator": [
+        233,
+        146,
+        209,
+        142,
+        207,
+        104,
+        64,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "pool_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "senior_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  110,
+                  105,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "junior_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  106,
+                  117,
+                  110,
+                  105,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "tranche_token_program"
+        },
+        {
+          "name": "collateral_token_program"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "pool_id",
+          "type": "u32"
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "PoolParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "deposit",
+      "docs": [
+        "TE-P2: deposit collateral at `MARK_PROTECTIVE` (Fresh mark only);",
+        "mint junior = value × attachment, senior = the rest. Junior is",
+        "frozen (lock-up)."
+      ],
+      "discriminator": [
+        242,
+        35,
+        198,
+        137,
+        82,
+        225,
+        242,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "feed",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "senior_mint",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "junior_mint",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "collateral_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "depositor",
+          "signer": true
+        },
+        {
+          "name": "depositor_collateral",
+          "writable": true
+        },
+        {
+          "name": "depositor_senior",
+          "writable": true
+        },
+        {
+          "name": "depositor_junior",
+          "writable": true
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tranche_token_program"
+        },
+        {
+          "name": "collateral_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "distribute",
+      "docs": [
+        "TE-P4: one period's actual `cash` (paid in by the caller) down the",
+        "waterfall through rails `distribute_coupon`. Coupons accrue per",
+        "second since the last distribution; Amortizing pays senior",
+        "principal. Remaining accounts: the rails `DistributeCoupon` list +",
+        "the signer's `EngineGrant`."
+      ],
+      "discriminator": [
+        191,
+        44,
+        223,
+        207,
+        164,
+        236,
+        126,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "payer_usdc",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "period",
+          "type": "u32"
+        },
+        {
+          "name": "cash",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "exit_junior",
+      "docs": [
+        "TE-P5: a junior holder exits `amount` junior units for the pro-rata",
+        "collateral — only if the pool stays at or above its attachment",
+        "floor afterwards (otherwise the exit must be an auction sale to a",
+        "replacement holder)."
+      ],
+      "discriminator": [
+        93,
+        182,
+        58,
+        231,
+        251,
+        231,
+        104,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "feed",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "junior_mint",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "collateral_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "holder",
+          "signer": true
+        },
+        {
+          "name": "holder_junior",
+          "writable": true
+        },
+        {
+          "name": "holder_collateral",
+          "writable": true
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tranche_token_program"
+        },
+        {
+          "name": "collateral_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "human_override",
+      "docs": [
+        "TE-P7: human override on a contract/indenture conflict — any",
+        "state, authority only, evented with the authority document hash."
+      ],
+      "discriminator": [
+        223,
+        241,
+        139,
+        51,
+        233,
+        175,
+        78,
+        246
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "to",
+          "type": {
+            "defined": {
+              "name": "PoolState"
+            }
+          }
+        },
+        {
+          "name": "authority_doc_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "mark",
+      "docs": [
+        "TE-P3 MARK book: collateral at `MARK_PROTECTIVE` against principal.",
+        "Marks never touch principal; a mark that breaches the attachment",
+        "floor impairs the pool (TE-P5). Permissionless."
+      ],
+      "discriminator": [
+        203,
+        149,
+        171,
+        234,
+        35,
+        230,
+        238,
+        184
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "feed",
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "realise_loss",
+      "docs": [
+        "TE-P3 REALISED book: write a realised loss down junior → reserve →",
+        "senior (`credit_math::apply_loss`); the same amount becomes a",
+        "recovery receivable. Authority only."
+      ],
+      "discriminator": [
+        151,
+        29,
+        159,
+        162,
+        155,
+        136,
+        31,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "ref_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_recovery",
+      "docs": [
+        "TE-P3 RECOVERY book: a recovery reverses losses in reverse-waterfall",
+        "order — senior first, then junior. Authority only."
+      ],
+      "discriminator": [
+        53,
+        75,
+        21,
+        95,
+        180,
+        26,
+        115,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "ref_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_pool_state",
+      "docs": [
+        "TE-P6: governed transitions (authority)."
+      ],
+      "discriminator": [
+        20,
+        104,
+        205,
+        0,
+        74,
+        96,
+        94,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "to",
+          "type": {
+            "defined": {
+              "name": "PoolState"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Pool",
+      "discriminator": [
+        241,
+        154,
+        109,
+        4,
+        17,
+        177,
+        109,
+        188
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Books",
+      "discriminator": [
+        207,
+        41,
+        77,
+        244,
+        170,
+        184,
+        161,
+        70
+      ]
+    },
+    {
+      "name": "Deposited",
+      "discriminator": [
+        111,
+        141,
+        26,
+        45,
+        161,
+        35,
+        100,
+        57
+      ]
+    },
+    {
+      "name": "HumanOverride",
+      "discriminator": [
+        139,
+        63,
+        101,
+        132,
+        168,
+        207,
+        4,
+        226
+      ]
+    },
+    {
+      "name": "JuniorExited",
+      "discriminator": [
+        160,
+        166,
+        42,
+        172,
+        84,
+        55,
+        112,
+        131
+      ]
+    },
+    {
+      "name": "LossRealised",
+      "discriminator": [
+        133,
+        133,
+        139,
+        133,
+        116,
+        92,
+        242,
+        118
+      ]
+    },
+    {
+      "name": "PeriodDistributed",
+      "discriminator": [
+        51,
+        131,
+        173,
+        91,
+        186,
+        104,
+        169,
+        7
+      ]
+    },
+    {
+      "name": "PoolCreated",
+      "discriminator": [
+        202,
+        44,
+        41,
+        88,
+        104,
+        220,
+        157,
+        82
+      ]
+    },
+    {
+      "name": "PoolStateChanged",
+      "discriminator": [
+        96,
+        18,
+        77,
+        187,
+        117,
+        8,
+        109,
+        251
+      ]
+    },
+    {
+      "name": "RecoveryRecorded",
+      "discriminator": [
+        38,
+        18,
+        5,
+        99,
+        23,
+        64,
+        59,
+        246
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "MissingDoc",
+      "msg": "pool needs its indenture hash and waterfall version (TE-P1)"
+    },
+    {
+      "code": 6001,
+      "name": "AttachmentOutOfBounds",
+      "msg": "attachment point outside the hard bounds"
+    },
+    {
+      "code": 6002,
+      "name": "RateOutOfBounds",
+      "msg": "coupon / fee rate above the ceiling"
+    },
+    {
+      "code": 6003,
+      "name": "ZeroAmount",
+      "msg": "amount must be positive"
+    },
+    {
+      "code": 6004,
+      "name": "WrongState",
+      "msg": "pool is not in a state that allows this"
+    },
+    {
+      "code": 6005,
+      "name": "MarkNotFresh",
+      "msg": "deposits need a Fresh mark"
+    },
+    {
+      "code": 6006,
+      "name": "FeedMismatch",
+      "msg": "feed / mint / vault does not match the pool"
+    },
+    {
+      "code": 6007,
+      "name": "NotAuthority",
+      "msg": "signer is not the pool authority"
+    },
+    {
+      "code": 6008,
+      "name": "LossAboveCapital",
+      "msg": "loss exceeds junior + reserve + senior capital"
+    },
+    {
+      "code": 6009,
+      "name": "RecoveryAboveReceivable",
+      "msg": "recovery exceeds the receivable"
+    },
+    {
+      "code": 6010,
+      "name": "WrongPeriod",
+      "msg": "period out of order"
+    },
+    {
+      "code": 6011,
+      "name": "RailsAccounts",
+      "msg": "rails accounts do not match the pool"
+    },
+    {
+      "code": 6012,
+      "name": "SubordinationBreach",
+      "msg": "junior exit would breach the attachment floor (TE-P5)"
+    },
+    {
+      "code": 6013,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Books",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool_id",
+            "type": "u32"
+          },
+          {
+            "name": "senior_principal",
+            "type": "u64"
+          },
+          {
+            "name": "junior_principal",
+            "type": "u64"
+          },
+          {
+            "name": "unrealised_mark",
+            "type": "i64"
+          },
+          {
+            "name": "realised_loss",
+            "type": "u64"
+          },
+          {
+            "name": "recovery_receivable",
+            "type": "u64"
+          },
+          {
+            "name": "reserve_level",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Deposited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "value",
+            "type": "u64"
+          },
+          {
+            "name": "senior",
+            "type": "u64"
+          },
+          {
+            "name": "junior",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Feed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "docs": [
+              "auction-engine's print PDA (the only `record_print` signer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "n_publishers",
+            "type": "u8"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          },
+          {
+            "name": "nav_pico",
+            "docs": [
+              "Latest official NAV at [`NAV_SCALE`] (0 = never published)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "docs": [
+              "When the NAV was written on-chain; ages are measured from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "publications",
+            "type": "u64"
+          },
+          {
+            "name": "last_drill",
+            "docs": [
+              "The latest NAV came from `publish_drill_nav`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "suspended",
+            "type": "bool"
+          },
+          {
+            "name": "suspend_reason",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_state",
+            "docs": [
+              "Last evented state (transitions are evented once)."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "docs": [
+              "Implied NAV from the latest eligible print (0 = none)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "implied_ts",
+            "type": "i64"
+          },
+          {
+            "name": "prints_accepted",
+            "type": "u32"
+          },
+          {
+            "name": "prints_rejected",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "warn_after",
+            "docs": [
+              "Age at which a Fresh mark becomes Warned."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stale_after",
+            "docs": [
+              "Age at which the mark becomes Stale."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "warned_haircut_bps",
+            "docs": [
+              "Haircut applied while Warned (≤ `MAX_WARNED_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stale_haircut_bps",
+            "docs": [
+              "Haircut applied while Stale or Suspended (≤ `MAX_STALE_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "print_policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "band_bps",
+            "docs": [
+              "BANDED width, bps of price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_volume",
+            "docs": [
+              "Minimum print volume (base units) to enter the implied curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_investors",
+            "docs": [
+              "Minimum distinct investor_ids on a print (G2)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "outlier_band_bps",
+            "docs": [
+              "Maximum |print − NAV| / NAV for an eligible print."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drills_enabled",
+            "docs": [
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HumanOverride",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": {
+              "defined": {
+                "name": "PoolState"
+              }
+            }
+          },
+          {
+            "name": "to",
+            "type": {
+              "defined": {
+                "name": "PoolState"
+              }
+            }
+          },
+          {
+            "name": "authority_doc_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "JuniorExited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "principal",
+            "type": "u64"
+          },
+          {
+            "name": "collateral",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LossRealised",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "junior_hit",
+            "type": "u64"
+          },
+          {
+            "name": "reserve_hit",
+            "type": "u64"
+          },
+          {
+            "name": "senior_hit",
+            "type": "u64"
+          },
+          {
+            "name": "ref_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkState",
+      "docs": [
+        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fresh"
+          },
+          {
+            "name": "Warned"
+          },
+          {
+            "name": "Stale"
+          },
+          {
+            "name": "Suspended"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PeriodDistributed",
+      "docs": [
+        "TE-P4: every line, with its distribution character."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "cash",
+            "type": "u64"
+          },
+          {
+            "name": "fees",
+            "type": "u64"
+          },
+          {
+            "name": "senior_coupon",
+            "type": "u64"
+          },
+          {
+            "name": "reserve",
+            "type": "u64"
+          },
+          {
+            "name": "senior_amort",
+            "type": "u64"
+          },
+          {
+            "name": "junior_coupon",
+            "type": "u64"
+          },
+          {
+            "name": "junior_residual",
+            "type": "u64"
+          },
+          {
+            "name": "unpaid_senior_coupon",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool_id",
+            "type": "u32"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "PoolParams"
+              }
+            }
+          },
+          {
+            "name": "collateral_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "senior_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "junior_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "collateral_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash",
+            "type": "pubkey"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "PoolState"
+              }
+            }
+          },
+          {
+            "name": "collateral_qty",
+            "type": "u64"
+          },
+          {
+            "name": "senior_principal",
+            "type": "u64"
+          },
+          {
+            "name": "junior_principal",
+            "type": "u64"
+          },
+          {
+            "name": "unrealised_mark",
+            "docs": [
+              "MARK book: collateral value − principal (signed)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "last_value",
+            "type": "u64"
+          },
+          {
+            "name": "realised_loss",
+            "docs": [
+              "REALISED book."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "senior_loss",
+            "type": "u64"
+          },
+          {
+            "name": "junior_loss",
+            "type": "u64"
+          },
+          {
+            "name": "recovery_receivable",
+            "docs": [
+              "RECOVERY book."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_level",
+            "docs": [
+              "Ledger of the reserve line (the cash sits in the rails reserve)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "periods",
+            "type": "u32"
+          },
+          {
+            "name": "last_distribution",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "signer_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "legal_doc_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "waterfall_version",
+            "type": "u32"
+          },
+          {
+            "name": "attachment_bps",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "legal_doc_hash",
+            "docs": [
+              "SHA-256 of the pilot indenture (TE-P1; required)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "waterfall_version",
+            "docs": [
+              "Waterfall version of record (TE-P1; required)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "attachment_bps",
+            "docs": [
+              "Junior share = attachment point, and the subordination floor."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "senior_coupon_bps",
+            "type": "u64"
+          },
+          {
+            "name": "junior_coupon_bps",
+            "type": "u64"
+          },
+          {
+            "name": "fees_bps",
+            "type": "u64"
+          },
+          {
+            "name": "reserve_target",
+            "docs": [
+              "Reserve account refill target (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "senior_payee_token",
+            "docs": [
+              "Registered rails payout accounts of the senior / junior holders",
+              "(pilot: one holder of record per tranche)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "junior_payee_token",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Warehousing"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Standstill"
+          },
+          {
+            "name": "Amortizing"
+          },
+          {
+            "name": "Impaired"
+          },
+          {
+            "name": "WoundDown"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolStateChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool_id",
+            "type": "u32"
+          },
+          {
+            "name": "from",
+            "type": {
+              "defined": {
+                "name": "PoolState"
+              }
+            }
+          },
+          {
+            "name": "to",
+            "type": {
+              "defined": {
+                "name": "PoolState"
+              }
+            }
+          },
+          {
+            "name": "doc_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintPolicy",
+      "docs": [
+        "ME-P6 print policy classes."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Public"
+          },
+          {
+            "name": "Banded"
+          },
+          {
+            "name": "AggregateOnly"
+          },
+          {
+            "name": "DataRoom"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RecoveryRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "to_senior",
+            "type": "u64"
+          },
+          {
+            "name": "to_junior",
+            "type": "u64"
+          },
+          {
+            "name": "ref_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
