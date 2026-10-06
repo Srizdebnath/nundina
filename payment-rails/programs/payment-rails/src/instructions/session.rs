@@ -6,7 +6,7 @@ use anchor_spl::token_interface::Mint;
 
 use crate::error::RailsError;
 use crate::events::{EscrowAction, EscrowEvent, SessionAction, SessionEvent};
-use crate::state::{CashSession, Escrow, RailsConfig, SessionStatus};
+use crate::state::{fee_within_cap, CashSession, Escrow, RailsConfig, SessionStatus};
 
 /// Operator-chosen session parameters, snapshotted at open (AE-P1, L5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
@@ -35,6 +35,9 @@ pub fn process_open_session(
 ) -> Result<()> {
     let cfg = &ctx.accounts.config;
     cfg.ensure_accepting()?;
+    // AE-3 (#147): a config written before the fee was removed (devnet:
+    // 10 bps) can never snapshot a fee into a session.
+    require!(fee_within_cap(cfg.fee_bps), RailsError::FeeTooHigh);
     let now = Clock::get()?.unix_timestamp;
     let SessionParams {
         commit_end,

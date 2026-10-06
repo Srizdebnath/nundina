@@ -9,7 +9,8 @@ use common::*;
 use payment_rails::{Breaker, FillSplit, RailsError, SessionStatus, MAX_FEE_BPS, MAX_RESERVE_BPS};
 use solana_signer::Signer;
 
-const FEE_BPS: u16 = 10;
+/// No protocol per-trade fee (AE-3, #147); the reserve cut stays.
+const FEE_BPS: u16 = 0;
 const RES_BPS: u16 = 5;
 const UNIT: u64 = 1_000_000; // 1 whole asset (6 dp)
 const PRICE: u64 = 98_123_456; // 98.123456 USDC per whole unit

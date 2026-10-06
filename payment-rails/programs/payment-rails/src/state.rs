@@ -4,9 +4,18 @@ use anchor_lang::prelude::*;
 
 use crate::error::RailsError;
 
-/// Hard ceiling on the protocol fee (bps of fill gross). Governance can set
-/// anything up to this, never above it (06 §11 HARD set).
-pub const MAX_FEE_BPS: u16 = 200;
+/// Hard ceiling on the protocol fee (bps of fill gross): **zero** (#147).
+/// doc 07 AE-3 forbids a protocol-collected per-trade fee, so no
+/// governance action can set one; the `fee` line of every split is 0.
+/// Changing this is a legal decision (doc 07 L2), not a parameter tweak.
+pub const MAX_FEE_BPS: u16 = 0;
+
+/// `fee_bps` within [`MAX_FEE_BPS`] (one place, so the ceiling can move
+/// without rewriting every check; clippy sees `x <= 0` as degenerate).
+#[allow(clippy::absurd_extreme_comparisons)]
+pub const fn fee_within_cap(fee_bps: u16) -> bool {
+    fee_bps <= MAX_FEE_BPS
+}
 /// Hard ceiling on the reserve cut (bps of fill gross).
 pub const MAX_RESERVE_BPS: u16 = 200;
 /// Basis-point denominator.
@@ -371,7 +380,7 @@ impl FillSplit {
     ) -> Result<FillSplit> {
         require!(qty > 0 && price > 0, RailsError::ZeroAmount);
         require!(
-            fee_bps <= MAX_FEE_BPS && reserve_bps <= MAX_RESERVE_BPS,
+            fee_within_cap(fee_bps) && reserve_bps <= MAX_RESERVE_BPS,
             RailsError::FeeTooHigh
         );
         let unit = 10u128
@@ -946,11 +955,13 @@ mod tests {
     #[test]
     fn fill_split_exact_values() {
         // 1.5 NPCS (6dp) at 98.123456 USDC → 147.185184 USDC.
-        let f = FillSplit::compute(1_500_000, 98_123_456, 6, 10, 5).unwrap();
+        let f = FillSplit::compute(1_500_000, 98_123_456, 6, 0, 5).unwrap();
         assert_eq!(f.gross, 147_185_184);
-        assert_eq!(f.fee, 147_185); // floor(147185184 × 10 / 10⁴)
+        assert_eq!(f.fee, 0); // AE-3: no per-trade fee (#147)
         assert_eq!(f.to_reserve, 73_592); // floor(147185184 × 5 / 10⁴)
-        assert_eq!(f.to_seller, 147_185_184 - 147_185 - 73_592);
+        assert_eq!(f.to_seller, 147_185_184 - 73_592);
+        // Any fee at all is refused.
+        assert!(FillSplit::compute(1_500_000, 98_123_456, 6, 1, 5).is_err());
     }
 
     #[test]
@@ -976,7 +987,7 @@ mod tests {
         let prices = [1u64, 3, 999_999, 1_000_000, 98_765_432];
         for &qty in &qtys {
             for &price in &prices {
-                for (fee, res) in [(0, 0), (1, 1), (10, 5), (MAX_FEE_BPS, MAX_RESERVE_BPS)] {
+                for (fee, res) in [(0, 0), (0, 1), (0, 5), (MAX_FEE_BPS, MAX_RESERVE_BPS)] {
                     for dec in [0u8, 6, 9] {
                         let Ok(f) = FillSplit::compute(qty, price, dec, fee, res) else {
                             continue; // only overflow may fail; checked below

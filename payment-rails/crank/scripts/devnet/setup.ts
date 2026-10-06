@@ -17,7 +17,7 @@ import { configPda } from "../../src/pda.ts";
 import { CIRCLE_DEVNET_USDC, clusterLabel, ensureAta, ensureSeedTokenAccount, must, writeJson, type Deployment } from "./common.ts";
 
 const LOADER_V3 = address("BPFLoaderUpgradeab1e11111111111111111111111");
-const FEE_BPS = 10;
+const FEE_BPS = 0; // AE-3: no protocol per-trade fee (#147)
 const RESERVE_BPS = 5;
 
 async function main(): Promise<void> {
