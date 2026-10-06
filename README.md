@@ -47,7 +47,7 @@ repo that describes them is the target, not a shipped feature.
 | `credit-gate` | ✅ | ✅ | ✅ LiteSVM + real SAS/Token ACL | — | CG-P1..P7 on `main`; devnet redeploy pending (#45) |
 | `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 4 functions consumed by `payment-rails` |
 | `auction-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P3) |
-| `mark-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P2) |
+| `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | ME-P1..P7 on `main` (#137); not deployed; no nav-publisher yet (#141) |
 | `queue-claim` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); "sell a claim in an auction" is the unshipped headline demo |
 | `liquidity-facility` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P4); cash leg only, no liquidation ladder (#124) |
 | `tranche-engine` | ❌ | ❌ | ❌ | ❌ | 🗺 roadmap (P5); cash waterfall only |
@@ -95,6 +95,7 @@ nundina/
 │   └── keys/                 ← gitignored keypairs + deployment records
 ├── programs/                 ← Anchor workspace (solana programs + shared math)
 │   ├── credit-gate/          ← Gate Program for Token ACL (sRFC37) — audit-scope-critical
+│   ├── mark-engine/          ← NAV feeds, mark states, prints, MARK_PROTECTIVE (#137)
 │   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
 ├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
 │   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical

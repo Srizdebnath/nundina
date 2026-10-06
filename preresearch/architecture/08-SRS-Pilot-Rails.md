@@ -41,7 +41,7 @@ over-claim. ✅ passes as specified · ⚠️ a named part is built ·
 | AC | Grade | What exists / what blocks it |
 |---|---|---|
 | AC-1 | ⚠️ passes off-chain-of-record | SAS credential + 3 schemas live on devnet; `validate` + Token ACL hooks thaw an attested wallet and reject an ineligible one with a typed reason, on a validator with the real SAS and Token ACL programs (`ops/gate/test-localnet.sh`, `tests-svm/tests/sas_token_acl.rs`). Not yet on the NPCS mint: needs the gate redeploy (`Bprm…`, #45) and the freeze authority handed to Token ACL (`2xhj…`) |
-| AC-2 | 🗺 | `mark-engine` and `nav-publisher` have no code; NAV math is in `credit-math` (`nav.rs`) with no consumer |
+| AC-2 | ⚠️ program only | `mark-engine` (#137): publisher-set `publish_nav`, Fresh→Warned→Stale→Fresh by age with evented transitions, explicit Suspended (LiteSVM `tests-svm/tests/mark.rs`). No `nav-publisher` and no devnet feed yet, so no 4-week record |
 | AC-3 | ⚠️ cash leg only | `payment-rails` escrow + one-fill DvP cash leg (live devnet, R5 on a manifest mint, not live NPCS). `auction-engine` has no code |
 | AC-4 | 🗺 | needs `auction-engine` + `mark-engine` |
 | AC-5 | ⚠️ cash leg only | `payment-rails` ROFR cash path; no session state machine around it |
@@ -232,7 +232,7 @@ Mark states arise **naturally**: publishing weekly keeps Fresh; skipping a week 
 
 ### 4.3 `mark-engine`
 
-> **As built (2026-10, #128): 🗺 roadmap — no crate, IDL, test or crank.** NAV and haircut math exist in `credit-math` with no program consumer.
+> **As built (2026-10, #137): program built, not deployed** (`programs/mark-engine`, id `79yp…x4LH`). ME-P1 publisher-set `publish_nav` storing `model_version` + `inputs_hash` (the SAS attestation is signed off-chain by the same publisher key; on-chain it is the publisher-set check); ME-P2 states with permissionless `refresh`; ME-P3 haircuts bounded by `MAX_WARNED_HAIRCUT_BPS` / `MAX_STALE_HAIRCUT_BPS`; ME-P4 `record_print` from the configured print source only (auction-engine's print PDA), eligibility = not forced-sale, min volume, min investor_ids, outlier band; ME-P5 `Feed::mark_protective`; ME-P6 PUBLIC/BANDED/AGGREGATE_ONLY/DATA_ROOM disclosure; ME-P7 `BreakerLevel` + `allows_liquidation` / `allows_new_advance`. `publish_drill_nav` (devnet drills only) is evented `admin_drill`. Tests: unit + LiteSVM `payment-rails/tests-svm/tests/mark.rs`.
 
 | ID | Requirement | Ref |
 |---|---|---|
