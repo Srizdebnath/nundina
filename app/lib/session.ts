@@ -174,6 +174,17 @@ export function navToPrice(navPico: bigint, assetDecimals: number): bigint {
   return (navPico * 10n ** BigInt(assetDecimals)) / PICO;
 }
 
+/**
+ * USDC for `qty` base units at `price` micro-USDC per whole unit, rounded UP
+ * (auction-engine `gross`, payment-rails escrow math). Escrowing the floored value
+ * under-funds by one base unit whenever `price × qty` is not a multiple of
+ * 10^decimals, and `reveal` then fails with `BidExceedsEscrow`.
+ */
+export function gross(qty: bigint, price: bigint, assetDecimals: number): bigint {
+  const scale = 10n ** BigInt(assetDecimals);
+  return (qty * price + scale - 1n) / scale;
+}
+
 /** "0.95" → 950000n at `dp` decimals; rejects more precision than `dp`. */
 export function parseUnits(s: string, dp: number): bigint {
   const m = s.trim().match(/^(\d+)(?:\.(\d+))?$/);

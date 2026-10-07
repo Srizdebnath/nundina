@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { address } from "@solana/kit";
 import { fromHex, hex } from "@/lib/borsh";
-import { clockPhase, curves, fmt6, navToPrice, parseUnits, type OrderView } from "@/lib/session";
+import { clockPhase, curves, fmt6, gross, navToPrice, parseUnits, type OrderView } from "@/lib/session";
 import { commitment } from "@/lib/tx";
 
 const owner = address("BJL7L58MX82DiGxtjcq5VbzWuLLZe26U6R8PCfdJ2EMh");
@@ -55,6 +55,15 @@ describe("session math", () => {
     expect(parseUnits("12", 6)).toBe(12_000_000n);
     expect(() => parseUnits("0.0000001", 6)).toThrow(/at most 6/);
     expect(() => parseUnits("1e3", 6)).toThrow(/not a number/);
+  });
+
+  it("escrow gross rounds up like the program (auction-engine gross_rounds_up_like_the_rails)", () => {
+    expect(gross(1_000_000n, 950_000n, 6)).toBe(950_000n);
+    expect(gross(1n, 950_000n, 6)).toBe(1n);
+    expect(gross(3n, 333_333n, 6)).toBe(1n);
+    expect(gross(0n, 950_000n, 6)).toBe(0n);
+    // 1.5 units at 0.333333: floor would escrow 499999 and reveal would fail.
+    expect(gross(1_500_000n, 333_333n, 6)).toBe(500_000n);
   });
 });
 

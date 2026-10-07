@@ -10,7 +10,7 @@ import React, { useEffect, useState } from "react";
 import { address, type Address } from "@solana/kit";
 import { fromHex, hex } from "@/lib/borsh";
 import { explorer } from "@/lib/programs";
-import { parseUnits } from "@/lib/session";
+import { gross, parseUnits } from "@/lib/session";
 import { getTokenHoldings } from "@/lib/rpc";
 import { commitBidIx, commitment, revealIx } from "@/lib/tx";
 import { useWallet } from "@/lib/wallet";
@@ -80,7 +80,7 @@ export function SessionActions(props: {
     run(async () => {
       const l = parseUnits(limit, 6);
       const q = parseUnits(qty, props.assetDecimals);
-      const cash = (l * q) / 10n ** BigInt(props.assetDecimals);
+      const cash = gross(q, l, props.assetDecimals);
       if (cash > BigInt(props.maxCash)) throw new Error(`cash ${cash} exceeds the per-investor cap ${props.maxCash}`);
       const holdings = await getTokenHoldings(account);
       const usdc = holdings.filter((h) => h.mint === props.usdcMint).sort((a, b) => (a.amount > b.amount ? -1 : 1))[0];
