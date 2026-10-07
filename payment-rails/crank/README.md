@@ -163,3 +163,33 @@ merges are `seasoning --mint` (above); bonded keepers cover the SLA.
 `tests/phases.spec.ts` pins the planner to the program's guards and the
 decoder to the program's IDL. **Not yet run against a live validator**: the
 engines are not deployed (see SRS §6).
+
+## Live-NPCS DvP (R5 on the real mint, #145 / #172)
+
+`scripts/devnet/npcs-dvp.ts` records one DvP where the asset leg is the
+devnet NPCS mint `6vt1…VKL4`. Holder H sells 1.0 NPCS, and buyers X (0.6) and
+Y (0.4) buy at 0.98:
+1. Each buyer is SAS-attested, passes `validate`, and gets an NPCS account
+   that Token ACL thaws permissionlessly; credit-gate decides.
+2. The escrow's asset vault is a program PDA, never an investor, so the
+   Token ACL MintConfig authority thaws it with the authority `Thaw`
+   (instruction 4, from the upstream client).
+3. Each fill's `settle_fill` CPIs credit-gate `settle_check`.
+4. The run finishes with refunds, reconciliation and a signed evidence
+   bundle, plus a step record with links.
+
+```bash
+RPC_URL=https://api.devnet.solana.com npx tsx scripts/devnet/npcs-dvp.ts --preflight   # read-only
+RPC_URL=https://api.devnet.solana.com npx tsx scripts/devnet/npcs-dvp.ts
+bash scripts/devnet/rehearse-npcs.sh      # the same run on a local clone of devnet
+```
+
+`--preflight` lists what still blocks the run: the approved payment-rails
+upgrade (Squads proposal #2; its buffer closes when executed), H's lot
+seasoning, the keys, and the operator's USDC and SOL. `rehearse-npcs.sh`
+clones every devnet account the run touches and loads payment-rails from
+that approved buffer (sha256 `b7681924…fbec`, the exact build devnet will
+run). It patches only H's seasoning expiry and the operator's USDC balance
+(`npcs-clone.ts`), then runs `npcs-dvp.ts` unchanged. It passes: both fills
+settle through the gate, reconciliation is clean, and 2/2 fills are proven
+under AE-P8.

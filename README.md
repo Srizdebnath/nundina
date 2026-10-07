@@ -77,7 +77,7 @@ substantive P0 exit (HACKATHON §4) is open:
 |---|---|---|---|
 | 8 | An investor thaws **through** `credit-gate` (Token ACL) | ⚠️ | ✅ on a validator with the real programs (`ops/gate/test-localnet.sh`); on devnet NPCS's freeze authority is still the `2xhj…` wallet and the gate is the pre-#26 build (#45) |
 | 9 | SAS attestation read by the gate | ✅ | credential + schemas live on devnet (`ops/gate/deployment-devnet.json`); CG-P6 read tested against the real SAS program (#122) |
-| 10 | R5 settles **live NPCS** | ❌ | R5 ran against a manifest mint (`payment-rails/PHASES.md`); waits on row 8 |
+| 10 | R5 settles **live NPCS** | ❌ (ready) | R5 ran against a manifest mint (`payment-rails/PHASES.md`). The live-NPCS run is scripted and rehearsed (#145/#172): `payment-rails/crank/scripts/devnet/npcs-dvp.ts` passes end to end on a devnet clone with the exact pending rails build. It waits on three things `--preflight` reports: the approved Squads upgrade executed, holder H's lot seasoned (2026-10-11 07:53 UTC), 1.6 devnet USDC for the operator |
 | 11 | Auction session + queue-claim sale | ⚠️ | both built and tested end to end in LiteSVM against the real rails, gate and SAS: a claim sells in an auction session (#136, #138). Not deployed |
 
 ## Repo structure
