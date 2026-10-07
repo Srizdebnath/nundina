@@ -6,11 +6,12 @@
  * synced from `anchor build` with `npm run sync-idl`), so the client can't
  * drift from the on-chain layout without the unit tests failing.
  *
- * Supported types are exactly what the program uses: u8/u16/u32/u64/i64,
- * bool, pubkey, fixed arrays, vecs (u32 length prefix), structs and unit
- * enums. Values: u64/i64 are `bigint`, pubkeys are `Address` strings,
- * `[u8; N]` is `Uint8Array`, `Vec<T>` is an array, enums are their variant
- * name.
+ * Supported types are exactly what the programs use: u8/u16/u32/u64/i64,
+ * u128/i128 (mark-engine NAVs), bool, pubkey, fixed arrays, vecs (u32 length
+ * prefix), options (credit-gate / mark-engine events), structs and unit
+ * enums. Values: u64/i64/u128 are `bigint`, pubkeys are `Address` strings,
+ * `[u8; N]` is `Uint8Array`, `Vec<T>` is an array, `None` is `null`, enums
+ * are their variant name.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -25,9 +26,10 @@ import {
 } from "@solana/kit";
 
 type IdlType =
-  | "u8" | "u16" | "u32" | "u64" | "i64" | "bool" | "pubkey"
+  | "u8" | "u16" | "u32" | "u64" | "i64" | "u128" | "i128" | "bool" | "pubkey"
   | { array: [IdlType, number] }
   | { vec: IdlType }
+  | { option: IdlType }
   | { defined: { name: string } };
 
 interface IdlField { name: string; type: IdlType }
@@ -58,7 +60,7 @@ export interface Idl {
   types: IdlTypeDef[];
 }
 
-export type Value = bigint | number | boolean | string | Uint8Array | Value[] | { [k: string]: Value };
+export type Value = bigint | number | boolean | string | null | Uint8Array | Value[] | { [k: string]: Value };
 export type Struct = { [k: string]: Value };
 
 const IDL_PATH = new URL("../idl/payment_rails.json", import.meta.url);
@@ -89,7 +91,15 @@ function encodeInto(t: IdlType, v: Value, out: number[]): void {
     case "u32": pushLe(BigInt(v as number), 4, out); return;
     case "u64": pushLe(BigInt(v as bigint), 8, out); return;
     case "i64": pushLe(BigInt.asUintN(64, BigInt(v as bigint)), 8, out); return;
+    case "u128": pushLe(BigInt(v as bigint), 16, out); return;
+    case "i128": pushLe(BigInt.asUintN(128, BigInt(v as bigint)), 16, out); return;
     case "pubkey": out.push(...addrEnc.encode(v as Address)); return;
+  }
+  if ("option" in t) {
+    if (v === null) { out.push(0); return; }
+    out.push(1);
+    encodeInto(t.option, v, out);
+    return;
   }
   if ("array" in t) {
     const [inner, len] = t.array;
@@ -147,7 +157,15 @@ function decodeAt(t: IdlType, b: Uint8Array, o: number): [Value, number] {
     case "u32": return [Number(readLe(b, o, 4)), o + 4];
     case "u64": return [readLe(b, o, 8), o + 8];
     case "i64": return [BigInt.asIntN(64, readLe(b, o, 8)), o + 8];
+    case "u128": return [readLe(b, o, 16), o + 16];
+    case "i128": return [BigInt.asIntN(128, readLe(b, o, 16)), o + 16];
     case "pubkey": return [addrDec.decode(b.subarray(o, o + 32)), o + 32];
+  }
+  if ("option" in t) {
+    const tag = Number(readLe(b, o, 1));
+    if (tag === 0) return [null, o + 1];
+    if (tag !== 1) throw new Error(`bad option tag ${tag}`);
+    return decodeAt(t.option, b, o + 1);
   }
   if ("array" in t) {
     const [inner, len] = t.array;

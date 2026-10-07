@@ -11,7 +11,12 @@
 //! * session 2 — four sealed orders committed, commit window still open
 //!   for `$UI_FIXTURE_COMMIT_SECS` (default 600) after the export, so a
 //!   wallet can still commit, then `$UI_FIXTURE_REVEAL_SECS` (default 600)
-//!   to reveal.
+//!   to reveal;
+//! * tranche pool 1 — 100 NPCS deposited (80 senior / 20 junior), active,
+//!   payees registered, nothing distributed yet: the distribution crank's
+//!   first period (#141). The `servicer` wallet holds the period cash;
+//! * the asset mint's supply set to the real total of its accounts, backed
+//!   1:1 by a USDC `sleeve` (the NAV publisher's input, #141).
 //!
 //! Wallet keypairs and the session-2 preimages go to `keys/` and
 //! `fixture.json` (local-only throwaway keys; never fund them elsewhere).
@@ -23,12 +28,16 @@
 mod common;
 
 use anchor_lang::prelude::Pubkey;
+use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::{InstructionData, ToAccountMetas};
 use auction_engine::{Phase, SessionParams, Side};
 use common::*;
+use payment_rails::EngineGrant;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use std::fmt::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tranche_engine::{accounts as tacc, instruction as tix, PoolParams};
 
 const UNIT: u64 = 1_000_000;
 
@@ -78,6 +87,10 @@ fn live_party(env: &mut Env, usdc: u64, asset: u64) -> Party {
         usdc: usdc_acct,
         asset: asset_acct,
     }
+}
+
+fn tpda(seeds: &[&[u8]]) -> Pubkey {
+    Pubkey::find_program_address(seeds, &tranche_engine::ID).0
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -187,6 +200,113 @@ fn export_ui_fixture() {
     }
     assert_eq!(env.auction(2).phase, Phase::Commit);
 
+    // Tranche pool 1 (tranche.rs's pool): 20% attachment, senior 6% /
+    // junior 12% / fees 0.1% APR, reserve target 1 USDC.
+    load_root_program(&mut env, tranche_engine::ID, "tranche_engine");
+    env.grant_engine(&tranche_engine::signer_pda().0, EngineGrant::ROLE_COUPON)
+        .expect("coupon grant");
+    let senior_holder = live_party(&mut env, 0, 0);
+    let junior_holder = live_party(&mut env, 0, 0);
+    let payee_expiry = env.now() + 365 * 86_400;
+    env.register(&senior_holder, payee_expiry)
+        .expect("senior payee");
+    env.register(&junior_holder, payee_expiry)
+        .expect("junior payee");
+    let spv = live_party(&mut env, 0, 100 * UNIT);
+    let servicer = live_party(&mut env, 100 * UNIT, 0);
+    let pool = tpda(&[tranche_engine::POOL_SEED, &1u32.to_le_bytes()]);
+    let senior_mint = tpda(&[tranche_engine::SENIOR_SEED, pool.as_ref()]);
+    let junior_mint = tpda(&[tranche_engine::JUNIOR_SEED, pool.as_ref()]);
+    let collateral_vault = tpda(&[tranche_engine::COLLATERAL_SEED, pool.as_ref()]);
+    let asset_mint = env.asset_mint;
+    let auth = env.authority.insecure_clone();
+    let create = Instruction {
+        program_id: tranche_engine::ID,
+        accounts: tacc::CreatePool {
+            pool,
+            feed: feed_pda(&asset_mint),
+            collateral_mint: asset_mint,
+            senior_mint,
+            junior_mint,
+            collateral_vault,
+            cash: tpda(&[tranche_engine::CASH_SEED, pool.as_ref()]),
+            usdc_mint: env.mint,
+            signer: tranche_engine::signer_pda().0,
+            authority: auth.pubkey(),
+            tranche_token_program: Tp::T22.id(),
+            collateral_token_program: env.asset_tp.id(),
+            token_program: env.tp.id(),
+            system_program: anchor_lang::system_program::ID,
+        }
+        .to_account_metas(None),
+        data: tix::CreatePool {
+            pool_id: 1,
+            params: PoolParams {
+                legal_doc_hash: [0x1d; 32],
+                waterfall_version: 1,
+                attachment_bps: 2_000,
+                senior_coupon_bps: 600,
+                junior_coupon_bps: 1_200,
+                fees_bps: 10,
+                reserve_target: UNIT,
+                senior_payee_token: senior_holder.usdc,
+                junior_payee_token: junior_holder.usdc,
+            },
+        }
+        .data(),
+    };
+    env.send(&[create], &[&auth]).expect("create pool");
+    let spv_owner = spv.key.pubkey();
+    let senior_acct = env.token_account_in(Tp::T22, &senior_mint, &spv_owner, 0);
+    let junior_acct = env.token_account_in(Tp::T22, &junior_mint, &spv_owner, 0);
+    let deposit = Instruction {
+        program_id: tranche_engine::ID,
+        accounts: tacc::Deposit {
+            pool,
+            feed: feed_pda(&asset_mint),
+            senior_mint,
+            junior_mint,
+            collateral_vault,
+            collateral_mint: asset_mint,
+            depositor: spv_owner,
+            depositor_collateral: spv.asset,
+            depositor_senior: senior_acct,
+            depositor_junior: junior_acct,
+            signer: tranche_engine::signer_pda().0,
+            tranche_token_program: Tp::T22.id(),
+            collateral_token_program: env.asset_tp.id(),
+        }
+        .to_account_metas(None),
+        data: tix::Deposit { qty: 100 * UNIT }.data(),
+    };
+    env.send(&[deposit], &[&spv.key]).expect("deposit");
+    let activate = Instruction {
+        program_id: tranche_engine::ID,
+        accounts: tacc::PoolAdmin {
+            pool,
+            authority: auth.pubkey(),
+        }
+        .to_account_metas(None),
+        data: tix::Activate {}.data(),
+    };
+    env.send(&[activate], &[&auth]).expect("activate");
+
+    // The harness fabricates the asset mint with a placeholder supply. Make
+    // it the real total of every account of the mint, and back it 1:1 with
+    // a USDC sleeve, so the NAV publisher (#141) reads a meaningful 1.00.
+    let mut supply = 0u64;
+    for (_, a) in env.svm.get_program_accounts(&Tp::T22.id()) {
+        if a.data.len() >= 165 && a.data[..32] == asset_mint.to_bytes() {
+            supply += u64::from_le_bytes(a.data[64..72].try_into().unwrap());
+        }
+    }
+    let mut m = env.svm.get_account(&asset_mint).unwrap();
+    m.data[36..44].copy_from_slice(&supply.to_le_bytes());
+    env.svm.set_account(asset_mint, m).unwrap();
+    let usdc_mint = env.mint;
+    let sleeve_owner = env.authority.pubkey();
+    let sleeve = env.token_account(&usdc_mint, &sleeve_owner, supply);
+
     // ── export ──────────────────────────────────────────────────────────
     let accounts_dir = out.join("accounts");
     let keys_dir = out.join("keys");
@@ -198,6 +318,7 @@ fn export_ui_fixture() {
         auction_engine::ID,
         mark_engine::ID,
         credit_gate::SAS_PROGRAM_ID,
+        tranche_engine::ID,
         Tp::Spl.id(),
         Tp::T22.id(),
         anchor_lang::system_program::ID,
@@ -225,6 +346,8 @@ fn export_ui_fixture() {
         ("b2", b2.key.insecure_clone()),
         ("b3", b3.key.insecure_clone()),
         ("crank", crank),
+        ("servicer", servicer.key.insecure_clone()),
+        ("spv", spv.key.insecure_clone()),
     ];
     for (name, k) in &wallets {
         std::fs::write(keys_dir.join(format!("{name}.json")), keypair_json(k)).unwrap();
@@ -260,10 +383,12 @@ fn export_ui_fixture() {
   "assetMint": "{}",
   "venue": "{}",
   "sessions": {{"printed": "{}", "open": "{}"}},
+  "pool": "{}",
+  "sleeve": "{}",
   "commitEnd": {commit_end},
   "revealEnd": {reveal_end},
   "wallets": {{{}}},
-  "tokenAccounts": {{"seller": ["{}","{}"], "b1": ["{}","{}"], "b2": ["{}","{}"], "b3": ["{}","{}"]}},
+  "tokenAccounts": {{"seller": ["{}","{}"], "b1": ["{}","{}"], "b2": ["{}","{}"], "b3": ["{}","{}"], "servicer": ["{}","{}"]}},
   "openOrders": [{}],
   "accounts": {n}
 }}
@@ -275,6 +400,8 @@ fn export_ui_fixture() {
         venue_pda(),
         auction_pda(1),
         auction_pda(2),
+        pool,
+        sleeve,
         wallet_list.join(","),
         seller.usdc,
         seller.asset,
@@ -284,6 +411,8 @@ fn export_ui_fixture() {
         b2.asset,
         b3.usdc,
         b3.asset,
+        servicer.usdc,
+        servicer.asset,
         orders.join(",")
     );
     std::fs::write(out.join("fixture.json"), manifest).unwrap();

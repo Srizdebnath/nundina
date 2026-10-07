@@ -10,15 +10,19 @@
  *   npm run crank -- keeper withdraw --token <usdc>
  *   npm run crank -- seasoning --mint <gated mint>          # credit-gate merge_expired (#127)
  *   npm run crank -- phases --session <auction-engine session> # phase-deadline steps (#149)
+ *   npm run crank -- distribute --pool <tranche pool> --cash N  # one coupon period, from KEYPAIR's USDC (#141)
+ *   npm run crank -- run --config runner.json [--once]         # the crank-runner: every duty on a schedule (#141)
  *   npm run crank -- settle    --session <addr> --plan fills.json [--max-sends N]
  *   npm run crank -- finish    --session <addr>
  *   npm run crank -- reconcile --session <addr> | --facility <addr>
  *   npm run crank -- export    --out <dir> [--limit N]          # signed (#127)
+ *   npm run crank -- export    --session <auction session> --out <dir>  # one session: events of all four programs + state snapshot (#141)
  *   npm run crank -- verify-export --dir <dir> [--signer <addr>] # keyless, offline
  *
  * Env: RPC_URL (default localhost), WS_URL, KEYPAIR (default
  * ~/.config/solana/id.json), EVIDENCE_KEYPAIR (signs exports; default
- * KEYPAIR), PRIORITY_FEE_MIN/MAX (µlamports/CU),
+ * KEYPAIR), CRANK_KILL_FILE (runner sends nothing while it exists),
+ * PRIORITY_FEE_MIN/MAX (µlamports/CU),
  * MAX_ATTEMPTS, RETRY_BASE_MS. Exit code 1 on any failed action or a
  * reconciliation that isn't clean.
  */
@@ -28,8 +32,11 @@ import { address } from "@solana/kit";
 import { finish, refundAll, settlePlan, type FillPlan, type Outcome } from "./crank.ts";
 import { loadKeypair, makeCtx } from "./ctx.ts";
 import { exportEvidence, verifyEvidence } from "./evidence.ts";
+import { exportSessionEvidence } from "./session-evidence.ts";
 import { assignKeeper, registerKeeper, releaseAssignment, topUpKeeper, withdrawKeeper } from "./keeper.ts";
+import { distribute } from "./distribute.ts";
 import { runPhases } from "./phases.ts";
+import { loadRunnerConfig, run } from "./runner.ts";
 import { seasonAll } from "./seasoning.ts";
 import { formatReport, reconcileFacility, reconcileSession } from "./ledger.ts";
 
@@ -50,6 +57,10 @@ const { positionals, values } = parseArgs({
     keeper: { type: "string" },
     mint: { type: "string" },
     signer: { type: "string" },
+    pool: { type: "string" },
+    cash: { type: "string" },
+    config: { type: "string" },
+    once: { type: "boolean" },
   },
 });
 
@@ -115,6 +126,12 @@ async function main(): Promise<boolean> {
       return summarize(await seasonAll(ctx, address(need("mint"))));
     case "phases":
       return summarize(await runPhases(ctx, address(need("session")), ctx.payer));
+    case "distribute":
+      return summarize([await distribute(ctx, address(need("pool")), BigInt(need("cash")), ctx.payer)]);
+    case "run": {
+      const outcomes = await run(ctx, loadRunnerConfig(need("config")), { once: values.once });
+      return outcomes.every((o) => o.result !== "failed");
+    }
     case "settle": {
       const plan = parsePlan(readFileSync(need("plan"), "utf8"));
       const maxSends = values["max-sends"] ? Number(values["max-sends"]) : undefined;
@@ -131,12 +148,15 @@ async function main(): Promise<boolean> {
     }
     case "export": {
       const signer = await loadKeypair(process.env.EVIDENCE_KEYPAIR ?? process.env.KEYPAIR ?? "~/.config/solana/id.json");
-      const m = await exportEvidence(ctx.rpc, need("out"), signer, { limit: values.limit ? Number(values.limit) : undefined });
+      const limit = values.limit ? Number(values.limit) : undefined;
+      const m = values.session
+        ? await exportSessionEvidence(ctx.rpc, need("out"), signer, address(values.session), { limit })
+        : await exportEvidence(ctx.rpc, need("out"), signer, { limit });
       console.log(JSON.stringify(m, null, 2));
       return true;
     }
     default:
-      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export|keeper|seasoning|phases> [options] — see src/cli.ts");
+      console.error("usage: crank <refunds|settle|finish|reconcile|export|verify-export|keeper|seasoning|phases|distribute|run> [options] — see src/cli.ts");
       return false;
   }
 }

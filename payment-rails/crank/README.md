@@ -29,6 +29,9 @@ npm run crank -- reconcile --session <addr>                    # or --facility <
 npm run crank -- export    --out evidence/ [--limit N]       # signed by EVIDENCE_KEYPAIR (or KEYPAIR)
 npm run crank -- keeper …  /  seasoning …                    # see § Bonded keepers below
 npm run crank -- phases    --session <auction-engine session>  # phase-deadline steps (#149), any wallet
+npm run crank -- distribute --pool <tranche pool> --cash N     # one coupon period from KEYPAIR's USDC (#141)
+npm run crank -- run       --config runner.json [--once]       # the crank-runner: every duty on a schedule (#141)
+npm run crank -- export    --session <auction session> --out evidence/s1   # one session, all four programs + snapshot (#141)
 npm run crank -- verify-export --dir evidence/ [--signer <addr>]   # keyless, offline
 ```
 
@@ -43,6 +46,7 @@ npm run crank -- verify-export --dir evidence/ [--signer <addr>]   # keyless, of
 | `EVIDENCE_KEYPAIR` | `KEYPAIR` | signs `export` bundles (#127). Use a key of its own, published to auditors, not the operator's |
 | `PRIORITY_FEE_MIN` / `_MAX` | `0` / `50000` | µlamports per CU; the p75 of recent fees for the program is clamped to these |
 | `MAX_ATTEMPTS` / `RETRY_BASE_MS` | `5` / `500` | retries for **transient** failures, with exponential backoff and a fresh blockhash each time |
+| `CRANK_KILL_FILE` | unset | `run` sends nothing while this file exists (the AC-11 kill drill; liveness never depends on the runner) |
 
 The exit code is 1 if any action fails or a reconciliation isn't clean.
 
@@ -169,3 +173,43 @@ step is 1,684 bytes as a plain transaction (rails `settle_fill` + gate
 go through an address lookup table the crank creates and extends on demand
 (`src/alt.ts`, `tests/alt.spec.ts`). The table costs rent, paid by the crank
 wallet; it is not closed automatically.
+
+## Crank-runner, distribution and session evidence (#141)
+
+`run --config runner.json` is the hosted crank-runner of SRS 08 §6. Each
+tick (every `intervalSeconds`; `--once` for cron) it:
+
+1. finds every auction-engine session on chain and runs the phase crank on
+   the live ones;
+2. refunds every finished or failed session whose rails `CashSession` still
+   has open escrows (bonds back to their owners);
+3. runs `seasoning` for each mint in `seasoningMints`;
+4. for each pool in `distribution`, pays the next coupon period
+   (`cashPerPeriod` µUSDC from the runner wallet) once `minIntervalSeconds`
+   have passed since the last one. If the wallet can't pay, the period is
+   skipped and reported.
+
+```json
+{ "intervalSeconds": 60, "seasoningMints": ["<NPCS>"],
+  "distribution": [{ "pool": "<tranche pool>", "cashPerPeriod": "1500000", "minIntervalSeconds": 604800 }] }
+```
+
+`distribute --pool --cash` is step 4 on its own: tranche-engine's
+permissionless `distribute(period, cash)` with the rails
+`DistributeCoupon` accounts forwarded (coupon receipt for
+`rails_period_id(pool_id, period)`, payees' registered destinations, the
+tranche signer's `EngineGrant`). The period is the pool's own counter.
+
+`export --session` writes one session's bundle: every event of
+auction-engine, payment-rails, credit-gate and mark-engine in every
+transaction that touched the session or its rails session, attributed by
+invoke stack (the codec now reads `u128` and `Option`); `snapshot.json` with
+the session, the CashSession, the mark feed (NAV, `model_version`,
+`inputs_hash`, state) and the print; and a manifest carrying both
+SHA-256s, signed. `verify-export` checks the snapshot hash as well.
+
+Verified on a local validator with the real programs (`app/scripts/localnet.sh`).
+One `run --once` tick refunded 9 escrows across two printed sessions,
+merged 2 seasoned ledgers and paid a coupon period. A session bundle came out at
+16 transactions and 39 events, with both fills proven under AE-P8.
+Unit tests: `tests/runner.spec.ts`.
