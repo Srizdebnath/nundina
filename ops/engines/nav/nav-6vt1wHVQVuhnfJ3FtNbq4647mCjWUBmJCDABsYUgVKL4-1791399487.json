@@ -1,0 +1,22 @@
+{
+  "feed": "7b39TtCi6jLRFbNGSUU7tydefjWqc3w2jf5btdcQjT2k",
+  "inputs": {
+    "model_version": 1,
+    "asset_mint": "6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4",
+    "supply_base": "1000000",
+    "treasury_source": "sleeve",
+    "treasury_account": "B78WTdsY4MYhAvT757xtdb6KZ61pkBTPzKCtohK3NKAz",
+    "treasury_micros": "1000000",
+    "slot": "508552661",
+    "fee_bps": "10",
+    "delta_seconds": "0",
+    "previous_computed_ts": "1791399487",
+    "computed_ts": "1791399487"
+  },
+  "canonical_inputs": "{\"asset_mint\":\"6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4\",\"computed_ts\":\"1791399487\",\"delta_seconds\":\"0\",\"fee_bps\":\"10\",\"model_version\":1,\"previous_computed_ts\":\"1791399487\",\"slot\":\"508552661\",\"supply_base\":\"1000000\",\"treasury_account\":\"B78WTdsY4MYhAvT757xtdb6KZ61pkBTPzKCtohK3NKAz\",\"treasury_micros\":\"1000000\",\"treasury_source\":\"sleeve\"}",
+  "inputs_hash": "464e3f16c12bb28e032f1e0ce66cccbcacae6aac45991a9872e64f53d44f4118",
+  "nav_gross_pico": "1000000000000",
+  "fee_pico": "0",
+  "nav_published_pico": "1000000000000",
+  "signature": "4Jf5dTHT57nFSEooXcQ3xuk8RCBGetxnA7RxLdGdAMSN1v8TqupBdRWKwoaaykbJX4a6fR3wkVYpkuzXUGUd5ZRQ"
+}

@@ -15,6 +15,9 @@ to match.
 |---|---|---|---|---|---|---|
 | payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
 | credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507271972 | `wBS5W8CZ3qmyPv9rduw2wEtpaGAHUGqC2HdqLB58xQzrhaSzYr2A6CrMKoRK8okNwvc2BxriY8bxbY4gvbf4nNQ` | `7668a862b60f4d1602aa0dbf8a8c29a6da56658c82a7a9caf6dd27266dfe2270` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2, 48h timelock (#171; was `9WH1…2uDZ`) |
+| mark-engine v0.1.0 (ME-P1..P7: feed, NAV publication, prints, staleness haircuts; #137) | devnet | `79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH` | 508551724 | `RomDYUFy5KT6EAiqtdVqhuzPt3JT2ZRo1Ttmsct5FBf6hbhAYLzoeCm1hbvPef1aWU9DaQhF8oehiLzWNMkPABf` | `23dbbd22ea2937960bfccbe8ef2a68bba629e72d31127448f3f031f4299a0c0a` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer; Squads hand-over pending, as for credit-gate) |
+| auction-engine v0.1.0 (AE-P1..P11: sealed-bid sessions, uniform clear, ROFR; #136) | devnet | `Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7` | 508552044 | `USqwBa1X4NJoc549FvdcrjemsTZ3G6jaXMoqnrGQTEmYnxkAydg2RFgT23YW1Gbaca9UtkDnpqBRjt3Kk6vZSnh` | `8957e87deb0dfe6390ffd481ad6605060f683b70a5f2e8a398e2c2b74ca283cc` | `9WH1…2uDZ` (as above) |
+| queue-claim v0.1.0 (QC-P1..P5: redemption queue claims; #138) | devnet | `2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4` | 508552133 | `5AgmEw858PeSYaYu2CaP3TckFRMPnH8ngBMxX1jo425KNTbmytkWyYbSpnadmyUCUzGxKGrhGGoQUSLP1sLZosBe` | `960d3e745ff5ffc8cdac09d23d10ac2e62538eed59e0b144bc0b20d32ba531a7` | `9WH1…2uDZ` (as above) |
 
 **Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
 `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
@@ -24,6 +27,41 @@ the current source was deployed on 2026-10-04 at a **new program id** under
 new keys (row above). The old id is a dead record: nothing in this repo
 references it, and payment-rails `CREDIT_GATE_ID` now names the new id.
 Configs created against the old program are not trusted (#26).
+
+## Engines on devnet (2026-10-07)
+
+Built from `main` at `74effa7` (`anchor build`, anchor-cli 1.1.2). The
+on-chain bytes were checked against the local build: `solana program dump`
+gives the same SHA-256 as the table. Wiring is done by
+`payment-rails/crank/scripts/devnet/engines.ts`, signed by the rails
+authority `9WH1…2uDZ`. Run it with `--status` to read the state back.
+
+| Account | Address | Created by |
+|---|---|---|
+| mark-engine feed (NPCS) | `7b39TtCi6jLRFbNGSUU7tydefjWqc3w2jf5btdcQjT2k` | `initialize_feed` + `set_publishers` [`4WmrkRmz…dLRQLKjhw`](https://explorer.solana.com/tx/4WmrkRmzY76cNBF75GMrRFzgHBKrxU7emGhXi3AsfEuK5QmFETMrTqkwAEpvVwqYf99L85yMqiW4FVdnLRQLKjhw?cluster=devnet). Weekly cadence (Warned 8 d, Stale 15 d), public prints, **drills off** |
+| NAV publisher | `6DZGcFWxr6VHQrXscQsG55gwNbFv3sCttHkcLPVBpUbT` | the feed's only publisher (key `~/.config/nundina/mark-engine-devnet/publisher.json`, off-repo) |
+| auction-engine venue | `B6bnWtdFecb3ByMSi5uuKDhXojgbL3xdfEAspH3vmQ3j` | `initialize_venue` [`NnBAf7md…GrAeYhzx`](https://explorer.solana.com/tx/NnBAf7mdCiNFyKHqUPbXDybqEjFkCfxBeKvLkTkVcb7NZjSPgwyjU8v1xvMYj1RhHNUiVoyxJJhKqB2GrQeYhzx?cluster=devnet). No forced-sale opener |
+| auction-engine print PDA = feed print source | `AyfBCCp2wDC4pjen8kdZfD7gtB5r4tigW8QHzMRNEMwr` | `set_print_source` [`27oCRh8R…DkzMQC6X`](https://explorer.solana.com/tx/27oCRh8RkiVieC2jKwGDJQKyqNMFTB73BjWBBPB66V1FoZmRBLHqibRbLMExSn2JXoYttWE2deEhNg4PDkzMQC6X?cluster=devnet) |
+| queue-claim queue (NPCS) | `8HFKR5FkxMYcCgYqgvvPaPErQMsR4ccXjbHFkDyYavAK` | `init_queue` [`3bJA9w4z…3UMg9dRLoi`](https://explorer.solana.com/tx/3bJA9w4zRaPXyCmY8gzMFmGsyLUrez2r5xGZEdhUDdfbUxZewNa23akkFeTSv65RgPptjr32XKtYoH3UMg9dRLoi?cluster=devnet). Attester = `9WH1…2uDZ` (devnet stand-in for the transfer agent) |
+
+**NAV record (AC-2).** Publication #1: NAV 1.000000 USDC per NPCS (sleeve
+`B78W…NKAz` holds 1 USDC, supply 1.000000), `inputs_hash`
+`464e3f16…d44f4118`, tx
+[`4Jf5dTHT…UGzUXJ`](https://explorer.solana.com/tx/4Jf5dTHT57nFSEooXcQ3xuk8RCBGetxnA7RxLdGdAMSN1v8TqupBdRWKwoaaykbJX4a6fR3wkVYpkuzXUGUd5ZRQ?cluster=devnet).
+The inputs document is in `ops/engines/nav/`; anyone can recompute it.
+Published by `services` `npm run svc -- nav` (#141), weekly from here on.
+
+**Not live yet.** Auction sessions need payment-rails `grant_engine` for
+the auction operator PDA, and the devnet rails build (and the approved
+Squads upgrade #2 buffer `FqAJ…d5U`) predates `GrantEngine` (#181). That
+takes a third rails upgrade through Squads (48 h timelock). Not deployed
+yet: liquidity-facility, tranche-engine, npcs-treasury.
+
+**The init instructions are first-caller-wins.** `initialize_feed`,
+`initialize_venue` and `init_queue` make whoever calls them first the
+authority. Here they ran right after each deploy, and `engines.ts` fails
+if an account exists under another authority. For mainnet, gate them on
+the program upgrade authority.
 
 ## NPCS asset (Token-2022 mint)
 
