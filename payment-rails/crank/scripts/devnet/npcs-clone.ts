@@ -7,7 +7,10 @@
  *                 exact build devnet will run once proposal #2 executes;
  *   lots.json   — holder H's credit-gate lot ledger with the seasoning
  *                 expiry moved into the past (on devnet it passes on
- *                 2026-10-11; nothing else in the ledger changes);
+ *                 2026-10-11; nothing else in the ledger changes:
+ *                 free_qty stays as on devnet, and npcs-dvp.ts runs
+ *                 `merge_expired` to fold the expired lots into FREE,
+ *                 exactly as it will on devnet);
  *   usdc.json   — the rails operator's Circle-USDC account with 5 USDC
  *                 (the devnet faucet is a captcha).
  *

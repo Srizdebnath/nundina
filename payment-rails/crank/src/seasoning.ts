@@ -10,7 +10,7 @@
  * restriction_expiry @+20 (i64 LE).
  */
 import { createHash } from "node:crypto";
-import { AccountRole, address, getAddressDecoder, getBase64Encoder, type Address, type Base58EncodedBytes } from "@solana/kit";
+import { AccountRole, address, getAddressDecoder, getBase64Encoder, type Address, type Base58EncodedBytes, type Instruction } from "@solana/kit";
 import { clockNow, type R } from "./chain.ts";
 import type { Outcome } from "./crank.ts";
 import { send, type Ctx } from "./send.ts";
@@ -52,6 +52,18 @@ export async function listLedgers(rpc: R, mint: Address, program: Address = CRED
   return accounts.map((a) => ({ address: a.pubkey, data: new Uint8Array(b64.encode(a.account.data[0])) }));
 }
 
+/** credit-gate `merge_expired`: [lots W, mint]; permissionless. */
+export function mergeExpiredIx(lots: Address, mint: Address, program: Address = CREDIT_GATE): Instruction {
+  return {
+    programAddress: program,
+    accounts: [
+      { address: lots, role: AccountRole.WRITABLE },
+      { address: mint, role: AccountRole.READONLY },
+    ],
+    data: Uint8Array.from(MERGE_EXPIRED),
+  };
+}
+
 export async function seasonAll(ctx: Ctx, mint: Address, program: Address = CREDIT_GATE): Promise<Outcome[]> {
   const now = await clockNow(ctx.rpc);
   const out: Outcome[] = [];
@@ -62,14 +74,7 @@ export async function seasonAll(ctx: Ctx, mint: Address, program: Address = CRED
       out.push({ target, result: "not-yet", detail: "no lot past restriction_expiry" });
       continue;
     }
-    const r = await send(ctx, `merge_expired ${holder.slice(0, 12)}…`, [{
-      programAddress: program,
-      accounts: [
-        { address: lots, role: AccountRole.WRITABLE },
-        { address: mint, role: AccountRole.READONLY },
-      ],
-      data: Uint8Array.from(MERGE_EXPIRED),
-    }], { cuLimit: 60_000 });
+    const r = await send(ctx, `merge_expired ${holder.slice(0, 12)}…`, [mergeExpiredIx(lots, mint, program)], { cuLimit: 60_000 });
     out.push(r.status === "sent"
       ? { target, result: "sent", signature: r.signature }
       : { target, result: "failed", detail: r.name ?? r.message });
