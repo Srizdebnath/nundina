@@ -22,6 +22,7 @@ import {
   type Address,
   type TransactionSigner,
 } from "@solana/kit";
+import { CrankLookupTable } from "./alt.ts";
 import { clockNow, ownerTokenAccount, rawAccount, tokenProgramOf } from "./chain.ts";
 import type { Outcome } from "./crank.ts";
 import { fillGateAccounts } from "./gate.ts";
@@ -210,6 +211,8 @@ export async function runPhases(
   opts: { maxSteps?: number } = {},
 ): Promise<Outcome[]> {
   const out: Outcome[] = [];
+  // `settle` is too wide for a plain transaction (see alt.ts): one table per run.
+  const alt = new CrankLookupTable();
   for (let step = 0; step < (opts.maxSteps ?? 64); step++) {
     const s = await loadAuction(ctx, session);
     const a = planPhase(s, await clockNow(ctx.rpc));
@@ -225,7 +228,16 @@ export async function runPhases(
       out.push({ target, result: "skipped", detail: (e as Error).message });
       break;
     }
-    const r = await send(ctx, `auction ${target}`, [instruction], { cuLimit: 600_000 });
+    let lookupTables;
+    if (a.kind === "settle") {
+      try {
+        lookupTables = await alt.cover(ctx, [instruction]);
+      } catch (e) {
+        out.push({ target, result: "failed", detail: (e as Error).message });
+        break;
+      }
+    }
+    const r = await send(ctx, `auction ${target}`, [instruction], { cuLimit: 600_000, lookupTables });
     if (r.status !== "sent") {
       out.push({ target, result: "failed", detail: r.name ?? r.message });
       break;

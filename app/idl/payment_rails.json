@@ -1,0 +1,7173 @@
+{
+  "address": "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn",
+  "metadata": {
+    "name": "payment_rails",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "USDC money layer for NUNDINA: escrow, bonds, refunds, DvP cash leg, payouts to attested wallets only (SRS 08 §4.2/§4.4/§4.5). Audit-scope-critical."
+  },
+  "instructions": [
+    {
+      "name": "advance_funds",
+      "docs": [
+        "LF-P1: advance to a registered destination (curator), bounded by the",
+        "stated collateral mark × an advance rate ≤ the H1 ceiling (#94)."
+      ],
+      "discriminator": [
+        198,
+        117,
+        73,
+        173,
+        214,
+        239,
+        98,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Halt switches."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "facility",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility.curator",
+                "account": "Facility"
+              },
+              {
+                "kind": "account",
+                "path": "facility.facility_id",
+                "account": "Facility"
+              }
+            ]
+          }
+        },
+        {
+          "name": "advance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility"
+              },
+              {
+                "kind": "account",
+                "path": "borrower"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "borrower"
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "fails with a typed reason instead of a framework error."
+          ]
+        },
+        {
+          "name": "destination_token",
+          "docs": [
+            "Must equal the destination's registered token account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "curator",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "collateral_ref_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "collateral_value",
+          "type": "u64"
+        },
+        {
+          "name": "advance_rate_bps",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "assign_keeper",
+      "docs": [
+        "#127: the session operator assigns a bonded keeper; SLA snapshotted."
+      ],
+      "discriminator": [
+        190,
+        170,
+        212,
+        97,
+        224,
+        198,
+        209,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "keeper.wallet",
+                "account": "Keeper"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "session_keeper",
+          "docs": [
+            "One keeper per session; `init` fails on a second assignment."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "deposit",
+      "docs": [
+        "AE-P3: lock cash + bond in a per-escrow vault (depositor signs)."
+      ],
+      "discriminator": [
+        242,
+        35,
+        198,
+        137,
+        82,
+        225,
+        242,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Halt switches (`ensure_accepting`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "One escrow per (session, owner); the owner must sign, so nobody can",
+            "squat another investor's escrow address."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Dedicated vault, authority = escrow PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "owner_token",
+          "docs": [
+            "Depositor's USDC (token program enforces `owner` authority)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "cash",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deposit_ask",
+      "docs": [
+        "AE-P3 sell side: lock asset + bond in per-escrow vaults (seller signs)."
+      ],
+      "discriminator": [
+        31,
+        170,
+        241,
+        205,
+        103,
+        102,
+        169,
+        187
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Halt switches (`ensure_accepting`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "Same seed as a bid escrow: one escrow per (session, owner), so a",
+            "participant cannot be both buyer and seller in one session."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "USDC vault (bond only), authority = escrow PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_vault",
+          "docs": [
+            "Asset vault from `open_asset_vault`, authority = escrow PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "owner_usdc",
+          "docs": [
+            "Seller's USDC (bond source)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "owner_asset",
+          "docs": [
+            "Seller's asset."
+          ],
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program of the settlement mint."
+          ]
+        },
+        {
+          "name": "asset_token_program",
+          "docs": [
+            "Token program of the asset mint (Token-2022 for NPCS)."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "distribute_coupon",
+      "docs": [
+        "TE-P4: one coupon period down the `credit-math` waterfall."
+      ],
+      "discriminator": [
+        173,
+        189,
+        184,
+        145,
+        61,
+        187,
+        36,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "docs": [
+            "Idempotency: one distribution per (distributor, period)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  117,
+                  112,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "operator"
+              },
+              {
+                "kind": "arg",
+                "path": "period_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "source",
+          "docs": [
+            "Period cash (token program enforces the operator's authority)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_receiver",
+          "writable": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "reserve",
+          "writable": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "senior_destination"
+        },
+        {
+          "name": "senior_token",
+          "writable": true
+        },
+        {
+          "name": "junior_destination"
+        },
+        {
+          "name": "junior_token",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Tranche-engine signer: the config operator, or an engine granted",
+            "`ROLE_COUPON` (first remaining account, #136); pays the receipt rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "period_id",
+          "type": "u64"
+        },
+        {
+          "name": "cash",
+          "type": "u64"
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "CouponParams"
+            }
+          }
+        },
+        {
+          "name": "period_ref_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "fail_session",
+      "docs": [
+        "AE-P2/P4: operator aborts the session; all escrows refundable."
+      ],
+      "discriminator": [
+        149,
+        196,
+        144,
+        235,
+        244,
+        41,
+        185,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "docs": [
+            "Session to abort / finish; only its snapshotted operator may."
+          ],
+          "writable": true
+        },
+        {
+          "name": "operator",
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finish_session",
+      "docs": [
+        "R2: operator closes settlement; remaining escrow refundable at once."
+      ],
+      "discriminator": [
+        52,
+        39,
+        209,
+        168,
+        22,
+        240,
+        102,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "docs": [
+            "Session to abort / finish; only its snapshotted operator may."
+          ],
+          "writable": true
+        },
+        {
+          "name": "operator",
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "forfeit_bond",
+      "docs": [
+        "AE-P4: unrevealed bond → reserve after reveals close (permissionless)."
+      ],
+      "discriminator": [
+        78,
+        227,
+        190,
+        54,
+        190,
+        185,
+        151,
+        143
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone (crank)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          },
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "reserve",
+          "docs": [
+            "Session's snapshotted reserve — the only bond destination."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_facility",
+      "docs": [
+        "LF-P2: add cash to a facility (anyone)."
+      ],
+      "discriminator": [
+        178,
+        137,
+        48,
+        212,
+        150,
+        146,
+        13,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "facility",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility.curator",
+                "account": "Facility"
+              },
+              {
+                "kind": "account",
+                "path": "facility.facility_id",
+                "account": "Facility"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "funder_token",
+          "writable": true
+        },
+        {
+          "name": "funder",
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "grant_engine",
+      "docs": [
+        "#136: admit an engine signer PDA as operator for `roles`",
+        "(`EngineGrant::ROLE_*`). Authority only."
+      ],
+      "discriminator": [
+        50,
+        24,
+        8,
+        101,
+        15,
+        99,
+        219,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "engine"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "engine",
+          "type": "pubkey"
+        },
+        {
+          "name": "roles",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_config",
+      "docs": [
+        "Initialize the global rails config. Only the program's upgrade",
+        "authority (Squads 2-of-2, SRS §8) may call this, so the singleton",
+        "PDA cannot be front-run at deploy time."
+      ],
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Global rails config PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "Settlement mint (USDC). Owner-checked against `token_program`."
+          ]
+        },
+        {
+          "name": "fee_receiver",
+          "docs": [
+            "Protocol fee token account, denominated in the settlement mint."
+          ]
+        },
+        {
+          "name": "reserve",
+          "docs": [
+            "Reserve token account (forfeited bonds, reserve cut), distinct from",
+            "the fee receiver so the ledger can reconcile them separately."
+          ]
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Upgrade authority (Squads 2-of-2); becomes the config authority and",
+            "pays rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program",
+          "docs": [
+            "This program — used only to locate its ProgramData account."
+          ],
+          "address": "GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn"
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "Holds the upgrade authority the signer must match."
+          ]
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_keeper_policy",
+      "docs": [
+        "#127: keeper terms (min bond, SLA after the hard deadline, reward",
+        "per escalated escrow). Config authority only."
+      ],
+      "discriminator": [
+        177,
+        36,
+        150,
+        80,
+        56,
+        131,
+        136,
+        185
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_bond",
+          "type": "u64"
+        },
+        {
+          "name": "sla_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "escalation_reward",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "mark_revealed",
+      "docs": [
+        "AE-P4: operator reports a successful reveal."
+      ],
+      "discriminator": [
+        135,
+        82,
+        225,
+        178,
+        43,
+        8,
+        130,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "docs": [
+            "Session; only its snapshotted operator may report on it."
+          ],
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "Escrow in that session."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_asset_vault",
+      "docs": [
+        "Sell side, step 1: create the seller's empty asset vault so a",
+        "frozen-by-default asset (NPCS) can be thawed before `deposit_ask`."
+      ],
+      "discriminator": [
+        234,
+        215,
+        58,
+        80,
+        93,
+        128,
+        127,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Halt switches (`ensure_accepting`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The seller's future escrow PDA — only its address is used here."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "asset_token_program",
+          "docs": [
+            "Token program of the asset mint (Token-2022 for NPCS)."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_facility",
+      "docs": [
+        "LF-P2: open a facility fund + vault (operator becomes curator)."
+      ],
+      "discriminator": [
+        3,
+        64,
+        248,
+        119,
+        95,
+        41,
+        149,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "facility",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "operator"
+              },
+              {
+                "kind": "arg",
+                "path": "facility_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Config operator, or an engine granted `ROLE_FACILITY` (its",
+            "`EngineGrant` is the first remaining account, #136); becomes the",
+            "curator."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "facility_id",
+          "type": "u64"
+        },
+        {
+          "name": "rate_bps",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "open_session",
+      "docs": [
+        "AE-P1/P3: open a cash session with snapshotted parameters (operator)."
+      ],
+      "discriminator": [
+        130,
+        54,
+        124,
+        7,
+        236,
+        20,
+        104,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Global config: operator check + mint/reserve snapshot source."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "docs": [
+            "New session PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "operator"
+              },
+              {
+                "kind": "arg",
+                "path": "session_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint",
+          "docs": [
+            "Traded asset mint (any token program); snapshotted with its decimals."
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Config operator, or an engine granted `ROLE_SESSIONS` (its",
+            "`EngineGrant` is the first remaining account, #136); pays rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "SessionParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "refund",
+      "docs": [
+        "AE-P10 / AC-11: permissionless buy-side refund; never pausable."
+      ],
+      "discriminator": [
+        2,
+        96,
+        183,
+        251,
+        63,
+        208,
+        46,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone — refunds are permissionless (AE-P10). Pays only the tx fee."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          },
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "owner_token",
+          "docs": [
+            "Refund destination: must belong to the escrow owner — a third-party",
+            "caller can trigger the refund but can never redirect it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "docs": [
+            "Session's snapshotted reserve (receives a forfeited bond, if any)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_ask",
+      "docs": [
+        "AE-P10: permissionless sell-side refund (asset + bond); never pausable."
+      ],
+      "discriminator": [
+        237,
+        76,
+        154,
+        185,
+        167,
+        213,
+        205,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone — refunds are permissionless (AE-P10). Pays only the tx fee."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          },
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "asset_vault",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "owner_usdc",
+          "docs": [
+            "Bond destination: the seller's own USDC account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "owner_asset",
+          "docs": [
+            "Asset destination: the seller's own asset account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_ask_escalated",
+      "docs": [
+        "#127: as `refund_escalated`, for a sell escrow (`refund_ask`)."
+      ],
+      "discriminator": [
+        21,
+        204,
+        173,
+        170,
+        144,
+        219,
+        180,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "refund",
+          "accounts": [
+            {
+              "name": "caller",
+              "docs": [
+                "Anyone — refunds are permissionless (AE-P10). Pays only the tx fee."
+              ],
+              "signer": true
+            },
+            {
+              "name": "session",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.operator",
+                    "account": "CashSession"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.session_id",
+                    "account": "CashSession"
+                  }
+                ]
+              },
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "escrow",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "escrow.owner",
+                    "account": "Escrow"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "asset_vault",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner_usdc",
+              "docs": [
+                "Bond destination: the seller's own USDC account."
+              ],
+              "writable": true
+            },
+            {
+              "name": "owner_asset",
+              "docs": [
+                "Asset destination: the seller's own asset account."
+              ],
+              "writable": true
+            },
+            {
+              "name": "reserve",
+              "writable": true
+            },
+            {
+              "name": "usdc_mint"
+            },
+            {
+              "name": "asset_mint"
+            },
+            {
+              "name": "token_program"
+            },
+            {
+              "name": "asset_token_program"
+            }
+          ]
+        },
+        {
+          "name": "keeper",
+          "accounts": [
+            {
+              "name": "session_keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110,
+                      95,
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session_keeper.session",
+                    "account": "SessionKeeper"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "keeper.wallet",
+                    "account": "Keeper"
+                  }
+                ]
+              },
+              "relations": [
+                "session_keeper"
+              ]
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "keeper"
+              ]
+            },
+            {
+              "name": "caller_token",
+              "docs": [
+                "The caller's USDC account: where the reward goes. `dup`: the escrow",
+                "owner may escalate its own late refund (it has the strongest reason",
+                "to), and then this is the same account as the refund's",
+                "`owner_token`. Safe: it is only a transfer destination here, its mint",
+                "is checked, and Anchor never writes a token account back."
+              ],
+              "writable": true
+            }
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_escalated",
+      "docs": [
+        "#127: after the keeper's SLA, anyone refunds a buy escrow and is",
+        "paid from the keeper's bond (same refund body as `refund`)."
+      ],
+      "discriminator": [
+        216,
+        174,
+        105,
+        241,
+        131,
+        157,
+        185,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "refund",
+          "accounts": [
+            {
+              "name": "caller",
+              "docs": [
+                "Anyone — refunds are permissionless (AE-P10). Pays only the tx fee."
+              ],
+              "signer": true
+            },
+            {
+              "name": "session",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.operator",
+                    "account": "CashSession"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session.session_id",
+                    "account": "CashSession"
+                  }
+                ]
+              },
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "escrow",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "escrow.owner",
+                    "account": "Escrow"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner",
+              "writable": true,
+              "relations": [
+                "escrow"
+              ]
+            },
+            {
+              "name": "owner_token",
+              "docs": [
+                "Refund destination: must belong to the escrow owner — a third-party",
+                "caller can trigger the refund but can never redirect it."
+              ],
+              "writable": true
+            },
+            {
+              "name": "reserve",
+              "docs": [
+                "Session's snapshotted reserve (receives a forfeited bond, if any)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "usdc_mint"
+            },
+            {
+              "name": "token_program"
+            }
+          ]
+        },
+        {
+          "name": "keeper",
+          "accounts": [
+            {
+              "name": "session_keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110,
+                      95,
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "session_keeper.session",
+                    "account": "SessionKeeper"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "keeper",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      107,
+                      101,
+                      101,
+                      112,
+                      101,
+                      114
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "keeper.wallet",
+                    "account": "Keeper"
+                  }
+                ]
+              },
+              "relations": [
+                "session_keeper"
+              ]
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "relations": [
+                "keeper"
+              ]
+            },
+            {
+              "name": "caller_token",
+              "docs": [
+                "The caller's USDC account: where the reward goes. `dup`: the escrow",
+                "owner may escalate its own late refund (it has the strongest reason",
+                "to), and then this is the same account as the refund's",
+                "`owner_token`. Safe: it is only a transfer destination here, its mint",
+                "is checked, and Anchor never writes a token account back."
+              ],
+              "writable": true
+            }
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_destination",
+      "docs": [
+        "Admit an attested payout wallet (registrar; hash only, no PII)."
+      ],
+      "discriminator": [
+        35,
+        157,
+        228,
+        94,
+        38,
+        135,
+        168,
+        102
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "token_account",
+          "docs": [
+            "The payout account: a settlement-mint account the owner controls."
+          ]
+        },
+        {
+          "name": "registrar",
+          "docs": [
+            "Payout registrar; pays rent."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "attestation_ref_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "expires_at",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "register_keeper",
+      "docs": [
+        "#127: bond a keeper (≥ `min_bond` USDC into a PDA-owned vault)."
+      ],
+      "discriminator": [
+        175,
+        126,
+        140,
+        213,
+        21,
+        174,
+        234,
+        239
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "keeper"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "keeper_token",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "bond",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "release_assignment",
+      "docs": [
+        "#127: close a keeper's duty once the session has no open escrow."
+      ],
+      "discriminator": [
+        195,
+        246,
+        26,
+        74,
+        160,
+        224,
+        23,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "keeper.wallet",
+                "account": "Keeper"
+              }
+            ]
+          },
+          "relations": [
+            "session_keeper"
+          ]
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone."
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "renew_destination",
+      "docs": [
+        "Refresh / re-point / re-activate a payout wallet (registrar)."
+      ],
+      "discriminator": [
+        183,
+        75,
+        191,
+        218,
+        25,
+        166,
+        92,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "destination.owner",
+                "account": "PayoutDestination"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_account"
+        },
+        {
+          "name": "registrar",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "attestation_ref_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "expires_at",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "repay",
+      "docs": [
+        "LF-P6: repay an advance, interest first (anyone)."
+      ],
+      "discriminator": [
+        234,
+        103,
+        67,
+        82,
+        208,
+        234,
+        219,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "facility",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility.curator",
+                "account": "Facility"
+              },
+              {
+                "kind": "account",
+                "path": "facility.facility_id",
+                "account": "Facility"
+              }
+            ]
+          },
+          "relations": [
+            "advance"
+          ]
+        },
+        {
+          "name": "advance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility"
+              },
+              {
+                "kind": "account",
+                "path": "advance.borrower",
+                "account": "Advance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "curator",
+          "writable": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "payer_token",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "signer": true
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "revoke_destination",
+      "docs": [
+        "Revoke a payout wallet immediately (registrar)."
+      ],
+      "discriminator": [
+        165,
+        192,
+        121,
+        247,
+        2,
+        206,
+        60,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "destination.owner",
+                "account": "PayoutDestination"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registrar",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_breaker",
+      "docs": [
+        "Flip the pause or depeg breaker (authority only; evented). Never",
+        "blocks refunds."
+      ],
+      "discriminator": [
+        119,
+        127,
+        52,
+        124,
+        188,
+        82,
+        139,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Global rails config; only its authority may write."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Squads 2-of-2 authority (checked by `has_one`)."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "breaker",
+          "type": {
+            "defined": {
+              "name": "Breaker"
+            }
+          }
+        },
+        {
+          "name": "engaged",
+          "type": "bool"
+        },
+        {
+          "name": "evidence_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_engine_roles",
+      "docs": [
+        "#136: change or revoke (`roles = 0`) an engine grant. Authority only."
+      ],
+      "discriminator": [
+        137,
+        145,
+        79,
+        130,
+        216,
+        78,
+        150,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant.engine",
+                "account": "EngineGrant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "roles",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "set_fees",
+      "docs": [
+        "Set fee / reserve bps within the hard ceilings (authority; evented)."
+      ],
+      "discriminator": [
+        137,
+        178,
+        49,
+        58,
+        0,
+        245,
+        242,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Global rails config; only its authority may write."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Squads 2-of-2 authority (checked by `has_one`)."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "reserve_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_keeper_policy",
+      "docs": [
+        "#127: change keeper terms; live assignments keep their snapshot."
+      ],
+      "discriminator": [
+        113,
+        131,
+        98,
+        244,
+        25,
+        146,
+        140,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "min_bond",
+          "type": "u64"
+        },
+        {
+          "name": "sla_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "escalation_reward",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_operator",
+      "docs": [
+        "Re-point the session operator (authority only; evented)."
+      ],
+      "discriminator": [
+        238,
+        153,
+        101,
+        169,
+        243,
+        131,
+        36,
+        1
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Global rails config; only its authority may write."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Squads 2-of-2 authority (checked by `has_one`)."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "operator",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_registrar",
+      "docs": [
+        "R3: re-point the payout registrar (authority only; evented)."
+      ],
+      "discriminator": [
+        218,
+        97,
+        53,
+        173,
+        221,
+        199,
+        57,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Global rails config; only its authority may write."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Squads 2-of-2 authority (checked by `has_one`)."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "registrar",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "settle_fill",
+      "docs": [
+        "AE-P8: one atomic DvP fill between escrows (operator; idempotent)."
+      ],
+      "discriminator": [
+        197,
+        81,
+        135,
+        50,
+        191,
+        3,
+        171,
+        75
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Halt switches (depeg breaker blocks settlement)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          },
+          "relations": [
+            "buyer_escrow",
+            "seller_escrow"
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Operator (crank-driven engine signer); pays the receipt rent."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        },
+        {
+          "name": "receipt",
+          "docs": [
+            "Idempotency: created here, so a replayed `fill_index` fails."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "arg",
+                "path": "fill_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "buyer_escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_vault",
+          "writable": true
+        },
+        {
+          "name": "seller_escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "seller_escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_asset_vault",
+          "writable": true
+        },
+        {
+          "name": "seller_usdc",
+          "docs": [
+            "Cash destination: must belong to the seller."
+          ],
+          "writable": true
+        },
+        {
+          "name": "buyer_asset",
+          "docs": [
+            "Asset destination: must belong to the buyer (gate-thawed for NPCS)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_receiver",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_authority",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      116,
+                      101,
+                      95,
+                      115,
+                      101,
+                      116,
+                      116,
+                      108,
+                      101
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "gate_config",
+              "docs": [
+                "re-derives it, as it does every gate account below)."
+              ]
+            },
+            {
+              "name": "gate_policy"
+            },
+            {
+              "name": "seller_block"
+            },
+            {
+              "name": "buyer_block"
+            },
+            {
+              "name": "seller_lots",
+              "writable": true
+            },
+            {
+              "name": "buyer_lots",
+              "writable": true
+            },
+            {
+              "name": "buyer_link"
+            },
+            {
+              "name": "buyer_identity"
+            },
+            {
+              "name": "buyer_accreditation"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_index",
+          "type": "u32"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "price",
+          "type": "u64"
+        },
+        {
+          "name": "disclosure_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settle_rofr_fill",
+      "docs": [
+        "AE-P7: issuer ROFR fill — issuer pays cash, takes the seller's asset."
+      ],
+      "discriminator": [
+        242,
+        157,
+        31,
+        142,
+        243,
+        192,
+        156,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  105,
+                  108,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.operator",
+                "account": "CashSession"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "CashSession"
+              }
+            ]
+          },
+          "relations": [
+            "seller_escrow"
+          ]
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        },
+        {
+          "name": "issuer",
+          "docs": [
+            "Issuer ROFR authority (session snapshot); pays the cash."
+          ],
+          "signer": true
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "arg",
+                "path": "fill_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "seller_escrow.owner",
+                "account": "Escrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_asset_vault",
+          "writable": true
+        },
+        {
+          "name": "seller_usdc",
+          "writable": true
+        },
+        {
+          "name": "issuer_usdc",
+          "docs": [
+            "Issuer's USDC (token program enforces the issuer's authority)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "issuer_asset",
+          "docs": [
+            "Asset destination: must belong to the issuer."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_receiver",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_authority",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      116,
+                      101,
+                      95,
+                      115,
+                      101,
+                      116,
+                      116,
+                      108,
+                      101
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "seller_block"
+            },
+            {
+              "name": "issuer_block"
+            },
+            {
+              "name": "seller_lots",
+              "writable": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_index",
+          "type": "u32"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "price",
+          "type": "u64"
+        },
+        {
+          "name": "disclosure_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "sweep_proceeds",
+      "docs": [
+        "QC-P4: claim-sale proceeds → facility first, remainder → holder."
+      ],
+      "discriminator": [
+        154,
+        245,
+        98,
+        195,
+        215,
+        5,
+        43,
+        232
+      ],
+      "accounts": [
+        {
+          "name": "facility",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility.curator",
+                "account": "Facility"
+              },
+              {
+                "kind": "account",
+                "path": "facility.facility_id",
+                "account": "Facility"
+              }
+            ]
+          },
+          "relations": [
+            "advance"
+          ]
+        },
+        {
+          "name": "advance",
+          "docs": [
+            "The pledged claim's advance (QC-P4: claim pledged to this facility)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "facility"
+              },
+              {
+                "kind": "account",
+                "path": "advance.borrower",
+                "account": "Advance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "curator",
+          "writable": true,
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "proceeds_token",
+          "docs": [
+            "Where the sale proceeds sit (queue-claim engine / crank account)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "proceeds_authority",
+          "signer": true
+        },
+        {
+          "name": "holder_destination"
+        },
+        {
+          "name": "holder_token",
+          "docs": [
+            "Must equal the holder's registered token account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "facility"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "top_up_keeper",
+      "docs": [
+        "#127: add to a keeper's bond."
+      ],
+      "discriminator": [
+        45,
+        32,
+        19,
+        218,
+        28,
+        127,
+        164,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "keeper_token",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "signer": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_keeper",
+      "docs": [
+        "#127: a keeper with no live assignment takes its bond back and closes."
+      ],
+      "discriminator": [
+        140,
+        81,
+        19,
+        219,
+        254,
+        144,
+        199,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  101,
+                  112,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "keeper_token",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "keeper"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Advance",
+      "discriminator": [
+        66,
+        25,
+        217,
+        133,
+        38,
+        192,
+        224,
+        218
+      ]
+    },
+    {
+      "name": "CashSession",
+      "discriminator": [
+        9,
+        160,
+        220,
+        77,
+        128,
+        85,
+        165,
+        188
+      ]
+    },
+    {
+      "name": "CouponReceipt",
+      "discriminator": [
+        167,
+        165,
+        251,
+        131,
+        179,
+        56,
+        0,
+        18
+      ]
+    },
+    {
+      "name": "EngineGrant",
+      "discriminator": [
+        173,
+        149,
+        74,
+        97,
+        113,
+        130,
+        27,
+        82
+      ]
+    },
+    {
+      "name": "Escrow",
+      "discriminator": [
+        31,
+        213,
+        123,
+        187,
+        186,
+        22,
+        218,
+        155
+      ]
+    },
+    {
+      "name": "Facility",
+      "discriminator": [
+        16,
+        190,
+        236,
+        249,
+        84,
+        151,
+        160,
+        37
+      ]
+    },
+    {
+      "name": "FillReceipt",
+      "discriminator": [
+        8,
+        10,
+        169,
+        84,
+        163,
+        19,
+        167,
+        139
+      ]
+    },
+    {
+      "name": "Keeper",
+      "discriminator": [
+        127,
+        221,
+        194,
+        46,
+        120,
+        73,
+        144,
+        77
+      ]
+    },
+    {
+      "name": "KeeperPolicy",
+      "discriminator": [
+        124,
+        56,
+        216,
+        136,
+        101,
+        123,
+        214,
+        117
+      ]
+    },
+    {
+      "name": "PayoutDestination",
+      "discriminator": [
+        216,
+        38,
+        130,
+        175,
+        104,
+        0,
+        154,
+        60
+      ]
+    },
+    {
+      "name": "RailsConfig",
+      "discriminator": [
+        199,
+        249,
+        56,
+        169,
+        51,
+        166,
+        91,
+        135
+      ]
+    },
+    {
+      "name": "SessionKeeper",
+      "discriminator": [
+        145,
+        197,
+        208,
+        100,
+        119,
+        116,
+        75,
+        199
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BreakerChanged",
+      "discriminator": [
+        150,
+        231,
+        34,
+        202,
+        50,
+        167,
+        73,
+        145
+      ]
+    },
+    {
+      "name": "DestinationEvent",
+      "discriminator": [
+        186,
+        177,
+        118,
+        94,
+        162,
+        101,
+        32,
+        141
+      ]
+    },
+    {
+      "name": "EngineGrantChanged",
+      "discriminator": [
+        47,
+        29,
+        51,
+        144,
+        93,
+        205,
+        72,
+        169
+      ]
+    },
+    {
+      "name": "EscrowEvent",
+      "discriminator": [
+        241,
+        51,
+        61,
+        3,
+        5,
+        32,
+        113,
+        144
+      ]
+    },
+    {
+      "name": "FacilityEvent",
+      "discriminator": [
+        254,
+        79,
+        39,
+        135,
+        168,
+        96,
+        142,
+        60
+      ]
+    },
+    {
+      "name": "FillSettled",
+      "discriminator": [
+        47,
+        107,
+        42,
+        146,
+        115,
+        71,
+        20,
+        119
+      ]
+    },
+    {
+      "name": "KeeperEvent",
+      "discriminator": [
+        71,
+        103,
+        246,
+        246,
+        205,
+        216,
+        19,
+        63
+      ]
+    },
+    {
+      "name": "PayoutMade",
+      "discriminator": [
+        197,
+        30,
+        136,
+        82,
+        228,
+        4,
+        109,
+        105
+      ]
+    },
+    {
+      "name": "RailsConfigUpdated",
+      "discriminator": [
+        25,
+        107,
+        0,
+        94,
+        136,
+        115,
+        126,
+        130
+      ]
+    },
+    {
+      "name": "SessionEvent",
+      "discriminator": [
+        82,
+        225,
+        122,
+        195,
+        226,
+        135,
+        125,
+        98
+      ]
+    },
+    {
+      "name": "TransferInstruction",
+      "discriminator": [
+        107,
+        88,
+        92,
+        152,
+        248,
+        72,
+        206,
+        84
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Signer is not the rails config authority"
+    },
+    {
+      "code": 6001,
+      "name": "NotUpgradeAuthority",
+      "msg": "Signer is not the program upgrade authority"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidMintDecimals",
+      "msg": "Settlement mint must have 6 decimals"
+    },
+    {
+      "code": 6003,
+      "name": "MintMismatch",
+      "msg": "Token account mint does not match the settlement mint"
+    },
+    {
+      "code": 6004,
+      "name": "DuplicateTreasuryAccount",
+      "msg": "Fee receiver and reserve must be distinct accounts"
+    },
+    {
+      "code": 6005,
+      "name": "Paused",
+      "msg": "Rails are paused"
+    },
+    {
+      "code": 6006,
+      "name": "DepegBreakerTripped",
+      "msg": "Settlement-asset depeg breaker is tripped"
+    },
+    {
+      "code": 6007,
+      "name": "DeadlineNotReached",
+      "msg": "Deadline has not been reached"
+    },
+    {
+      "code": 6008,
+      "name": "EscrowClosed",
+      "msg": "Escrow is already closed"
+    },
+    {
+      "code": 6009,
+      "name": "FillAlreadySettled",
+      "msg": "Fill already settled"
+    },
+    {
+      "code": 6010,
+      "name": "ConservationViolated",
+      "msg": "Settlement does not conserve escrowed cash"
+    },
+    {
+      "code": 6011,
+      "name": "DestinationNotAllowlisted",
+      "msg": "Payout destination is not allowlisted"
+    },
+    {
+      "code": 6012,
+      "name": "MathDivisionByZero",
+      "msg": "Math: division by zero"
+    },
+    {
+      "code": 6013,
+      "name": "MathOverflow",
+      "msg": "Math: overflow"
+    },
+    {
+      "code": 6014,
+      "name": "MathInvalidInput",
+      "msg": "Math: invalid input"
+    },
+    {
+      "code": 6015,
+      "name": "MathUnderflow",
+      "msg": "Math: underflow"
+    },
+    {
+      "code": 6016,
+      "name": "MathOverAllocation",
+      "msg": "Math: over-allocation"
+    },
+    {
+      "code": 6017,
+      "name": "NotOperator",
+      "msg": "Signer is not the session operator"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidSchedule",
+      "msg": "Session schedule is not strictly increasing from now"
+    },
+    {
+      "code": 6019,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6020,
+      "name": "CashCapExceeded",
+      "msg": "Deposit exceeds the per-investor cash cap"
+    },
+    {
+      "code": 6021,
+      "name": "SessionNotOpen",
+      "msg": "Session is not open"
+    },
+    {
+      "code": 6022,
+      "name": "OutsideWindow",
+      "msg": "Outside the permitted phase window"
+    },
+    {
+      "code": 6023,
+      "name": "AlreadyRevealed",
+      "msg": "Escrow already revealed"
+    },
+    {
+      "code": 6024,
+      "name": "BondNotForfeitable",
+      "msg": "Bond is not forfeitable"
+    },
+    {
+      "code": 6025,
+      "name": "NotEscrowOwner",
+      "msg": "Refund destination is not owned by the escrow owner"
+    },
+    {
+      "code": 6026,
+      "name": "ReserveMismatch",
+      "msg": "Account is not the session reserve"
+    },
+    {
+      "code": 6027,
+      "name": "FeeTooHigh",
+      "msg": "Fee or reserve bps above the hard ceiling"
+    },
+    {
+      "code": 6028,
+      "name": "WrongSide",
+      "msg": "Escrow is on the wrong side for this operation"
+    },
+    {
+      "code": 6029,
+      "name": "NotRevealed",
+      "msg": "Escrow has not been revealed"
+    },
+    {
+      "code": 6030,
+      "name": "InsufficientEscrow",
+      "msg": "Fill exceeds the escrowed amount"
+    },
+    {
+      "code": 6031,
+      "name": "AssetMismatch",
+      "msg": "Account is not the session asset"
+    },
+    {
+      "code": 6032,
+      "name": "NotRofrAuthority",
+      "msg": "Signer is not the session ROFR authority"
+    },
+    {
+      "code": 6033,
+      "name": "FeeReceiverMismatch",
+      "msg": "Account is not the session fee receiver"
+    },
+    {
+      "code": 6034,
+      "name": "DestinationRevoked",
+      "msg": "Payout destination has been revoked"
+    },
+    {
+      "code": 6035,
+      "name": "DestinationExpired",
+      "msg": "Payout destination attestation has expired"
+    },
+    {
+      "code": 6036,
+      "name": "NotRegistrar",
+      "msg": "Signer is not the payout registrar"
+    },
+    {
+      "code": 6037,
+      "name": "FacilityUnderfunded",
+      "msg": "Facility has insufficient funds"
+    },
+    {
+      "code": 6038,
+      "name": "RateTooHigh",
+      "msg": "Facility rate above the hard ceiling"
+    },
+    {
+      "code": 6039,
+      "name": "NothingOwed",
+      "msg": "Nothing is owed on this advance"
+    },
+    {
+      "code": 6040,
+      "name": "NotCurator",
+      "msg": "Signer is not the facility curator"
+    },
+    {
+      "code": 6041,
+      "name": "AssetVaultFrozen",
+      "msg": "Asset vault is frozen; the gate must thaw it before deposit_ask"
+    },
+    {
+      "code": 6042,
+      "name": "RefundAssetDestinationFrozen",
+      "msg": "Refund asset destination is frozen; pass a thawed account of the owner"
+    },
+    {
+      "code": 6043,
+      "name": "RefundUsdcDestinationFrozen",
+      "msg": "Refund USDC destination is frozen; pass a thawed account of the owner"
+    },
+    {
+      "code": 6044,
+      "name": "EscrowDrained",
+      "msg": "Seller asset vault holds less than the fill quantity"
+    },
+    {
+      "code": 6045,
+      "name": "AdvanceRateTooHigh",
+      "msg": "Advance rate above the hard ceiling"
+    },
+    {
+      "code": 6046,
+      "name": "AdvanceExceedsRate",
+      "msg": "Advance exceeds collateral value × advance rate"
+    },
+    {
+      "code": 6047,
+      "name": "TooManyLots",
+      "msg": "Too many lots in one fill"
+    },
+    {
+      "code": 6048,
+      "name": "KeeperPolicyOutOfBounds",
+      "msg": "Keeper policy out of bounds"
+    },
+    {
+      "code": 6049,
+      "name": "KeeperBondTooLow",
+      "msg": "Keeper bond below the minimum"
+    },
+    {
+      "code": 6050,
+      "name": "KeeperSlaNotDue",
+      "msg": "Keeper SLA has not run out"
+    },
+    {
+      "code": 6051,
+      "name": "KeeperAssigned",
+      "msg": "Keeper has live assignments"
+    },
+    {
+      "code": 6052,
+      "name": "SessionStillOpen",
+      "msg": "Session still has open escrows"
+    },
+    {
+      "code": 6053,
+      "name": "KeeperSessionMismatch",
+      "msg": "Keeper assignment is for another session"
+    },
+    {
+      "code": 6054,
+      "name": "GateProgramMismatch",
+      "msg": "Gate program is not credit-gate"
+    },
+    {
+      "code": 6055,
+      "name": "GateOutcomeInvalid",
+      "msg": "Gate outcome missing or malformed"
+    },
+    {
+      "code": 6056,
+      "name": "EngineNotGranted",
+      "msg": "Signer is not an operator or granted engine for this role"
+    }
+  ],
+  "types": [
+    {
+      "name": "Advance",
+      "docs": [
+        "One borrower's advance from one facility (LF-P1/P6)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "facility",
+            "docs": [
+              "Facility (`has_one`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "borrower",
+            "docs": [
+              "Borrower (the pledging claim holder)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "collateral_ref_hash",
+            "docs": [
+              "Hash of the pledged collateral reference (claim / lot id)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "collateral_value",
+            "docs": [
+              "Collateral mark the advance was sized against (micro-USDC), as",
+              "supplied by the curator (#94). There is no mark engine yet, so the",
+              "rails cannot verify it; they bound the advance by it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "advance_rate_bps",
+            "docs": [
+              "Advance rate the curator applied, in bps; at most the H1 ceiling",
+              "`credit_math::MAX_ADVANCE_RATE_BPS` (#94). Original principal ≤",
+              "`collateral_value × advance_rate_bps / 10⁴`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "principal",
+            "docs": [
+              "Principal still owed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "interest",
+            "docs": [
+              "Interest accrued and not yet paid."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_accrual",
+            "docs": [
+              "Last accrual time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmountUnit",
+      "docs": [
+        "Unit of [`EscrowEvent::amount`] (#89). Explicit so a consumer that books",
+        "`amount` never mixes micro-USDC with asset base units."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "MicroUsdc"
+          },
+          {
+            "name": "AssetBase"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Breaker",
+      "docs": [
+        "Halt switch that moved."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pause"
+          },
+          {
+            "name": "Depeg"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BreakerChanged",
+      "docs": [
+        "Emitted when `paused` or `depeg_breaker` flips (`set_breaker`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "breaker",
+            "docs": [
+              "Which switch."
+            ],
+            "type": {
+              "defined": {
+                "name": "Breaker"
+              }
+            }
+          },
+          {
+            "name": "engaged",
+            "docs": [
+              "New state (`true` = halted)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "evidence_hash",
+            "docs": [
+              "Hash of the off-chain evidence (price sources, incident note)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Authority that flipped it."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CashSession",
+      "docs": [
+        "The cash side of one auction session (AE-P1/P3/P10).",
+        "",
+        "Everything a refund depends on is snapshotted here at open, so a later",
+        "config change can never strand or re-route escrowed cash (L5)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "operator",
+            "docs": [
+              "Operator that opened the session (config snapshot) — reports reveals",
+              "and failure. Cannot move cash."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session_id",
+            "docs": [
+              "Operator-chosen id; part of the PDA seed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "usdc_mint",
+            "docs": [
+              "Settlement mint snapshot."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reserve",
+            "docs": [
+              "Reserve token account snapshot (forfeited bonds, reserve cut)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_receiver",
+            "docs": [
+              "Fee token account snapshot."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "docs": [
+              "Traded asset (NPCS or a queue-claim token). Sellers escrow it; each",
+              "fill delivers it to the buyer atomically with the cash leg (DvP)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "docs": [
+              "Asset decimals: prices are micro-USDC per whole asset unit."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "fee_bps",
+            "docs": [
+              "Fee bps snapshot."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "reserve_bps",
+            "docs": [
+              "Reserve bps snapshot."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "rofr_authority",
+            "docs": [
+              "Issuer ROFR authority (AE-P7); `Pubkey::default()` = no ROFR."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "commit_end",
+            "docs": [
+              "Deposits accepted while `now < commit_end`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reveal_end",
+            "docs": [
+              "Reveals reported while `commit_end <= now < reveal_end`; unrevealed",
+              "escrows become forfeitable at `reveal_end`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "settle_deadline",
+            "docs": [
+              "Hard deadline (AE-P10): at/after it every escrow is refundable by",
+              "anyone, whatever the session state."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bond_amount",
+            "docs": [
+              "Bond every escrow posts (micro-USDC, forfeitable)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_cash",
+            "docs": [
+              "Per-investor cash cap (AE-P3 bid caps; one escrow per owner)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Running / aborted."
+            ],
+            "type": {
+              "defined": {
+                "name": "SessionStatus"
+              }
+            }
+          },
+          {
+            "name": "failed_at",
+            "docs": [
+              "When the operator failed the session (0 while open)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "open_escrows",
+            "docs": [
+              "Live escrow count."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "total_cash",
+            "docs": [
+              "Cash held across live escrows (R4 reconciliation invariant)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_bonds",
+            "docs": [
+              "Bonds held across live escrows."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_asset",
+            "docs": [
+              "Asset held across live sell escrows."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fills_settled",
+            "docs": [
+              "Fills settled so far."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "volume_settled",
+            "docs": [
+              "Asset delivered across settled fills."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "gross_settled",
+            "docs": [
+              "Cash (gross) paid across settled fills."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_cash_shortfall",
+            "docs": [
+              "Micro-USDC that refunds recorded but did not find in a vault (#89):",
+              "the sum of every `CashShortfall`. A refund still completes and stops",
+              "tracking the recorded amount, so without this the loss would leave",
+              "the books. Non-zero means escrowed cash was taken (e.g. by a",
+              "settlement-mint clawback) and reconciliation must not report clean."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_asset_shortfall",
+            "docs": [
+              "Asset base units that `refund_ask` recorded but did not find (#89):",
+              "the sum of every `AssetShortfall` (e.g. a permanent-delegate pull)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigChange",
+      "docs": [
+        "Which governed config field group changed."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Initialized"
+          },
+          {
+            "name": "Treasury"
+          },
+          {
+            "name": "Authority"
+          },
+          {
+            "name": "Operator"
+          },
+          {
+            "name": "Fees"
+          },
+          {
+            "name": "Registrar"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CouponParams",
+      "docs": [
+        "Borsh mirror of `credit_math::WaterfallParams` for one coupon period",
+        "(TE-P4). All amounts micro-USDC."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fees_due",
+            "docs": [
+              "1 · fees & expenses."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "senior_coupon_due",
+            "docs": [
+              "2 · senior coupon."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_target",
+            "docs": [
+              "3 · reserve refilled toward this target …"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_current",
+            "docs": [
+              "… from this current tranche-reserve level (tranche-engine ledger)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "senior_amort_due",
+            "docs": [
+              "4 · senior amortization."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "junior_coupon_due",
+            "docs": [
+              "5 · junior coupon."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CouponReceipt",
+      "docs": [
+        "Idempotency + audit record for one coupon period."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "distributor",
+            "docs": [
+              "Distributor that paid it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "period_id",
+            "docs": [
+              "Period id (seed)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "split",
+            "docs": [
+              "The split actually paid."
+            ],
+            "type": {
+              "defined": {
+                "name": "CouponSplit"
+              }
+            }
+          },
+          {
+            "name": "paid_at",
+            "docs": [
+              "Cluster time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CouponSplit",
+      "docs": [
+        "Where one period's cash went. `fees + reserve + senior + junior == cash`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "cash",
+            "docs": [
+              "Cash distributed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fees",
+            "docs": [
+              "→ fee receiver."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve",
+            "docs": [
+              "→ reserve (top-up line)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "senior",
+            "docs": [
+              "→ senior holder (coupon + amortization)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "junior",
+            "docs": [
+              "→ junior holder (coupon + residual)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "unpaid_senior_coupon",
+            "docs": [
+              "Senior coupon shortfall (defers, never a default event)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DestinationAction",
+      "docs": [
+        "Payout-registry step (R3)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Registered"
+          },
+          {
+            "name": "Renewed"
+          },
+          {
+            "name": "Revoked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DestinationEvent",
+      "docs": [
+        "Emitted on every payout-registry write (R3). Hash only — no PII."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "action",
+            "docs": [
+              "Step."
+            ],
+            "type": {
+              "defined": {
+                "name": "DestinationAction"
+              }
+            }
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "Wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "token_account",
+            "docs": [
+              "Registered USDC token account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_ref_hash",
+            "docs": [
+              "Attestation reference hash."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Expiry."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "registrar",
+            "docs": [
+              "Registrar that performed it."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EngineGrant",
+      "docs": [
+        "#136: an engine program's signer PDA admitted by the config authority to",
+        "act as operator for some roles, next to `RailsConfig.operator`. Several",
+        "engines (auction-engine sessions, liquidity-facility facilities,",
+        "tranche-engine coupons) can then drive the rails at once without",
+        "re-pointing the single operator. Presented as the first remaining",
+        "account of the instruction that needs it, so existing clients that sign",
+        "as the config operator are unchanged."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "docs": [
+              "The engine's signer (a PDA of the engine program)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "roles",
+            "docs": [
+              "Bitmask of `EngineGrant::ROLE_*`; 0 = revoked."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EngineGrantChanged",
+      "docs": [
+        "#136: an engine grant was written (roles 0 = revoked)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "type": "pubkey"
+          },
+          {
+            "name": "roles",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Escrow",
+      "docs": [
+        "One investor's escrow in one session: cash (`qty × limit`, opaque to the",
+        "rails so the bid stays sealed) plus the bond. Its tokens sit in a",
+        "dedicated vault owned by this PDA — never in a shared pool (AE-P10)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "Session this escrow belongs to (`has_one`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "Depositor; the only possible refund destination."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "Vault token account (`has_one`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "docs": [
+              "Buy (cash) or sell (asset) escrow."
+            ],
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "cash",
+            "docs": [
+              "Cash held (micro-USDC); always 0 on the sell side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "asset",
+            "docs": [
+              "Asset held (base units); always 0 on the buy side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "asset_vault",
+            "docs": [
+              "Sell side: asset vault (`[\"asset_vault\", escrow]`); default on buys."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Bond held (micro-USDC); 0 once forfeited."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "revealed",
+            "docs": [
+              "Reveal reported by the operator."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowAction",
+      "docs": [
+        "Escrow lifecycle step (AE-P3/P4/P10)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Deposited"
+          },
+          {
+            "name": "BondPosted"
+          },
+          {
+            "name": "BondForfeited"
+          },
+          {
+            "name": "Refunded"
+          },
+          {
+            "name": "Revealed"
+          },
+          {
+            "name": "AssetDeposited"
+          },
+          {
+            "name": "AssetReturned"
+          },
+          {
+            "name": "AssetShortfall"
+          },
+          {
+            "name": "CashShortfall"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowEvent",
+      "docs": [
+        "Emitted for every escrow/bond movement (R1)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "action",
+            "docs": [
+              "Lifecycle step."
+            ],
+            "type": {
+              "defined": {
+                "name": "EscrowAction"
+              }
+            }
+          },
+          {
+            "name": "session",
+            "docs": [
+              "Session (or facility) the escrow belongs to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow",
+            "docs": [
+              "Escrow PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "Depositor wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Amount moved (or missing, for the shortfall actions), in `unit`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "`MicroUsdc` or `AssetBase` — always `action.unit()` (#89)."
+            ],
+            "type": {
+              "defined": {
+                "name": "AmountUnit"
+              }
+            }
+          },
+          {
+            "name": "caller",
+            "docs": [
+              "Signer that triggered it (any participant for refunds)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExemptionPath",
+      "docs": [
+        "Legal basis a fill relies on (doc 07 L3–L5, SRS 08 AE-P8). Wire-stable",
+        "by index and append-only; the indices are credit-gate's exemption codes.",
+        "credit-gate's settle-time check picks it for every fill (#133), so a",
+        "settled fill never carries `NotRecorded`; the variant stays for wire",
+        "stability and for records made before the check existed."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "NotRecorded"
+          },
+          {
+            "name": "Section4a7"
+          },
+          {
+            "name": "Section4a1Half"
+          },
+          {
+            "name": "IssuanceExemption"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Facility",
+      "docs": [
+        "A liquidity-facility fund (LF-P1/P2): USDC in a program-owned vault,",
+        "lent out as advances to registered destinations only."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "curator",
+            "docs": [
+              "Curator key (the liquidity-facility engine's signer; underwriting —",
+              "advance rate vs `MARK_PROTECTIVE` — happens there, not here)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "facility_id",
+            "docs": [
+              "Curator-chosen id; part of the PDA seed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "usdc_mint",
+            "docs": [
+              "Settlement mint snapshot."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "Vault token account (`[\"facility_vault\", facility]`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rate_bps",
+            "docs": [
+              "Simple APR in bps (pilot: 1_200 = 12%), ≤ `MAX_RATE_BPS`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "principal_outstanding",
+            "docs": [
+              "Principal currently lent out across live advances."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_funded",
+            "docs": [
+              "Lifetime cash in from funders."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "interest_collected",
+            "docs": [
+              "Lifetime interest collected."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FacilityAction",
+      "docs": [
+        "Facility lifecycle step (R3)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Opened"
+          },
+          {
+            "name": "Funded"
+          },
+          {
+            "name": "AdvanceClosed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FacilityEvent",
+      "docs": [
+        "Emitted for facility steps that are not payouts (R3)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "action",
+            "docs": [
+              "Step."
+            ],
+            "type": {
+              "defined": {
+                "name": "FacilityAction"
+              }
+            }
+          },
+          {
+            "name": "facility",
+            "docs": [
+              "Facility PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Micro-USDC involved (0 for `Opened`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "actor",
+            "docs": [
+              "Signer."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillReceipt",
+      "docs": [
+        "Idempotency + audit record for one settled fill (AE-P8). Its PDA is",
+        "created by `settle_fill`, so replaying a fill index cannot pay twice."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "Session."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "docs": [
+              "Fill index (seed)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "buyer",
+            "docs": [
+              "Buyer wallet (issuer on the ROFR path)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "docs": [
+              "Seller wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Asset delivered (base units)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Price, micro-USDC per whole asset unit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "split",
+            "docs": [
+              "The split of this fill's cash."
+            ],
+            "type": {
+              "defined": {
+                "name": "FillSplit"
+              }
+            }
+          },
+          {
+            "name": "rofr",
+            "docs": [
+              "Issuer ROFR fill (AE-P7)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "settled_at",
+            "docs": [
+              "Cluster time of settlement."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillSettled",
+      "docs": [
+        "Emitted once per settled fill — the DvP settlement (AE-P7/P8, R2).",
+        "`to_seller + fee + to_reserve == gross` always, and `qty` of the asset",
+        "moved seller → buyer in the same instruction."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "Session."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "docs": [
+              "Fill index within the session (receipt PDA seed)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "buyer",
+            "docs": [
+              "Buyer wallet (issuer on the ROFR path)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "docs": [
+              "Seller wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Asset base units delivered."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Price, micro-USDC per whole asset unit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "gross",
+            "docs": [
+              "Buyer cash released for this fill."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "to_seller",
+            "docs": [
+              "Cash to seller."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "docs": [
+              "Protocol fee."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "to_reserve",
+            "docs": [
+              "Reserve cut."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rofr",
+            "docs": [
+              "`true` when the issuer's ROFR took the fill (AE-P7)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "disclosure_hash",
+            "docs": [
+              "Disclosure-policy hash (aggregate-only print discipline)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillSplit",
+      "docs": [
+        "Cash split of one fill. `to_seller + fee + to_reserve == gross` always."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "gross",
+            "docs": [
+              "Buyer cash released: `ceil(qty × price / 10^asset_decimals)`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "docs": [
+              "Protocol fee: `floor(gross × fee_bps / 10⁴)`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "to_reserve",
+            "docs": [
+              "Reserve cut: `floor(gross × reserve_bps / 10⁴)`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "to_seller",
+            "docs": [
+              "Seller proceeds: the remainder."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GateCheck",
+      "docs": [
+        "Whether the gate's AE-P8 final re-check (attestation still valid, lot",
+        "seasoning OK, block-list miss) ran inside this settlement. Append-only."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "NotPerformed"
+          },
+          {
+            "name": "Passed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Keeper",
+      "docs": [
+        "A bonded keeper. Its bond sits in `[\"keeper_vault\", keeper]`, a USDC",
+        "account owned by this PDA, never by the keeper's wallet."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "assignments",
+            "docs": [
+              "Live session assignments; the bond can't leave while > 0."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "missed",
+            "docs": [
+              "Escrows third parties had to refund past this keeper's SLA."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeeperAction",
+      "docs": [
+        "Keeper lifecycle and SLA escalations (doc 06 §8, #127)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Registered"
+          },
+          {
+            "name": "ToppedUp"
+          },
+          {
+            "name": "Assigned"
+          },
+          {
+            "name": "Escalated"
+          },
+          {
+            "name": "Released"
+          },
+          {
+            "name": "Withdrawn"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeeperEvent",
+      "docs": [
+        "Emitted by every keeper instruction (#127)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "action",
+            "type": {
+              "defined": {
+                "name": "KeeperAction"
+              }
+            }
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "The keeper's wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "docs": [
+              "Session (default when not session-scoped)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "micro-USDC, per `action`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "caller",
+            "docs": [
+              "Who signed."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeeperPolicy",
+      "docs": [
+        "Keeper terms, set by the config authority. Snapshotted into every",
+        "assignment, so a later change never moves a live session's SLA (L5)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "min_bond",
+            "docs": [
+              "Minimum bond (micro-USDC) to register and to be assigned."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sla_seconds",
+            "docs": [
+              "Seconds after a session's hard deadline by which the assigned keeper",
+              "must have refunded every escrow."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "escalation_reward",
+            "docs": [
+              "Paid from the keeper's bond to whoever refunds an escrow the keeper",
+              "left open past its SLA (per escrow, capped by what the bond holds)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotRef",
+      "docs": [
+        "One Rule-144 lot a fill draws from (doc 07 L6/L21, CG-P3), as",
+        "credit-gate's settle-time check debited it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lot_index",
+            "docs": [
+              "The lot's id in the seller's `HolderLots` ledger. `u32::MAX` is the",
+              "FREE bucket (seasoned lots merged together; its times are 0)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Base units this fill took from the lot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "acquired_ts",
+            "docs": [
+              "When the lot was acquired (unix seconds)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "restriction_expiry",
+            "docs": [
+              "When the lot's seasoning ends (unix seconds)."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutDestination",
+      "docs": [
+        "An attested, allowlisted payout wallet (R3, \"private\" rails).",
+        "",
+        "The only place any payout path is allowed to send cash to a person. No",
+        "PII: the off-chain KYC/attestation record appears only as a hash."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "docs": [
+              "Wallet this entry belongs to (PDA seed)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "token_account",
+            "docs": [
+              "The one USDC token account payouts may go to (owned by `owner`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_ref_hash",
+            "docs": [
+              "Hash of the off-chain attestation / KYC reference. Never raw data.",
+              "Supplied by the registrar and **not checked** against any SAS",
+              "attestation: the registrar key vouches for it (#52)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registrar",
+            "docs": [
+              "Registrar that admitted / last renewed it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Payouts rejected at/after this time (attestation expiry, H4)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "active",
+            "docs": [
+              "`false` once revoked (block-list precedence, CG-P5)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutKind",
+      "docs": [
+        "Why cash is being paid out (R3)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "ClaimProceeds"
+          },
+          {
+            "name": "FacilityRepayment"
+          },
+          {
+            "name": "FacilityAdvance"
+          },
+          {
+            "name": "Coupon"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutMade",
+      "docs": [
+        "Emitted for every payout to an allowlisted destination (R3)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "docs": [
+              "Why."
+            ],
+            "type": {
+              "defined": {
+                "name": "PayoutKind"
+              }
+            }
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Source PDA (escrow, facility fund, distribution vault)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "Destination token account (must be in the payout registry)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Micro-USDC paid."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reference_hash",
+            "docs": [
+              "Hash of the off-chain reference (claim id, advance id, period)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RailsConfig",
+      "docs": [
+        "The one global rails configuration.",
+        "",
+        "Every cash path reads it: the settlement mint all escrows are",
+        "denominated in, where fees and forfeited bonds go, and the two halt",
+        "switches. Consumers (auction sessions, facility advances) snapshot the",
+        "fields they depend on at open — the rails never re-route an in-flight",
+        "session's cash (L5 snapshot discipline). Updates are governed (Squads",
+        "2-of-2) and always evented."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Squads 2-of-2: sole authority for this PDA (SRS §8 protocol authority)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "docs": [
+              "Settlement mint (USDC). Every escrow, bond and payout uses it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_receiver",
+            "docs": [
+              "USDC token account receiving protocol fees (AE-P8 fee split)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reserve",
+            "docs": [
+              "USDC token account receiving forfeited bonds and the reserve cut",
+              "(AE-P4, LF-P5 shortfall buffer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "Sole key allowed to open cash sessions and report their outcomes",
+              "(reveals, failure). Set to the authority at init; re-pointed to the",
+              "auction-engine's session-signer PDA once that program exists (Q1)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "registrar",
+            "docs": [
+              "Payout-registry key (R3): the only key that can admit, renew or",
+              "revoke payout destinations. Stands in for the SAS attester until the",
+              "gate's attestation read is on-chain (Q2). Set to the authority at init."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "docs": [
+              "Protocol fee on each fill's gross, bps (≤ `MAX_FEE_BPS`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "reserve_bps",
+            "docs": [
+              "Reserve cut on each fill's gross, bps (≤ `MAX_RESERVE_BPS`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Operational pause (authority-set). Blocks new money in; refunds stay",
+              "open (AE-P10: refunds are never pausable)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "depeg_breaker",
+            "docs": [
+              "Settlement-asset depeg breaker (06 §2, F4/M5). Tripped ⇒ no new",
+              "settlement at a price denominated in a broken USDC; refunds stay open."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RailsConfigUpdated",
+      "docs": [
+        "Emitted on every config write."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "change",
+            "docs": [
+              "What changed."
+            ],
+            "type": {
+              "defined": {
+                "name": "ConfigChange"
+              }
+            }
+          },
+          {
+            "name": "new_config_hash",
+            "docs": [
+              "`RailsConfig::fingerprint()` after the write."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Authority that performed the write."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionAction",
+      "docs": [
+        "Cash-session lifecycle step (R1)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Opened"
+          },
+          {
+            "name": "Failed"
+          },
+          {
+            "name": "Settled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionEvent",
+      "docs": [
+        "Emitted when a cash session opens or fails (R1)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "action",
+            "docs": [
+              "Lifecycle step."
+            ],
+            "type": {
+              "defined": {
+                "name": "SessionAction"
+              }
+            }
+          },
+          {
+            "name": "session",
+            "docs": [
+              "Session PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "Operator."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "settle_deadline",
+            "docs": [
+              "Hard refund deadline (AE-P10)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "ts",
+            "docs": [
+              "Cluster time of the step."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionKeeper",
+      "docs": [
+        "One keeper's duty for one session: every escrow refunded by `due_at`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "The `Keeper` PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "due_at",
+            "docs": [
+              "`session.settle_deadline + policy.sla_seconds` at assignment."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reward",
+            "docs": [
+              "`policy.escalation_reward` at assignment."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "escalations",
+            "docs": [
+              "Escrows escalated so far."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionParams",
+      "docs": [
+        "Operator-chosen session parameters, snapshotted at open (AE-P1, L5)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commit_end",
+            "docs": [
+              "Deposits accepted while `now < commit_end`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reveal_end",
+            "docs": [
+              "Reveals reported until `reveal_end`; settlement opens at it."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "settle_deadline",
+            "docs": [
+              "Hard deadline: settlement closes, every escrow refundable."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bond_amount",
+            "docs": [
+              "Bond per escrow (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_cash",
+            "docs": [
+              "Per-investor cash cap (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rofr_authority",
+            "docs": [
+              "Issuer ROFR authority (AE-P7); `Pubkey::default()` disables ROFR."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionStatus",
+      "docs": [
+        "Lifecycle of a cash session. Deliberately tiny: the auction phases live",
+        "in auction-engine; the rails only need to know \"still running\" vs",
+        "\"aborted, release everything\"."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Failed"
+          },
+          {
+            "name": "Settled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Side",
+      "docs": [
+        "Which side of the book an escrow is on."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Buy"
+          },
+          {
+            "name": "Sell"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TransferInstruction",
+      "docs": [
+        "The AE-P8 transfer record **schema**, emitted once per settled fill right",
+        "after `FillSettled` (#61). `FillSettled` carries the economics. This",
+        "event has the fields a transfer agent (doc 07 L21) and a",
+        "books-and-records export (L22) need to show the transfer was lawful.",
+        "",
+        "Every fill now runs credit-gate's settle-time check first (#133, #134):",
+        "block-list on both wallets, the buyer's SAS attestations re-read, the",
+        "seller's seasoned lots debited. The record carries what the gate",
+        "returned: the lots drawn, the exemption basis, and `gate_check =",
+        "Passed`. The crank's evidence manifest counts a fill as `proven` only",
+        "when all three are present (#88)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "Session."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "docs": [
+              "Fill index within the session (joins to `FillSettled`)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "from",
+            "docs": [
+              "Seller wallet (asset leaves)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "to",
+            "docs": [
+              "Buyer wallet (asset arrives; issuer on the ROFR path)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Asset base units transferred."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Price, micro-USDC per whole asset unit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lot_ids",
+            "docs": [
+              "Lots the transferred units came from, at most `MAX_LOTS_PER_FILL`."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "LotRef"
+                }
+              }
+            }
+          },
+          {
+            "name": "exemption_path",
+            "docs": [
+              "Exemption basis relied on for this resale."
+            ],
+            "type": {
+              "defined": {
+                "name": "ExemptionPath"
+              }
+            }
+          },
+          {
+            "name": "gate_check",
+            "docs": [
+              "Whether the gate's final re-check ran in this transaction."
+            ],
+            "type": {
+              "defined": {
+                "name": "GateCheck"
+              }
+            }
+          },
+          {
+            "name": "disclosure_hash",
+            "docs": [
+              "Disclosure-policy hash (same value as `FillSettled`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

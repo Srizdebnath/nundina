@@ -1,0 +1,2032 @@
+{
+  "address": "2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4",
+  "metadata": {
+    "name": "queue_claim",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Tokenized redemption-queue claims: attested request -> claim position token, issuer consent flags, sell in an auction session or pledge into the liquidity facility, window fills swept facility-first (SRS 08 §4.4, QC-P1..P5)."
+  },
+  "instructions": [
+    {
+      "name": "attest",
+      "docs": [
+        "QC-P1/P2: the attester confirms the request (queue rank + expected",
+        "fill schedule). Mints the claim position token to the holder and",
+        "freezes it: non-transferable until issuer consent."
+      ],
+      "discriminator": [
+        83,
+        148,
+        120,
+        119,
+        144,
+        139,
+        117,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "claim_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "request"
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_claim",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "request"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cash_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "request"
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder"
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "attester",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "claim_token_program"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "rank",
+          "type": "u32"
+        },
+        {
+          "name": "schedule",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "ScheduledFill"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cancel",
+      "docs": [
+        "Cancel before any fill (QC-P2 Cancelled): the holder returns the",
+        "claim token (burned) and gets the NPCS back."
+      ],
+      "discriminator": [
+        232,
+        219,
+        223,
+        41,
+        219,
+        236,
+        220,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "holder",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "npcs_vault",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "holder_asset",
+          "writable": true
+        },
+        {
+          "name": "holder_claim",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "claim_mint",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "claim_token_program",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "collect",
+      "docs": [
+        "QC-P4: the holder of an unpledged claim token takes the proceeds."
+      ],
+      "discriminator": [
+        208,
+        47,
+        194,
+        155,
+        17,
+        98,
+        82,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request"
+        },
+        {
+          "name": "claim",
+          "docs": [
+            "The caller's claim token account: holds the claim."
+          ]
+        },
+        {
+          "name": "holder",
+          "signer": true
+        },
+        {
+          "name": "cash_vault",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "holder_usdc",
+          "writable": true
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "discharge",
+      "docs": [
+        "Clear a pledge whose advance the rails have closed (repaid in full",
+        "by any path). Permissionless."
+      ],
+      "discriminator": [
+        148,
+        228,
+        15,
+        151,
+        89,
+        97,
+        171,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "advance"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_queue",
+      "docs": [
+        "One queue per asset. The signer is the issuer authority (consent",
+        "flags, fills, freezes); `attester` attests requests (QC-P1)."
+      ],
+      "discriminator": [
+        230,
+        85,
+        190,
+        41,
+        189,
+        153,
+        231,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "attester",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "pledge",
+      "docs": [
+        "QC-P4: pledge the claim into a liquidity-facility for `amount` USDC.",
+        "Remaining accounts: the facility `PledgeAndAdvance` list followed",
+        "by its rails `AdvanceFunds` list."
+      ],
+      "discriminator": [
+        235,
+        47,
+        156,
+        254,
+        0,
+        88,
+        212,
+        142
+      ],
+      "accounts": [
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "holder",
+          "signer": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "facility_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "quote_pv",
+      "docs": [
+        "QC-P3: the claim's model value — `credit_math::pv_of_claim` over the",
+        "unfilled part of the attested schedule, each expected fill priced at",
+        "the underlying asset's `MARK_PROTECTIVE`, discounted per period.",
+        "Evented for the nav-publisher, which publishes it to the claim feed."
+      ],
+      "discriminator": [
+        212,
+        157,
+        235,
+        55,
+        70,
+        49,
+        108,
+        32
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request"
+        },
+        {
+          "name": "asset_feed",
+          "docs": [
+            "The underlying asset's mark-engine feed."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "discount_bps_per_period",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "record_fill",
+      "docs": [
+        "QC-P4: a real window execution. The issuer pays `fill_qty × price`",
+        "USDC into the claim's cash vault (rounded up: the issuer initiates)",
+        "and receives the redeemed NPCS from the request vault."
+      ],
+      "discriminator": [
+        111,
+        238,
+        183,
+        82,
+        73,
+        168,
+        151,
+        125
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "npcs_vault",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "cash_vault",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        },
+        {
+          "name": "issuer_usdc",
+          "writable": true
+        },
+        {
+          "name": "issuer_asset",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_qty",
+          "type": "u64"
+        },
+        {
+          "name": "price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "request_redemption",
+      "docs": [
+        "QC-P1: the holder submits a redemption request; `qty` NPCS move",
+        "into the request vault until filled or cancelled."
+      ],
+      "discriminator": [
+        14,
+        62,
+        182,
+        237,
+        59,
+        79,
+        149,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              },
+              {
+                "kind": "account",
+                "path": "queue.requests",
+                "account": "Queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "npcs_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  110,
+                  112,
+                  99,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "request"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "holder_asset",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "window_date",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "set_flags",
+      "docs": [
+        "QC-P2: issuer consent, set independently. Either flag thaws the",
+        "original holder account (the token must be able to move into an",
+        "auction escrow or the facility's custody); neither re-freezes it."
+      ],
+      "discriminator": [
+        199,
+        54,
+        111,
+        124,
+        87,
+        47,
+        217,
+        198
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "claim_mint",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "holder_claim",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        },
+        {
+          "name": "claim_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "transferable",
+          "type": "bool"
+        },
+        {
+          "name": "pledgeable",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_state",
+      "docs": [
+        "QC-P2 Frozen (NAV suspended / fund gates fully) and back, or",
+        "Restructured (redemptions suspended indefinitely). Issuer only."
+      ],
+      "discriminator": [
+        65,
+        69,
+        101,
+        248,
+        20,
+        15,
+        200,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "state",
+          "type": {
+            "defined": {
+              "name": "ClaimState"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "sweep_pledged",
+      "docs": [
+        "QC-P4: a pledged claim's proceeds go through rails",
+        "`sweep_proceeds`: facility repayment first, the rest to the",
+        "borrower's registered destination. Permissionless. Remaining",
+        "accounts: the rails `SweepProceeds` list."
+      ],
+      "discriminator": [
+        0,
+        211,
+        72,
+        108,
+        193,
+        31,
+        4,
+        18
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "cash_vault",
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rails_program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Queue",
+      "discriminator": [
+        204,
+        167,
+        6,
+        247,
+        20,
+        33,
+        2,
+        188
+      ]
+    },
+    {
+      "name": "Request",
+      "discriminator": [
+        125,
+        172,
+        150,
+        161,
+        162,
+        115,
+        39,
+        71
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ClaimPledged",
+      "discriminator": [
+        10,
+        39,
+        208,
+        179,
+        133,
+        221,
+        150,
+        92
+      ]
+    },
+    {
+      "name": "ClaimPv",
+      "discriminator": [
+        67,
+        137,
+        128,
+        37,
+        53,
+        195,
+        36,
+        65
+      ]
+    },
+    {
+      "name": "FillRecorded",
+      "discriminator": [
+        242,
+        171,
+        105,
+        186,
+        40,
+        32,
+        92,
+        26
+      ]
+    },
+    {
+      "name": "FlagsSet",
+      "discriminator": [
+        18,
+        239,
+        239,
+        47,
+        29,
+        66,
+        236,
+        126
+      ]
+    },
+    {
+      "name": "PledgedProceedsSwept",
+      "discriminator": [
+        251,
+        81,
+        247,
+        6,
+        56,
+        61,
+        174,
+        126
+      ]
+    },
+    {
+      "name": "ProceedsPaid",
+      "discriminator": [
+        142,
+        195,
+        207,
+        19,
+        167,
+        168,
+        130,
+        112
+      ]
+    },
+    {
+      "name": "QueueConfigured",
+      "discriminator": [
+        224,
+        250,
+        149,
+        52,
+        71,
+        37,
+        164,
+        93
+      ]
+    },
+    {
+      "name": "RequestAttested",
+      "discriminator": [
+        74,
+        47,
+        221,
+        0,
+        127,
+        255,
+        65,
+        194
+      ]
+    },
+    {
+      "name": "RequestSubmitted",
+      "discriminator": [
+        113,
+        213,
+        202,
+        246,
+        213,
+        106,
+        73,
+        44
+      ]
+    },
+    {
+      "name": "StateChanged",
+      "discriminator": [
+        0,
+        150,
+        55,
+        224,
+        43,
+        26,
+        214,
+        192
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ZeroAmount",
+      "msg": "amount must be positive"
+    },
+    {
+      "code": 6001,
+      "name": "NotAttester",
+      "msg": "signer is not the queue's attester"
+    },
+    {
+      "code": 6002,
+      "name": "NotIssuer",
+      "msg": "signer is not the issuer authority"
+    },
+    {
+      "code": 6003,
+      "name": "NotHolder",
+      "msg": "signer is not the request holder"
+    },
+    {
+      "code": 6004,
+      "name": "MintMismatch",
+      "msg": "mint or vault does not match the queue/request"
+    },
+    {
+      "code": 6005,
+      "name": "WrongState",
+      "msg": "request is not in a state that allows this"
+    },
+    {
+      "code": 6006,
+      "name": "BadSchedule",
+      "msg": "schedule empty, too long, or above the request qty"
+    },
+    {
+      "code": 6007,
+      "name": "NotPledgeable",
+      "msg": "issuer has not consented to pledging"
+    },
+    {
+      "code": 6008,
+      "name": "AlreadyPledged",
+      "msg": "claim already pledged"
+    },
+    {
+      "code": 6009,
+      "name": "Pledged",
+      "msg": "claim is pledged: proceeds go through sweep_pledged"
+    },
+    {
+      "code": 6010,
+      "name": "NotPledged",
+      "msg": "claim is not pledged"
+    },
+    {
+      "code": 6011,
+      "name": "OverFill",
+      "msg": "fill exceeds the unfilled quantity"
+    },
+    {
+      "code": 6012,
+      "name": "ClaimNotHeld",
+      "msg": "caller does not hold the claim token"
+    },
+    {
+      "code": 6013,
+      "name": "FacilityAccounts",
+      "msg": "facility / rails accounts do not match"
+    },
+    {
+      "code": 6014,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "ClaimPledged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "facility",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrower",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimPv",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "pv",
+            "type": "u64"
+          },
+          {
+            "name": "discount_bps_per_period",
+            "type": "u64"
+          },
+          {
+            "name": "mark_price",
+            "type": "u64"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimState",
+      "docs": [
+        "QC-P2 states (doc 06 §5). Transferable / Pledgeable are the",
+        "independent consent flags on the request."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Requested"
+          },
+          {
+            "name": "Attested"
+          },
+          {
+            "name": "PartiallyFilled"
+          },
+          {
+            "name": "Retired"
+          },
+          {
+            "name": "Cancelled"
+          },
+          {
+            "name": "Frozen"
+          },
+          {
+            "name": "Restructured"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Feed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "docs": [
+              "auction-engine's print PDA (the only `record_print` signer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "n_publishers",
+            "type": "u8"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          },
+          {
+            "name": "nav_pico",
+            "docs": [
+              "Latest official NAV at [`NAV_SCALE`] (0 = never published)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "docs": [
+              "When the NAV was written on-chain; ages are measured from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "publications",
+            "type": "u64"
+          },
+          {
+            "name": "last_drill",
+            "docs": [
+              "The latest NAV came from `publish_drill_nav`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "suspended",
+            "type": "bool"
+          },
+          {
+            "name": "suspend_reason",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_state",
+            "docs": [
+              "Last evented state (transitions are evented once)."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "docs": [
+              "Implied NAV from the latest eligible print (0 = none)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "implied_ts",
+            "type": "i64"
+          },
+          {
+            "name": "prints_accepted",
+            "type": "u32"
+          },
+          {
+            "name": "prints_rejected",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "warn_after",
+            "docs": [
+              "Age at which a Fresh mark becomes Warned."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stale_after",
+            "docs": [
+              "Age at which the mark becomes Stale."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "warned_haircut_bps",
+            "docs": [
+              "Haircut applied while Warned (≤ `MAX_WARNED_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stale_haircut_bps",
+            "docs": [
+              "Haircut applied while Stale or Suspended (≤ `MAX_STALE_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "print_policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "band_bps",
+            "docs": [
+              "BANDED width, bps of price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_volume",
+            "docs": [
+              "Minimum print volume (base units) to enter the implied curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_investors",
+            "docs": [
+              "Minimum distinct investor_ids on a print (G2)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "outlier_band_bps",
+            "docs": [
+              "Maximum |print − NAV| / NAV for an eligible print."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drills_enabled",
+            "docs": [
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_qty",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "cash",
+            "type": "u64"
+          },
+          {
+            "name": "filled_qty",
+            "type": "u64"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "ClaimState"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FlagsSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "transferable",
+            "type": "bool"
+          },
+          {
+            "name": "pledgeable",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkState",
+      "docs": [
+        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fresh"
+          },
+          {
+            "name": "Warned"
+          },
+          {
+            "name": "Stale"
+          },
+          {
+            "name": "Suspended"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PledgeRef",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "facility_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "rails_facility",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrower",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PledgedProceedsSwept",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "discharged",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintPolicy",
+      "docs": [
+        "ME-P6 print policy classes."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Public"
+          },
+          {
+            "name": "Banded"
+          },
+          {
+            "name": "AggregateOnly"
+          },
+          {
+            "name": "DataRoom"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProceedsPaid",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "to",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Queue",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "attester",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "requests",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "signer_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueConfigured",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "attester",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Request",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "window_date",
+            "type": "i64"
+          },
+          {
+            "name": "request_ts",
+            "type": "i64"
+          },
+          {
+            "name": "rank",
+            "type": "u32"
+          },
+          {
+            "name": "schedule",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ScheduledFill"
+                }
+              }
+            }
+          },
+          {
+            "name": "npcs_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "claim_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holder_claim",
+            "docs": [
+              "The token account the claim was minted to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "transferable",
+            "type": "bool"
+          },
+          {
+            "name": "pledgeable",
+            "type": "bool"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "ClaimState"
+              }
+            }
+          },
+          {
+            "name": "filled_qty",
+            "type": "u64"
+          },
+          {
+            "name": "cash_received",
+            "type": "u64"
+          },
+          {
+            "name": "pledge",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "PledgeRef"
+                }
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RequestAttested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "rank",
+            "type": "u32"
+          },
+          {
+            "name": "claim_mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RequestSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "window_date",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScheduledFill",
+      "docs": [
+        "One attested expected fill: `qty` base units in window `period`",
+        "(0 = next window)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StateChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "ClaimState"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

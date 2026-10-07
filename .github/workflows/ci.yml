@@ -150,6 +150,9 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm run typecheck
+      # Decoders against real devnet account bytes; tx builders (#144).
+      - run: npm test
       - run: npm run build
 
   # payment-rails is its own Cargo/Anchor workspace (payment-rails/README.md

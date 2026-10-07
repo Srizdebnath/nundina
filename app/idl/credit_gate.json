@@ -1,0 +1,4718 @@
+{
+  "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX",
+  "metadata": {
+    "name": "credit_gate",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Gate Program for Token ACL (sRFC37): eligibility, block-list, holder governor, lot ledger (SRS 08 §4.1, doc 09). Audit-scope-critical."
+  },
+  "instructions": [
+    {
+      "name": "accept_gate_authority",
+      "docs": [
+        "Step 2 of 2: the proposed key signs to take over. Proving it can sign",
+        "before anything moves means a typo'd or unreachable key can never",
+        "strand the config."
+      ],
+      "discriminator": [
+        33,
+        135,
+        225,
+        153,
+        28,
+        196,
+        210,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "docs": [
+            "Rent goes to the incoming authority (#96): the outgoing one is",
+            "typically the bootstrap key being retired at hand-over, whose",
+            "lamports would otherwise be stranded with it."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "new_authority",
+          "docs": [
+            "The proposed key; must sign. Receives the pending rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposed_by",
+          "docs": [
+            "cannot accept against a proposal it misidentifies."
+          ],
+          "relations": [
+            "pending"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "accept_root_authority",
+      "docs": [
+        "Step 2 of 2: the proposed key signs to take over the root."
+      ],
+      "discriminator": [
+        108,
+        147,
+        163,
+        175,
+        67,
+        148,
+        250,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "root",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  114,
+                  111,
+                  111,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "new_authority",
+          "docs": [
+            "The proposed key; must sign."
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "append_lot",
+      "docs": [
+        "CG-P3 `append_lot`: record `qty` acquired now, seasoning for the",
+        "config's `seasoning_seconds`. Gate-config authority only (it stands",
+        "in for auction-engine settle and the primary mint). Re-screens the",
+        "holder: block-list precedence on every path (CG-P5)."
+      ],
+      "discriminator": [
+        93,
+        251,
+        248,
+        78,
+        95,
+        102,
+        21,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "block_entry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "source",
+          "type": {
+            "defined": {
+              "name": "LotSource"
+            }
+          }
+        },
+        {
+          "name": "affiliate",
+          "type": "bool"
+        },
+        {
+          "name": "exemption_path",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "block_wallet",
+      "docs": [
+        "CG-P5: block `wallet` on this market. Fails if already blocked."
+      ],
+      "discriminator": [
+        132,
+        75,
+        123,
+        1,
+        97,
+        186,
+        159,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "blocklist",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  108,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "entry",
+          "docs": [
+            "`init` fails if the wallet is already blocked."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "wallet",
+          "type": "pubkey"
+        },
+        {
+          "name": "reason_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "can_freeze_permissionless",
+      "docs": [
+        "Token ACL `can-freeze-permissionless` hook: succeeds iff the owner is",
+        "no longer admitted (revocation)."
+      ],
+      "discriminator": [
+        214,
+        141,
+        109,
+        75,
+        248,
+        1,
+        45,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "signer"
+        },
+        {
+          "name": "token_account"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "account; `decide` re-checks)."
+          ]
+        },
+        {
+          "name": "flag_account"
+        },
+        {
+          "name": "extra_metas",
+          "docs": [
+            "it by its PDA address, so only its existence matters here."
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "block_entry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_link",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_attestation"
+        },
+        {
+          "name": "accreditation_attestation"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "can_thaw_permissionless",
+      "docs": [
+        "Token ACL `can-thaw-permissionless` hook (sRFC37): succeeds iff the",
+        "owner is admitted by the gate right now."
+      ],
+      "discriminator": [
+        8,
+        175,
+        169,
+        129,
+        137,
+        74,
+        61,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "signer"
+        },
+        {
+          "name": "token_account"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "account; `decide` re-checks)."
+          ]
+        },
+        {
+          "name": "flag_account"
+        },
+        {
+          "name": "extra_metas",
+          "docs": [
+            "it by its PDA address, so only its existence matters here."
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "block_entry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_link",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_attestation"
+        },
+        {
+          "name": "accreditation_attestation"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_gate_authority",
+      "docs": [
+        "Withdraws a pending proposal. Only the current authority may cancel."
+      ],
+      "discriminator": [
+        53,
+        7,
+        194,
+        162,
+        250,
+        40,
+        13,
+        249
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "proposed_by",
+          "writable": true,
+          "relations": [
+            "pending"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_root_authority",
+      "docs": [
+        "Withdraws a pending root hand-over. Only the root authority."
+      ],
+      "discriminator": [
+        99,
+        134,
+        178,
+        246,
+        77,
+        177,
+        192,
+        120
+      ],
+      "accounts": [
+        {
+          "name": "root",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  114,
+                  111,
+                  111,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Current root authority."
+          ],
+          "signer": true,
+          "relations": [
+            "root"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "check_blocklist",
+      "docs": [
+        "CG-P5 screen as an instruction, so a caller (auction-engine's",
+        "settle-time re-check, AE-P8) can CPI it: succeeds iff `wallet` is",
+        "clear on this market, fails [`GateError::Blocklisted`] otherwise,",
+        "and fails closed on an unreadable list."
+      ],
+      "discriminator": [
+        254,
+        87,
+        190,
+        248,
+        154,
+        161,
+        205,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "entry",
+          "docs": [
+            "seeds; empty when the wallet is not blocked. Read by [`screen`]."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_blocklist",
+      "docs": [
+        "CG-P5: create the market's block-list header and point the config",
+        "at it. From then on every screen reads it, and `update_config` can",
+        "re-point but never clear it."
+      ],
+      "discriminator": [
+        177,
+        19,
+        101,
+        160,
+        10,
+        36,
+        28,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "blocklist",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  108,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "docs": [
+        "CG-P2: initialize the per-mint market config. Called once per gated",
+        "mint. The signer must be the [`GateRoot`] authority, so the",
+        "first-caller-wins `init` cannot be front-run by anyone watching for a",
+        "new mint (#26), and onboarding keeps working after the program is",
+        "finalized (#93)."
+      ],
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Per-mint policy PDA (CG-P2)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "root",
+          "docs": [
+            "The gate root (#93); its authority is the only allowed signer."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  114,
+                  111,
+                  111,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "this mint happens at ACL wiring in P1 (CG-P1)."
+          ]
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Gate root authority (a single bootstrap key on devnet today, Squads",
+            "2-of-2 is the SRS 08 §8 target); becomes the gate-config authority",
+            "and pays rent. Rotate it later with `propose_gate_authority` +",
+            "`accept_gate_authority`."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "root"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "policy_class",
+          "type": "u32"
+        },
+        {
+          "name": "holder_cap",
+          "type": "u32"
+        },
+        {
+          "name": "seasoning_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "settlement_horizon_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "attesters",
+          "type": {
+            "vec": "pubkey"
+          }
+        },
+        {
+          "name": "identity_schema",
+          "type": "pubkey"
+        },
+        {
+          "name": "accreditation_schema",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_policy",
+      "docs": [
+        "CG-P1/P6: create the market's eligibility policy. Verifies both",
+        "config schemas are SAS schemas under `credential`."
+      ],
+      "discriminator": [
+        9,
+        186,
+        86,
+        225,
+        129,
+        162,
+        231,
+        56
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_schema",
+          "docs": [
+            "`credential` (checked by [`check_schema`])."
+          ]
+        },
+        {
+          "name": "accreditation_schema"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "credential",
+          "type": "pubkey"
+        },
+        {
+          "name": "jurisdictions",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          }
+        },
+        {
+          "name": "min_kyc_level",
+          "type": "u8"
+        },
+        {
+          "name": "require_accreditation",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "initialize_root",
+      "docs": [
+        "Seeds the [`GateRoot`] (#93). One-shot (`init`), and only this",
+        "program's upgrade authority may call it, so it cannot be front-run",
+        "(#26). It names the root authority directly, so the upgrade key can",
+        "seed it straight to a Squads vault it does not control."
+      ],
+      "discriminator": [
+        215,
+        103,
+        206,
+        228,
+        186,
+        88,
+        211,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "root",
+          "docs": [
+            "The singleton root (#93); `init` makes this one-shot."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  114,
+                  111,
+                  111,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "upgrade_authority",
+          "docs": [
+            "Program upgrade authority; pays rent. Only it may seed the root."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program",
+          "docs": [
+            "This program — used only to locate its ProgramData account."
+          ],
+          "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "Holds the upgrade authority the signer must match. `None` once the",
+            "program is finalized, so a finalized program can never be re-rooted."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_token_acl_metas",
+      "docs": [
+        "CG-P1: write the Token ACL extra-account-meta lists for this mint",
+        "(`[\"thaw_extra_account_metas\", mint]` and the freeze one)."
+      ],
+      "discriminator": [
+        147,
+        142,
+        87,
+        212,
+        212,
+        46,
+        229,
+        44
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "thaw_metas",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  104,
+                  97,
+                  119,
+                  95,
+                  101,
+                  120,
+                  116,
+                  114,
+                  97,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  95,
+                  109,
+                  101,
+                  116,
+                  97,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "freeze_metas",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  114,
+                  101,
+                  101,
+                  122,
+                  101,
+                  95,
+                  101,
+                  120,
+                  116,
+                  114,
+                  97,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  95,
+                  109,
+                  101,
+                  116,
+                  97,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "merge_expired",
+      "docs": [
+        "CG-P3 `merge_expired`: permissionless. Folds every seasoned lot into",
+        "the holder's FREE bucket. Fails [`GateError::NothingExpired`] when",
+        "there is nothing to fold, so every success is a state change."
+      ],
+      "discriminator": [
+        186,
+        162,
+        85,
+        69,
+        51,
+        72,
+        160,
+        58
+      ],
+      "accounts": [
+        {
+          "name": "lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_holder_lots",
+      "docs": [
+        "CG-P3: open the lot ledger for `holder` (anyone may pay). The holder",
+        "is screened first: a block-listed wallet gets no ledger."
+      ],
+      "discriminator": [
+        81,
+        43,
+        101,
+        161,
+        195,
+        129,
+        114,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "holder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "block_entry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "holder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "holder",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "project_and_check",
+      "docs": [
+        "CG-P4 `project_and_check` (for auction-engine at allocation): fails",
+        "[`GateError::GovernorCap`] iff admitting `investor_id` would exceed",
+        "the cap. An already-admitted investor always passes."
+      ],
+      "discriminator": [
+        180,
+        222,
+        91,
+        20,
+        2,
+        227,
+        25,
+        203
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "investor",
+          "docs": [
+            "the investor is new."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  118,
+                  101,
+                  115,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "investor_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "_investor_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "propose_gate_authority",
+      "docs": [
+        "Step 1 of 2: the current `gate_config_authority` names its successor",
+        "(#50). The upgrade authority has no role here, so a Squads vault can",
+        "take over from a key it does not control. One pending proposal per",
+        "mint; `cancel_gate_authority` withdraws it."
+      ],
+      "discriminator": [
+        46,
+        85,
+        216,
+        228,
+        98,
+        186,
+        64,
+        123
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "docs": [
+            "One pending proposal per mint (`init` fails while one exists)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "docs": [
+            "Current authority (checked by `has_one`); pays the pending rent."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "propose_root_authority",
+      "docs": [
+        "Step 1 of 2 of a root hand-over: the root authority names its",
+        "successor. Re-proposing replaces the pending successor."
+      ],
+      "discriminator": [
+        152,
+        72,
+        30,
+        214,
+        86,
+        219,
+        60,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "root",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  116,
+                  101,
+                  95,
+                  114,
+                  111,
+                  111,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Current root authority."
+          ],
+          "signer": true,
+          "relations": [
+            "root"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "release_holder",
+      "docs": [
+        "CG-P4 decrement: the gate-config authority confirms `owner` exited",
+        "to zero; its link closes, and its investor leaves the count with its",
+        "last wallet."
+      ],
+      "discriminator": [
+        84,
+        97,
+        56,
+        45,
+        107,
+        141,
+        4,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_link",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "investor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  118,
+                  101,
+                  115,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "holder_link.investor_id",
+                "account": "HolderLink"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "owner",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "settle_check",
+      "docs": [
+        "AE-P8 settle-time re-check for one fill (#133, #134): block-list on",
+        "both sides, the buyer's admission and SAS attestations re-read, the",
+        "seller's seasoned lots debited, the buyer's lot appended. Signed only",
+        "by payment-rails' settlement PDA, inside `settle_fill`; any failure",
+        "aborts the fill. Returns what the transfer record needs."
+      ],
+      "discriminator": [
+        33,
+        135,
+        215,
+        34,
+        235,
+        119,
+        151,
+        162
+      ],
+      "accounts": [
+        {
+          "name": "settlement_authority",
+          "docs": [
+            "payment-rails' settlement PDA: only `settle_fill` can sign for it."
+          ],
+          "signer": true,
+          "address": "GX6PXFskZdcA8L9FMgS81sAVtQNki4a2B5XFW9oWaqJm"
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_block",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "seller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_block",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_lots",
+          "docs": [
+            "The seller's ledger; a seller without one has nothing seasoned."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "seller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_lots",
+          "docs": [
+            "The buyer's ledger (`validate` opened it)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_link",
+          "docs": [
+            "The buyer's admission: must exist (CG-P1/P4)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_attestation"
+        },
+        {
+          "name": "accreditation_attestation"
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "seller",
+          "type": "pubkey"
+        },
+        {
+          "name": "buyer",
+          "type": "pubkey"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "SettleOutcome"
+        }
+      }
+    },
+    {
+      "name": "settle_check_rofr",
+      "docs": [
+        "[`settle_check`](credit_gate::settle_check) for the issuer's ROFR",
+        "fill (AE-P7): block-list on both sides and the seller's seasoned",
+        "lots debited. The issuer is buying its own security back, so it is",
+        "not admitted as a holder and gets no lot."
+      ],
+      "discriminator": [
+        154,
+        195,
+        89,
+        189,
+        222,
+        163,
+        184,
+        59
+      ],
+      "accounts": [
+        {
+          "name": "settlement_authority",
+          "signer": true,
+          "address": "GX6PXFskZdcA8L9FMgS81sAVtQNki4a2B5XFW9oWaqJm"
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_block",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "seller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "issuer_block",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "issuer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "seller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "seller",
+          "type": "pubkey"
+        },
+        {
+          "name": "issuer",
+          "type": "pubkey"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "SettleOutcome"
+        }
+      }
+    },
+    {
+      "name": "split_lot",
+      "docs": [
+        "CG-P3 `split_lot`: split `qty` off lot `lot_id`, both halves keeping",
+        "the original's seasoning and metadata. Gate-config authority only."
+      ],
+      "discriminator": [
+        132,
+        250,
+        187,
+        57,
+        224,
+        1,
+        94,
+        90
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "lot_id",
+          "type": "u32"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "unblock_wallet",
+      "docs": [
+        "CG-P5: unblock `wallet` (closes its entry; rent to the authority)."
+      ],
+      "discriminator": [
+        123,
+        52,
+        119,
+        61,
+        139,
+        43,
+        126,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "blocklist",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  108,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "entry",
+          "docs": [
+            "Closing the entry is the unblock; rent goes to the authority."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_config",
+      "docs": [
+        "CG-P2: governed field updates. Every call emits `ConfigUpdated`.",
+        "Snapshot discipline: auction-engine snapshots config at session open;",
+        "the gate itself never mutates config mid-session (L5)."
+      ],
+      "discriminator": [
+        29,
+        158,
+        252,
+        191,
+        10,
+        83,
+        219,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Per-mint policy PDA; only its governing authority may update."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "docs": [
+            "Current gate-config authority (checked by `has_one`)."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "policy_class",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "holder_cap",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "seasoning_seconds",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "settlement_horizon_seconds",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "attester_add",
+          "type": {
+            "option": "pubkey"
+          }
+        },
+        {
+          "name": "attester_remove",
+          "type": {
+            "option": "pubkey"
+          }
+        },
+        {
+          "name": "blocklist_set",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_policy",
+      "docs": [
+        "Governed policy edits. The credential is fixed at init: moving to a",
+        "new credential is a new market policy, not an edit."
+      ],
+      "discriminator": [
+        212,
+        245,
+        246,
+        7,
+        163,
+        151,
+        18,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "jurisdictions",
+          "type": {
+            "option": {
+              "vec": {
+                "array": [
+                  "u8",
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "name": "min_kyc_level",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "require_accreditation",
+          "type": {
+            "option": "bool"
+          }
+        }
+      ]
+    },
+    {
+      "name": "validate",
+      "docs": [
+        "CG-P1 `validate(owner, mint)`: block-list → SAS attestations →",
+        "expiry → policy → governor → lot-ledger init, every decision evented",
+        "as [`ValidateDecision`]. A rejection changes no state and succeeds",
+        "(so the event is kept); an approval writes the holder link that the",
+        "Token ACL hooks read."
+      ],
+      "discriminator": [
+        60,
+        252,
+        90,
+        66,
+        246,
+        253,
+        232,
+        139
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "block_entry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_attestation"
+        },
+        {
+          "name": "accreditation_attestation"
+        },
+        {
+          "name": "holder_link",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "investor",
+          "docs": [
+            "identity attestation, so the address is checked in the handler."
+          ],
+          "writable": true
+        },
+        {
+          "name": "lots",
+          "docs": [
+            "approval if absent (CG-P1 step 5)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "owner",
+          "type": "pubkey"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BlockEntry",
+      "discriminator": [
+        160,
+        179,
+        255,
+        246,
+        122,
+        148,
+        254,
+        143
+      ]
+    },
+    {
+      "name": "BlockList",
+      "discriminator": [
+        22,
+        89,
+        214,
+        247,
+        1,
+        150,
+        200,
+        178
+      ]
+    },
+    {
+      "name": "GateRoot",
+      "discriminator": [
+        26,
+        251,
+        32,
+        217,
+        171,
+        102,
+        34,
+        19
+      ]
+    },
+    {
+      "name": "HolderLink",
+      "discriminator": [
+        247,
+        151,
+        175,
+        110,
+        130,
+        86,
+        195,
+        217
+      ]
+    },
+    {
+      "name": "HolderLots",
+      "discriminator": [
+        22,
+        48,
+        27,
+        77,
+        79,
+        120,
+        246,
+        219
+      ]
+    },
+    {
+      "name": "InvestorRecord",
+      "discriminator": [
+        170,
+        144,
+        39,
+        68,
+        178,
+        31,
+        194,
+        117
+      ]
+    },
+    {
+      "name": "MarketConfig",
+      "discriminator": [
+        119,
+        255,
+        200,
+        88,
+        252,
+        82,
+        128,
+        24
+      ]
+    },
+    {
+      "name": "MarketPolicy",
+      "discriminator": [
+        27,
+        76,
+        208,
+        7,
+        112,
+        188,
+        140,
+        28
+      ]
+    },
+    {
+      "name": "PendingGateAuthority",
+      "discriminator": [
+        82,
+        251,
+        197,
+        233,
+        244,
+        92,
+        35,
+        245
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BlocklistUpdated",
+      "discriminator": [
+        220,
+        192,
+        169,
+        88,
+        177,
+        90,
+        75,
+        144
+      ]
+    },
+    {
+      "name": "ConfigUpdated",
+      "discriminator": [
+        40,
+        241,
+        230,
+        122,
+        11,
+        19,
+        198,
+        194
+      ]
+    },
+    {
+      "name": "GateAuthorityTransfer",
+      "discriminator": [
+        227,
+        196,
+        49,
+        31,
+        242,
+        165,
+        121,
+        224
+      ]
+    },
+    {
+      "name": "GateRootAuthority",
+      "discriminator": [
+        110,
+        90,
+        138,
+        119,
+        241,
+        66,
+        235,
+        250
+      ]
+    },
+    {
+      "name": "HolderReleased",
+      "discriminator": [
+        29,
+        122,
+        55,
+        145,
+        58,
+        200,
+        208,
+        61
+      ]
+    },
+    {
+      "name": "LotEvent",
+      "discriminator": [
+        63,
+        45,
+        191,
+        108,
+        194,
+        137,
+        240,
+        147
+      ]
+    },
+    {
+      "name": "PolicyUpdated",
+      "discriminator": [
+        225,
+        112,
+        112,
+        67,
+        95,
+        236,
+        245,
+        161
+      ]
+    },
+    {
+      "name": "SettleChecked",
+      "discriminator": [
+        85,
+        51,
+        82,
+        73,
+        31,
+        119,
+        202,
+        28
+      ]
+    },
+    {
+      "name": "ValidateDecision",
+      "discriminator": [
+        117,
+        80,
+        70,
+        97,
+        68,
+        193,
+        174,
+        3
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Signer is not the gate config authority"
+    },
+    {
+      "code": 6001,
+      "name": "TooManyAttesters",
+      "msg": "Too many attesters (max 4)"
+    },
+    {
+      "code": 6002,
+      "name": "ConfigFieldMissing",
+      "msg": "Config field required by this operation is not set"
+    },
+    {
+      "code": 6003,
+      "name": "NotUpgradeAuthority",
+      "msg": "Signer is not the program upgrade authority"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidNewAuthority",
+      "msg": "Proposed gate authority is invalid"
+    },
+    {
+      "code": 6005,
+      "name": "NotProposedAuthority",
+      "msg": "Signer is not the proposed gate authority"
+    },
+    {
+      "code": 6006,
+      "name": "ConfigOutOfBounds",
+      "msg": "Config value outside hard bounds"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidBlocklist",
+      "msg": "Invalid block-list account"
+    },
+    {
+      "code": 6008,
+      "name": "DuplicateAttester",
+      "msg": "Attester already present"
+    },
+    {
+      "code": 6009,
+      "name": "AttesterNotFound",
+      "msg": "Attester not found"
+    },
+    {
+      "code": 6010,
+      "name": "NotRootAuthority",
+      "msg": "Signer is not the gate root authority"
+    },
+    {
+      "code": 6011,
+      "name": "EmptyUpdate",
+      "msg": "Update writes no field"
+    },
+    {
+      "code": 6012,
+      "name": "NoPendingRootAuthority",
+      "msg": "No gate root hand-over is pending"
+    },
+    {
+      "code": 6013,
+      "name": "Blocklisted",
+      "msg": "Wallet is block-listed"
+    },
+    {
+      "code": 6014,
+      "name": "BlocklistUnreadable",
+      "msg": "Block-list is not readable by the gate"
+    },
+    {
+      "code": 6015,
+      "name": "LotLedgerFull",
+      "msg": "Lot ledger full"
+    },
+    {
+      "code": 6016,
+      "name": "LotNotFound",
+      "msg": "Lot not found"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidLotQty",
+      "msg": "Invalid lot quantity"
+    },
+    {
+      "code": 6018,
+      "name": "NothingExpired",
+      "msg": "No expired lots"
+    },
+    {
+      "code": 6019,
+      "name": "MathOverflow",
+      "msg": "Math overflow"
+    },
+    {
+      "code": 6020,
+      "name": "AttestationInvalid",
+      "msg": "Attestation invalid"
+    },
+    {
+      "code": 6021,
+      "name": "AttestationExpired",
+      "msg": "Attestation expires before the settlement horizon"
+    },
+    {
+      "code": 6022,
+      "name": "JurisdictionRejected",
+      "msg": "Jurisdiction rejected"
+    },
+    {
+      "code": 6023,
+      "name": "GovernorCap",
+      "msg": "Holder cap reached"
+    },
+    {
+      "code": 6024,
+      "name": "NotAccredited",
+      "msg": "Not accredited"
+    },
+    {
+      "code": 6025,
+      "name": "KycLevelTooLow",
+      "msg": "KYC level too low"
+    },
+    {
+      "code": 6026,
+      "name": "InvestorIdChanged",
+      "msg": "investor_id changed"
+    },
+    {
+      "code": 6027,
+      "name": "TooManyJurisdictions",
+      "msg": "Too many jurisdictions"
+    },
+    {
+      "code": 6028,
+      "name": "InvalidJurisdiction",
+      "msg": "Invalid jurisdiction code"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidSchema",
+      "msg": "Invalid SAS schema"
+    },
+    {
+      "code": 6030,
+      "name": "InvestorRecordMismatch",
+      "msg": "Investor record mismatch"
+    },
+    {
+      "code": 6031,
+      "name": "NotTokenAclFlow",
+      "msg": "Not inside a Token ACL thaw/freeze"
+    },
+    {
+      "code": 6032,
+      "name": "TokenAccountMismatch",
+      "msg": "Token account does not match mint/owner"
+    },
+    {
+      "code": 6033,
+      "name": "StillEligible",
+      "msg": "Holder is still eligible"
+    },
+    {
+      "code": 6034,
+      "name": "EmptyPolicyUpdate",
+      "msg": "Policy update writes nothing"
+    },
+    {
+      "code": 6035,
+      "name": "SeasoningNotMet",
+      "msg": "Seller's seasoned quantity is short of the sale"
+    },
+    {
+      "code": 6036,
+      "name": "NotSettlementAuthority",
+      "msg": "Signer is not the payment-rails settlement authority"
+    },
+    {
+      "code": 6037,
+      "name": "SelfTrade",
+      "msg": "Buyer and seller are the same wallet"
+    }
+  ],
+  "types": [
+    {
+      "name": "AttestationRef",
+      "docs": [
+        "Which SAS attestation a decision rested on (#131): who signed it, under",
+        "which schema, and until when (`0` = SAS \"never expires\"). No PII: the",
+        "attestation's data stays behind `attestation_inputs_hash`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "attestation",
+            "docs": [
+              "The SAS attestation account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attester",
+            "docs": [
+              "The attester that signed it (one of `MarketConfig::attesters`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "schema",
+            "docs": [
+              "Its SAS schema."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expiry",
+            "docs": [
+              "Its SAS expiry (unix seconds)."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BlockEntry",
+      "docs": [
+        "One blocked wallet. Existence is the block; closing it unblocks."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "docs": [
+              "The blocked wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reason_hash",
+            "docs": [
+              "Hash of the off-chain reason (sanctions list hit, court order, …).",
+              "Never the reason itself: no PII on-chain."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "blocked_at",
+            "docs": [
+              "When it was blocked."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BlockList",
+      "docs": [
+        "Header of one market's block-list. `MarketConfig::blocklist` points here",
+        "once `initialize_blocklist` has run."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "entries",
+            "docs": [
+              "Live entries (wallets currently blocked)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BlocklistUpdated",
+      "docs": [
+        "Emitted by `block_wallet` / `unblock_wallet` (CG-P5, CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "docs": [
+              "The wallet added or removed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "blocked",
+            "docs": [
+              "`true` = blocked, `false` = unblocked."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "reason_hash",
+            "docs": [
+              "Reason hash (the entry's, on unblock)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "entries",
+            "docs": [
+              "Live entries after this instruction."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "The gate-config authority that signed."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigUpdated",
+      "docs": [
+        "CG-P7: every state change emits exactly one event from these families."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint whose config this is (#96): the market key, so an",
+              "indexer can file the event per market without the config address."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "field_group",
+            "docs": [
+              "Bitmask of the fields this instruction wrote ([`field_group`]).",
+              "`INIT` plus every field set on creation; on update, one bit per",
+              "supplied argument. Never 0: an update that writes nothing is rejected."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "new_config_hash",
+            "docs": [
+              "SHA-256 of the post-update config (`MarketConfig::fingerprint`):",
+              "every governed field, domain-separated. No PII."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Authority that performed the update."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GateAuthorityTransfer",
+      "docs": [
+        "Emitted by the gate-authority hand-over instructions (#50). Exactly one",
+        "per instruction. `kind`: 0 = proposed, 1 = cancelled, 2 = accepted.",
+        "On `accepted` the config changed: `new_config_hash` is its fingerprint,",
+        "otherwise it is the unchanged config's fingerprint."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "docs": [
+              "0 = proposed, 1 = cancelled, 2 = accepted."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "old_authority",
+            "docs": [
+              "`gate_config_authority` before this instruction."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "new_authority",
+            "docs": [
+              "The proposed (or, on accept, the now-current) authority."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "new_config_hash",
+            "docs": [
+              "`MarketConfig::fingerprint()` after this instruction."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GateReject",
+      "docs": [
+        "Typed rejection reasons (CG-P7). Wire-stable; human-readable mapping",
+        "lives off-chain (ME-5/UI)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Blocklisted"
+          },
+          {
+            "name": "AttestationInvalid"
+          },
+          {
+            "name": "AttestationExpiry"
+          },
+          {
+            "name": "JurisdictionRejected"
+          },
+          {
+            "name": "GovernorCap"
+          },
+          {
+            "name": "ConfigInvalid"
+          },
+          {
+            "name": "LotLedgerFull"
+          },
+          {
+            "name": "NotAccredited"
+          },
+          {
+            "name": "KycLevelTooLow"
+          },
+          {
+            "name": "InvestorIdChanged"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GateRoot",
+      "docs": [
+        "Who may create `MarketConfig`s (#93). One per program, seeded once by",
+        "the upgrade authority while the program is still upgradeable.",
+        "",
+        "`initialize_config` authorizes against `authority` here, not against",
+        "`ProgramData`, so market onboarding (CG-P2 per mint, G14) survives",
+        "`solana program finalize`: doc 06 §11 U1 stages the program to immutable,",
+        "and an initializer pinned to the upgrade authority would die with it.",
+        "Seed this **before** finalizing — a finalized program with no root can",
+        "never onboard a market (fail-closed, nobody else can seed it)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Signs `initialize_config`; pays its rent and becomes each new",
+              "config's first `gate_config_authority`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority",
+            "docs": [
+              "Successor named by `propose_root_authority`; default = none pending."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GateRootAuthority",
+      "docs": [
+        "Emitted by the gate-root instructions (#93). Exactly one per",
+        "instruction. `kind`: 0 = seeded, 1 = proposed, 2 = cancelled,",
+        "3 = accepted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "docs": [
+              "0 = seeded, 1 = proposed, 2 = cancelled, 3 = accepted."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "old_authority",
+            "docs": [
+              "`GateRoot.authority` before this instruction (default when seeded)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "new_authority",
+            "docs": [
+              "The proposed key (proposed / cancelled) or the authority after this",
+              "instruction (seeded / accepted)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderLink",
+      "docs": [
+        "One admitted wallet (CG-P4: wallet → investor_id). Field order is part",
+        "of the Token ACL interface: the extra-account metas read the two",
+        "attestation addresses at fixed offsets ([`HolderLink::IDENTITY_OFFSET`])."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "The holder wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "identity_attestation",
+            "docs": [
+              "SAS identity attestation the admission rests on."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "accreditation_attestation",
+            "docs": [
+              "SAS accreditation attestation the admission rests on."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "investor_id",
+            "docs": [
+              "From the identity attestation."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "validated_at",
+            "docs": [
+              "Last successful `validate`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderLots",
+      "docs": [
+        "The ledger for one `(mint, holder)`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "holder",
+            "docs": [
+              "The holder wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "free_qty",
+            "docs": [
+              "Seasoned quantity, no longer tracked per lot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "next_lot_id",
+            "docs": [
+              "Next `lot_id` to assign."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "lot_count",
+            "docs": [
+              "Live entries in `lots`, packed at the front."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "lots",
+            "docs": [
+              "Seasoning lots; `lots[lot_count..]` are zeroed."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Lot"
+                  }
+                },
+                16
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderReleased",
+      "docs": [
+        "Emitted when a wallet is released (CG-P4 decrement)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "investor_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "investor_exited",
+            "docs": [
+              "The investor's last wallet went, so it left the count."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "distinct_investors",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InvestorRecord",
+      "docs": [
+        "One admitted investor and how many of its wallets are admitted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "investor_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "wallets",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Lot",
+      "docs": [
+        "One seasoning lot. A split keeps every field but `lot_id` and `qty`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lot_id",
+            "docs": [
+              "Ledger-local id, never reused."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "acquired_ts",
+            "docs": [
+              "When the holder acquired it."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "restriction_expiry",
+            "docs": [
+              "Sellable at or after this time: `acquired_ts + seasoning_seconds`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Primary mint or auction."
+            ],
+            "type": {
+              "defined": {
+                "name": "LotSource"
+              }
+            }
+          },
+          {
+            "name": "affiliate",
+            "docs": [
+              "Acquired by an affiliate of the issuer (doc 07: affiliate resale",
+              "rules differ)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "exemption_path",
+            "docs": [
+              "Exemption the acquisition relied on (code; mapping off-chain, like",
+              "`GateReject`)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotDraw",
+      "docs": [
+        "Quantity a sale took from one lot (or from FREE, [`FREE_LOT_ID`])."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lot_id",
+            "type": "u32"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "acquired_ts",
+            "type": "i64"
+          },
+          {
+            "name": "restriction_expiry",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotEvent",
+      "docs": [
+        "Emitted for every lot-ledger change (CG-P3, CG-P7). Same family as the",
+        "skeleton's `LotEvent`, extended with the lot id and holder FREE balance."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "docs": [
+              "0 = append, 1 = split, 2 = merge-to-free. A sale's debit is evented",
+              "as [`crate::SettleChecked`], which lists every lot it drew from."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "Gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "Lot owner."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lot_id",
+            "docs": [
+              "Append: the new lot. Split: the new (split-off) lot. Merge: 0."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Quantity affected (base units): appended, split off, or merged."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "restriction_expiry",
+            "docs": [
+              "Append/split: the lot's seasoning expiry. Merge: the merge time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "free_qty",
+            "docs": [
+              "Holder's FREE bucket after this change."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotSource",
+      "docs": [
+        "Where a lot came from. Wire-stable; append only."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PrimaryMint"
+          },
+          {
+            "name": "AuctionSettle"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketConfig",
+      "docs": [
+        "One immutable-per-market policy configuration (CG-P2).",
+        "",
+        "Seeded per-mint. Every consumer (auction-engine sessions, facility",
+        "underwriting) snapshots the fields it depends on — the gate never",
+        "mutates config mid-session (L5 snapshot discipline). Updates are",
+        "governed by `gate_config_authority` and always evented (CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint this config governs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "gate_config_authority",
+            "docs": [
+              "Sole authority for this PDA. Starts as the gate root authority that",
+              "initialized it (#93; a single bootstrap key on devnet today, see",
+              "DEPLOYMENTS.md). Moves to the Squads 2-of-2 vault (SRS 08 §8) only",
+              "through `propose_gate_authority` + `accept_gate_authority`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "policy_class",
+            "docs": [
+              "Policy class (pilot: `PILOT_506C_TEST`) — stable u32 for consumers."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "identity_schema",
+            "docs": [
+              "Accepted SAS identity schema (`nundina.identity.v1`, CG-P4/P6).",
+              "`eligibility::evaluate` (called by `validate`, `settle_check` and",
+              "`settle_check_rofr`) accepts an identity attestation only if it is a",
+              "SAS-owned account at its canonical PDA `[\"attestation\", credential,",
+              "schema, holder]`, under `MarketPolicy::credential`, with this schema."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "accreditation_schema",
+            "docs": [
+              "Accepted SAS accreditation schema (`nundina.accreditation.v1`,",
+              "CG-P6). Checked the same way as `identity_schema`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attesters",
+            "docs": [
+              "Attester authorities accepted for these schemas. An attestation whose",
+              "SAS `signer` is not in `attesters[..attester_count]` is rejected",
+              "(`AttestationInvalid`); one expiring before now +",
+              "`settlement_horizon_seconds` is rejected (`AttestationExpiry`, H4)."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "attester_count",
+            "docs": [
+              "Active count into `attesters`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "holder_cap",
+            "docs": [
+              "Distinct investor_id cap (pilot: 8, CG-P4)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "seasoning_seconds",
+            "docs": [
+              "Seasoning seconds (pilot: 7 days — compressed Rule-144 analog, CG-1)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "settlement_horizon_seconds",
+            "docs": [
+              "Attestation must remain valid at least this long after validation (H4)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "blocklist",
+            "docs": [
+              "Block-list header (CG-P5, [`BlockList`]). `None` = no list",
+              "configured: the screen passes. Set by `initialize_blocklist`;",
+              "re-pointable but never clearable. Pointing it anywhere but this",
+              "program's header for the mint makes every screen fail closed."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketPolicy",
+      "docs": [
+        "Per-market eligibility policy and the holder governor's count."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "credential",
+            "docs": [
+              "The SAS credential this market accepts attestations under."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "jurisdictions",
+            "docs": [
+              "ISO 3166-1 alpha-2 codes allowed to hold; `[..jurisdiction_count]`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    2
+                  ]
+                },
+                16
+              ]
+            }
+          },
+          {
+            "name": "jurisdiction_count",
+            "docs": [
+              "Live entries in `jurisdictions`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "min_kyc_level",
+            "docs": [
+              "Minimum `kyc_level` in the identity attestation."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "require_accreditation",
+            "docs": [
+              "`accredited == true` required (Rule 506(c) policy classes)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "distinct_investors",
+            "docs": [
+              "Distinct `investor_id`s currently admitted (CG-P4)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingGateAuthority",
+      "docs": [
+        "A pending hand-over of one market's `gate_config_authority` (#50).",
+        "Exists only between `propose_gate_authority` and accept/cancel."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint whose config is being handed over."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_by",
+            "docs": [
+              "The authority that proposed (and paid rent; refunded on close)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "new_authority",
+            "docs": [
+              "The key that must sign `accept_gate_authority`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PolicyUpdated",
+      "docs": [
+        "Emitted by `initialize_policy` / `update_policy`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "credential",
+            "type": "pubkey"
+          },
+          {
+            "name": "jurisdictions",
+            "type": {
+              "vec": {
+                "array": [
+                  "u8",
+                  2
+                ]
+              }
+            }
+          },
+          {
+            "name": "min_kyc_level",
+            "type": "u8"
+          },
+          {
+            "name": "require_accreditation",
+            "type": "bool"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettleChecked",
+      "docs": [
+        "Emitted once per passed settle-time check (CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "docs": [
+              "The buyer, or the issuer on the ROFR path."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "draws",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "LotDraw"
+                }
+              }
+            }
+          },
+          {
+            "name": "exemption_path",
+            "type": "u8"
+          },
+          {
+            "name": "buyer_lot_id",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "rofr",
+            "type": "bool"
+          },
+          {
+            "name": "seller_free_qty",
+            "docs": [
+              "Seller's FREE bucket after the debit."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettleOutcome",
+      "docs": [
+        "What a passed check hands back to payment-rails (return data)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "draws",
+            "docs": [
+              "The seller's lots the fill drew from, at most [`crate::MAX_DRAWS`]."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "LotDraw"
+                }
+              }
+            }
+          },
+          {
+            "name": "exemption_path",
+            "docs": [
+              "[`exemption`] code the transfer relies on."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "buyer_lot_id",
+            "docs": [
+              "The buyer's new lot; `None` on the ROFR path."
+            ],
+            "type": {
+              "option": "u32"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ValidateDecision",
+      "docs": [
+        "Emitted on every `validate` decision (CG-P1, CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "reject",
+            "docs": [
+              "Rejection reason; `None` = approved."
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "GateReject"
+                }
+              }
+            }
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "Owner whose eligibility was decided."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_inputs_hash",
+            "docs": [
+              "SHA-256 over both attestation addresses and data (no PII on-chain)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "identity",
+            "docs": [
+              "The identity attestation the approval rests on (#131). All zero on",
+              "a rejection: `reject` says why, and nothing was admitted."
+            ],
+            "type": {
+              "defined": {
+                "name": "AttestationRef"
+              }
+            }
+          },
+          {
+            "name": "accreditation",
+            "docs": [
+              "The accreditation attestation read; zero as for `identity`."
+            ],
+            "type": {
+              "defined": {
+                "name": "AttestationRef"
+              }
+            }
+          },
+          {
+            "name": "distinct_investors",
+            "docs": [
+              "Distinct investors admitted after this decision."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ]
+}

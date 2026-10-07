@@ -14,6 +14,7 @@
  */
 import {
   appendTransactionMessageInstructions,
+  compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
   getSignatureFromTransaction,
   pipe,
@@ -27,6 +28,7 @@ import {
   type SolanaRpcApi,
   type SolanaRpcSubscriptionsApi,
   type TransactionSigner,
+  type AddressesByLookupTableAddress,
 } from "@solana/kit";
 import {
   getSetComputeUnitLimitInstruction,
@@ -167,7 +169,7 @@ export async function send(
   ctx: Ctx,
   label: string,
   instructions: Instruction[],
-  opts: { cuLimit?: number } = {},
+  opts: { cuLimit?: number; lookupTables?: AddressesByLookupTableAddress } = {},
 ): Promise<SendResult> {
   const sendAndConfirm = sendAndConfirmTransactionFactory({
     rpc: ctx.rpc,
@@ -193,6 +195,7 @@ export async function send(
             ],
             m,
           ),
+        (m) => (opts.lookupTables ? compressTransactionMessageUsingAddressLookupTables(m, opts.lookupTables) : m),
       );
       const signed = await signTransactionMessageWithSigners(msg);
       await sendAndConfirm(signed as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });

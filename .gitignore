@@ -27,6 +27,8 @@ target/
 .anchor_generated/
 .solana/
 test-ledger/
+# UI demo cluster state + throwaway wallets (app/scripts/localnet.sh)
+app/.localnet/
 .deps/
 *.so
 # Third-party programs the credit-gate suite runs, pinned by SHA-256 (#122).
