@@ -52,10 +52,13 @@ The inputs document is in `ops/engines/nav/`; anyone can recompute it.
 Published by `services` `npm run svc -- nav` (#141), weekly from here on.
 
 **Not live yet.** Auction sessions need payment-rails `grant_engine` for
-the auction operator PDA, and the devnet rails build (and the approved
-Squads upgrade #2 buffer `FqAJ…d5U`) predates `GrantEngine` (#181). That
-takes a third rails upgrade through Squads (48 h timelock). Not deployed
-yet: liquidity-facility, tranche-engine, npcs-treasury.
+the auction operator PDA. The live rails build (Squads upgrade #2,
+executed 2026-10-07) predates `GrantEngine` (#181), so upgrade #3 to
+main is proposed and approved; its 48 h timelock opens 2026-10-09 20:43
+UTC (row 6 of the Squads table below). Not deployed yet:
+liquidity-facility, tranche-engine, npcs-treasury. They go up after #3
+refunds its buffer rent, each deploy immediately followed by its init
+(see the next paragraph).
 
 **The init instructions are first-caller-wins.** `initialize_feed`,
 `initialize_venue` and `init_queue` make whoever calls them first the
@@ -160,7 +163,8 @@ cd token && CLUSTER=devnet npm run verify
   | 2 | Vault answers to 2-of-2 | — | proposal #1 approved by both members | ✅ approvals 2026-10-03; execute opens 2026-10-05 10:00 UTC (timelock) — `npx tsx migrate.ts prove` |
   | 3 | NPCS mint, permanent delegate, metadata pointer, metadata update (new mint `6vt1wHVQ…VKL4`, #171) | `7Udt…5EEbuh` (bootstrap) | vault; **freeze → Token ACL `MintConfig`** (not the vault) | ✅ 2026-10-04 · `38a9LS93…eE8YF` (`move-mint` leaves a Token ACL freeze authority in place). Pending: the MintConfig's own authority (manual Token ACL freeze/thaw) is still `7Udt…` — payment-rails' session vault accounts are born frozen and need it for the #172 DvP; it moves to the vault right after that fill |
   | 4 | `credit-gate` upgrade authority (`5ycY…X6XX`, #170) | `9WH1…2uDZ` | vault | ✅ 2026-10-04 · `47v3X6D8…avnmuCi`; `programs/credit-gate/scripts/verify.sh` passes against the updated row. The gate root (`EPCf…BavSK`) and the NPCS `MarketConfig` authority stay with the devnet governance key: `append_lot` for primary issuance needs it (#50 hand-over when that path is an auction-engine CPI) |
-  | 5 | `payment-rails` upgrade to the build that CPIs the new gate (`CREDIT_GATE_ID` = `5ycY…X6XX`, #172) | — | vault-signed BPF `Upgrade` | 🕒 proposal #2 created + approved by both members 2026-10-04 08:42 UTC (`propose-upgrade`, record in `ops/squads/deployment-devnet.json`); buffer `FqAJqkS21CpfUZZZVuK2LMs679JPAukGQtMvAUeXBd5U` = build `b7681924…fbec`, authority = vault; ProgramData extended +194304 B first (permissionless, `4a64thEF…Z9gcQuW4`). **Executable from 2026-10-06 08:42 UTC:** `CLUSTER=devnet npx tsx migrate.ts execute-upgrade GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn`, then add the row to `payment-rails/DEPLOYMENTS.md` and re-run its `verify.sh` |
+  | 5 | `payment-rails` upgrade to the build that CPIs the new gate (`CREDIT_GATE_ID` = `5ycY…X6XX`, #172) | — | vault-signed BPF `Upgrade` | ✅ 2026-10-07 · `2YDQ1kVN…uoojSRhCMiJW` (proposal #2, buffer `FqAJ…d5U` = build `b7681924…fbec`, approved 2026-10-04; buffer rent refunded to `9WH1`). `payment-rails/crank/scripts/devnet/verify.sh` passes against the new row in `payment-rails/DEPLOYMENTS.md` |
+  | 6 | `payment-rails` upgrade to main (`GrantEngine`/`SetEngineRoles` #181, `MAX_FEE_BPS = 0` #185) | — | vault-signed BPF `Upgrade` | 🕒 proposal #3 created + approved by both members 2026-10-07 20:43 UTC; buffer `FwMUAaQKT6sR6cHApjCRM1UHHfAibJ5feY4wCYV1y1GE` = build `7c84150a…5b2787` (1075376 B, `anchor build` of `74effa7`), authority = vault; ProgramData extended +32056 B first (`4f9VabumQDte…`). The devnet `RailsConfig` fee was set to 0 beforehand (`set_fees(0, 5)`, `67oauBWv…`) so `open_session` never meets the new cap with a 10 bps config. Both earlier `CashSession`s are Settled and empty. **Executable from 2026-10-09 20:43 UTC:** `CLUSTER=devnet npx tsx migrate.ts execute-upgrade GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn`, then a new `payment-rails/DEPLOYMENTS.md` row, `verify.sh`, and `grant_engine(auction operator PDA, ROLE_SESSIONS)` |
 
   **Custody caveat (devnet only):** both member keys were generated on one
   machine (`~/.config/nundina/squads-devnet/`, mode 600, outside the repo).
