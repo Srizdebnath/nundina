@@ -46,7 +46,7 @@ test("runner config is validated before anything is sent", () => {
   );
 });
 
-test("kill switch: the runner sends nothing while CRANK_KILL_FILE exists (AC-11 drill)", () => {
+test("kill switch: the runner pauses all but refunds while CRANK_KILL_FILE exists (AC-11 drill)", () => {
   const dir = mkdtempSync(join(tmpdir(), "kill-"));
   const f = join(dir, "KILL");
   process.env.CRANK_KILL_FILE = f;

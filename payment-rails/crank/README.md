@@ -46,7 +46,7 @@ npm run crank -- verify-export --dir evidence/ [--signer <addr>]   # keyless, of
 | `EVIDENCE_KEYPAIR` | `KEYPAIR` | signs `export` bundles (#127). Use a key of its own, published to auditors, not the operator's |
 | `PRIORITY_FEE_MIN` / `_MAX` | `0` / `50000` | µlamports per CU; the p75 of recent fees for the program is clamped to these |
 | `MAX_ATTEMPTS` / `RETRY_BASE_MS` | `5` / `500` | retries for **transient** failures, with exponential backoff and a fresh blockhash each time |
-| `CRANK_KILL_FILE` | unset | `run` sends nothing while this file exists (the AC-11 kill drill; liveness never depends on the runner) |
+| `CRANK_KILL_FILE` | unset | `run` pauses phases, seasoning and distribution while this file exists; refunds keep running (never pausable). Checked once per tick (the AC-11 kill drill; liveness never depends on the runner) |
 
 The exit code is 1 if any action fails or a reconciliation isn't clean.
 

@@ -42,6 +42,8 @@ const s = (v: unknown) => (v === null || v === undefined ? null : typeof v === "
 const hex = (b: unknown) => plain(b) as string;
 const variant = (v: unknown) => (typeof v === "string" ? v : v && typeof v === "object" ? Object.keys(v)[0]! : String(v));
 const PHASES = ["Commit", "Reveal", "Allocating", "IssuerRofr", "Settling", "Printed", "Failed"];
+/** Printed and Failed are both terminal and exclusive on-chain: once either is stored, a late event never replaces it. */
+const TERMINAL = ["Printed", "Failed"];
 const LOT_KIND = ["append", "split", "merge"];
 
 /** Store a transaction's events and project them. Returns how many events it had. */
@@ -79,11 +81,13 @@ async function project(db: Db, sig: string, slot: bigint, ev: DecodedEvent, all:
       await q(
         `INSERT INTO sessions (session, phase, phase_slot, failed_reason) VALUES ($1, $2, $3, $4)
          ON CONFLICT (session) DO UPDATE SET
-           phase = CASE WHEN array_position($5::text[], excluded.phase) >= coalesce(array_position($5::text[], sessions.phase), 0)
+           phase = CASE WHEN sessions.phase = ANY($6::text[]) THEN sessions.phase
+                        WHEN array_position($5::text[], excluded.phase) >= coalesce(array_position($5::text[], sessions.phase), 0)
                         THEN excluded.phase ELSE sessions.phase END,
            phase_slot = greatest(sessions.phase_slot, excluded.phase_slot),
-           failed_reason = coalesce(excluded.failed_reason, sessions.failed_reason)`,
-        [d.session, to, slot, ev.name === "SessionFailed" ? variant(d.reason) : null, `{${PHASES.join(",")}}`],
+           failed_reason = CASE WHEN sessions.phase = ANY($6::text[]) THEN sessions.failed_reason
+                                ELSE coalesce(excluded.failed_reason, sessions.failed_reason) END`,
+        [d.session, to, slot, ev.name === "SessionFailed" ? variant(d.reason) : null, `{${PHASES.join(",")}}`, `{${TERMINAL.join(",")}}`],
       );
       return;
     }
@@ -368,26 +372,42 @@ export function parseWebhook(body: unknown): RawTx[] {
   });
 }
 
+/** Largest webhook body accepted (Helius batches up to 100 txs; logs are capped per tx). */
+export const MAX_WEBHOOK_BYTES = 4 * 1024 * 1024;
+
 /**
  * POST handler for raw-transaction webhooks. `secret` must equal the
  * request's `Authorization` header (Helius sends the configured value
- * verbatim). Replies 200 with what was ingested.
+ * verbatim). Replies 200 with what was ingested, 413 over
+ * `MAX_WEBHOOK_BYTES`, 500 if the database write fails (Helius retries;
+ * ingest is idempotent, so a partial batch is safe to resend).
  */
-export function webhookHandler(db: Db, secret: string) {
+export function webhookHandler(db: Db, secret: string, maxBytes = MAX_WEBHOOK_BYTES) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== "POST") return void res.writeHead(405).end();
     if (!secret || req.headers.authorization !== secret) return void res.writeHead(401).end();
+    if (Number(req.headers["content-length"] ?? 0) > maxBytes) return void res.writeHead(413, { connection: "close" }).end();
     const chunks: Buffer[] = [];
-    for await (const c of req) chunks.push(c as Buffer);
+    let size = 0;
+    for await (const c of req) {
+      size += (c as Buffer).length;
+      if (size > maxBytes) return void res.writeHead(413, { connection: "close" }).end();
+      chunks.push(c as Buffer);
+    }
     let txs: RawTx[];
     try {
       txs = parseWebhook(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     } catch {
       return void res.writeHead(400).end("bad json");
     }
-    let events = 0;
-    for (const tx of txs) events += await ingest(db, tx);
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ txs: txs.length, events }));
+    try {
+      let events = 0;
+      for (const tx of txs) events += await ingest(db, tx);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ txs: txs.length, events }));
+    } catch (e) {
+      console.error("webhook ingest failed:", e instanceof Error ? e.message : e);
+      res.writeHead(500).end("ingest failed");
+    }
   };
 }
 
