@@ -425,6 +425,8 @@ Postgres: Supabase (dev/prod projects). RPC: Helius (free dev tier → paid at P
 
 ## 11 · Audit plan (P7 — the long pole)
 
+**Status (2026-10-07, #150):** the scope pack is [`10-Audit-Scope-P7.md`](10-Audit-Scope-P7.md) (fixed scope 10,464 lines, best effort 2,915); no firm contacted, nothing booked. Counsel gates: [`11-Counsel-Engagement-Brief.md`](11-Counsel-Engagement-Brief.md); counsel not engaged.
+
 | Item | Plan |
 |---|---|
 | Scope (fixed) | **`payment-rails`** (added 2026-09, #47: it holds all client cash, so it is not optional at any pricing), `credit-gate`, `auction-engine` (escrow/clearing/settlement), `liquidity-facility`, `credit-math`. `mark-engine`, `queue-claim`, `tranche-engine` included at best-effort pricing — scope growth is the #1 timeline risk; **freeze scope at contract** |
