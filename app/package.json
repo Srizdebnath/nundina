@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "sync-idl": "for p in auction_engine credit_gate mark_engine queue_claim liquidity_facility tranche_engine npcs_treasury; do cp ../target/idl/$p.json idl/; done && cp ../payment-rails/target/idl/payment_rails.json idl/",
     "localnet": "bash scripts/localnet.sh",
-    "localnet:e2e": "NEXT_PUBLIC_CLUSTER=localnet tsx --tsconfig tsconfig.json scripts/localnet-e2e.mts"
+    "localnet:e2e": "NEXT_PUBLIC_CLUSTER=localnet tsx --tsconfig tsconfig.json scripts/localnet-e2e.mts",
+    "access:e2e": "tsx --tsconfig tsconfig.json scripts/access-e2e.mts"
   },
   "dependencies": {
     "@solana/kit": "^8.4.0",

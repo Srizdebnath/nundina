@@ -9,6 +9,7 @@ import { lotsView, type LotView } from "./gate";
 import { codecs, pdas, PROGRAMS } from "./programs";
 import { getAccounts, getProgramAccounts, getTokenHoldings, type TokenHolding } from "./rpc";
 import { listSessions } from "./session";
+import { loadTranchePositions, type TranchePosition } from "./tranche";
 
 export interface Portfolio {
   wallet: Address;
@@ -18,6 +19,7 @@ export interface Portfolio {
   lots: { freeQty: bigint; lots: LotView[] } | null;
   claims: { address: Address; request: Struct }[];
   positions: { address: Address; position: Struct }[];
+  tranches: TranchePosition[];
   orders: { session: Address; sessionId: bigint; phase: string; side: string; escrowed: bigint; revealed: boolean; limit: bigint; qty: bigint; alloc: bigint }[];
 }
 
@@ -41,6 +43,7 @@ export async function loadPortfolio(wallet: Address, mint: Address): Promise<Por
   const gate = (r: typeof linkR, name: string) =>
     r && r.owner === PROGRAMS.gate ? codecs.gate.decodeAccount(name, r.data) : null;
   const lots = gate(lotsR, "HolderLots");
+  const tranches = await loadTranchePositions(holdings).catch(() => []);
   return {
     wallet,
     mint,
@@ -49,6 +52,7 @@ export async function loadPortfolio(wallet: Address, mint: Address): Promise<Por
     lots: lots ? lotsView(lots) : null,
     claims: requests.map((r) => ({ address: r.address, request: codecs.queue.decodeAccount("Request", r.data) })),
     positions: positions.map((r) => ({ address: r.address, position: codecs.facility.decodeAccount("Position", r.data) })),
+    tranches,
     orders: sessions.flatMap((s) =>
       s.orders
         .filter((o) => o.owner === wallet)

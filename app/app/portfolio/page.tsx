@@ -128,6 +128,44 @@ function Advances({ p }: { p: Portfolio }) {
   );
 }
 
+function Tranches({ p }: { p: Portfolio }) {
+  if (p.tranches.length === 0) return <p className="muted small">No tranche-engine positions.</p>;
+  return (
+    <table className="t">
+      <thead>
+        <tr>
+          <th>pool</th>
+          <th>state</th>
+          <th>tranche</th>
+          <th className="r">units</th>
+          <th className="r">share</th>
+          <th className="r">principal</th>
+          <th className="r">allocated loss</th>
+          <th className="r">coupon</th>
+          <th>lock-up</th>
+        </tr>
+      </thead>
+      <tbody>
+        {p.tranches.map((t) => (
+          <tr key={`${t.pool}-${t.side}`}>
+            <td>
+              <Addr a={t.pool} /> #{t.poolId}
+            </td>
+            <td>{t.state}</td>
+            <td>{t.side}</td>
+            <td className="r">{fmt6(t.amount)}</td>
+            <td className="r">{(Number(t.shareBps) / 100).toFixed(2)}%</td>
+            <td className="r">{fmt6(t.principal)}</td>
+            <td className={`r ${t.loss > 0n ? "bad" : ""}`}>{fmt6(t.loss)}</td>
+            <td className="r">{(t.couponBps / 100).toFixed(2)}%</td>
+            <td>{t.locked ? "locked (frozen)" : "—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export default async function PortfolioPage({ searchParams }: { searchParams: Promise<{ wallet?: string; mint?: string }> }) {
   const q = await searchParams;
   const wallet = q.wallet && isAddress(q.wallet) ? address(q.wallet) : null;
@@ -180,6 +218,8 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <Claims p={p} />
           <h2>Advances (liquidity-facility)</h2>
           <Advances p={p} />
+          <h2>Tranche positions (tranche-engine)</h2>
+          <Tranches p={p} />
           <h2>Auction orders</h2>
           {p.orders.length === 0 ? (
             <p className="muted small">No orders in any session.</p>
