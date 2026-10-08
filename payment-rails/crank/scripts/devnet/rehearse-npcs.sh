@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Dress rehearsal of the live-NPCS DvP (#145, #172) on a local clone of
-# devnet: the real credit-gate, Token ACL and SAS programs and every devnet
-# account the run touches (NPCS mint + MintConfig, gate market, holder H's
-# link / attestations / NPCS account, rails config, Circle USDC mint),
-# with payment-rails loaded from the approved Squads upgrade's buffer —
-# the exact build devnet will run. Two accounts are patched, nothing else:
-# H's lot ledger (seasoning already passed) and the operator's USDC balance
-# (scripts/devnet/npcs-clone.ts says why). Then npcs-dvp.ts runs unchanged.
+# Dress rehearsal of the live-NPCS runs (#145, #172) on a local clone of
+# devnet: the real credit-gate, Token ACL, SAS, auction-engine and
+# mark-engine programs and every devnet account the run touches (NPCS mint +
+# MintConfig, gate market, holder H's link / attestations / NPCS account,
+# rails config, Circle USDC mint, venue, feed), with payment-rails loaded
+# from the pending Squads upgrade's buffer (#3) — the exact build devnet
+# will run. Two accounts are patched, nothing else: H's lot ledger
+# (seasoning already passed) and the operator's USDC balance
+# (scripts/devnet/npcs-clone.ts says why). Then the script runs unchanged.
 #
-#   bash scripts/devnet/rehearse-npcs.sh          # needs the devnet keys npcs-dvp.ts names
+#   bash scripts/devnet/rehearse-npcs.sh                  # npcs-dvp.ts: rails-direct DvP
+#   bash scripts/devnet/rehearse-npcs.sh auction-session  # the sealed-bid auction-engine session
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # → crank/
+RUN=${1:-npcs-dvp}
+case "$RUN" in npcs-dvp|auction-session) ;; *) echo "usage: $0 [npcs-dvp|auction-session]" >&2; exit 2 ;; esac
 PORT=${PORT:-8899}
 URL="http://127.0.0.1:$PORT"
 DEVNET=${DEVNET_RPC:-https://api.devnet.solana.com}
@@ -19,11 +23,11 @@ export NODE_OPTIONS=--dns-result-order=ipv4first
 
 echo "── clone plan (from devnet)"
 RPC_URL="$DEVNET" npx tsx scripts/devnet/npcs-clone.ts "$TMP"
-echo "rails.so sha256 $(sha256sum "$TMP/rails.so" | cut -d' ' -f1) (approved buffer b7681924…fbec)"
+echo "rails.so sha256 $(sha256sum "$TMP/rails.so" | cut -d' ' -f1)"
 
 args=(--reset --quiet --ledger "$TMP/ledger" --rpc-port "$PORT" --url "$DEVNET"
   --faucet-port "${FAUCET_PORT:-9910}" --gossip-port "${GOSSIP_PORT:-8010}" --dynamic-port-range "${DYNAMIC_PORTS:-8020-8070}")
-for p in gate tokenAcl sas; do
+for p in gate tokenAcl sas auction mark; do
   args+=(--clone-upgradeable-program "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['programs'][sys.argv[2]])" "$TMP/plan.json" "$p")")
 done
 RAILS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['programs']['rails'])" "$TMP/plan.json")
@@ -54,7 +58,7 @@ json.dump(d, open(".devnet/localnet/deployment.json", "w"), indent=2)
 PY
 
 echo; echo "── preflight on the clone"
-RPC_URL="$URL" npx tsx scripts/devnet/npcs-dvp.ts --preflight
-echo; echo "── npcs-dvp.ts"
-RPC_URL="$URL" npx tsx scripts/devnet/npcs-dvp.ts
-echo "NPCS REHEARSAL OK"
+RPC_URL="$URL" npx tsx "scripts/devnet/$RUN.ts" --preflight
+echo; echo "── $RUN.ts"
+RPC_URL="$URL" COMMIT_SECS=${COMMIT_SECS:-60} REVEAL_SECS=${REVEAL_SECS:-40} npx tsx "scripts/devnet/$RUN.ts"
+echo "NPCS REHEARSAL OK ($RUN)"

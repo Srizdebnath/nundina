@@ -13,6 +13,10 @@ PORT=${PORT:-8899}
 TMP=$(mktemp -d)
 CONFIG_PDA=$(npx tsx testkit.ts config-pda)
 TREASURY=$(npx tsx testkit.ts treasury)
+# npcs-treasury (#148), the real build, at its real id.
+TREASURY_SO=${TREASURY_SO:-../../target/deploy/npcs_treasury.so}
+[ -f "$TREASURY_SO" ] || { echo "build npcs-treasury first (anchor build -p npcs_treasury) or set TREASURY_SO" >&2; exit 1; }
+TREASURY_PROGRAM=4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y
 
 # A tiny real program (SPL noop) to stand in for payment-rails /
 # credit-gate, and a larger real one (memo) to upgrade to, so the upgrade
@@ -30,7 +34,8 @@ solana-test-validator --reset --quiet --ledger "$TMP/ledger" --rpc-port "$PORT" 
   --clone-upgradeable-program "$SQUADS" --clone "$CONFIG_PDA" --clone "$TREASURY" \
   --clone-upgradeable-program TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP \
   --deactivate-feature 2oMRZEDWT2tqtYMofhmmfQ8SsjqUFzT6sYXppQDavxwz \
-  --upgradeable-program "$PROGRAM" "$TMP/noop.so" "$TMP/upgrade.json" >"$TMP/validator.log" 2>&1 &
+  --upgradeable-program "$PROGRAM" "$TMP/noop.so" "$TMP/upgrade.json" \
+  --bpf-program "$TREASURY_PROGRAM" "$TREASURY_SO" >"$TMP/validator.log" 2>&1 &
 VPID=$!
 trap 'kill $VPID 2>/dev/null || true; wait $VPID 2>/dev/null || true; rm -rf "$TMP"' EXIT
 URL="http://127.0.0.1:$PORT"
@@ -113,5 +118,46 @@ if (!u || u.approvals.length !== 2 || !u.executeSignature) { console.error("upgr
 
 # One approval is not enough: a second proposal with only member-1 stays unexecutable.
 npx tsx testkit.ts single-approval
+
+# #148: the NPCS mint authority goes to npcs-treasury in one vault transaction.
+# A third NPCS-shaped mint with 1.0 supply and the process-backing status, moved
+# to the vault, and a vault-owned USDC sleeve holding the 1.0 backing.
+MINT3=$(spl-token create-token -u "$URL" --program-2022 --decimals 6 --enable-freeze --enable-metadata \
+  --mint-authority "$TMP/npcs-admin.json" --fee-payer "$TMP/npcs-admin.json" --output json \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).commandOutput.address')
+ADMIN=$(solana-keygen pubkey "$TMP/npcs-admin.json")
+spl-token initialize-metadata -u "$URL" "$MINT3" NPCS NPCS https://example.invalid \
+  --mint-authority "$TMP/npcs-admin.json" --update-authority "$ADMIN" --fee-payer "$TMP/npcs-admin.json" >/dev/null
+spl-token update-metadata -u "$URL" "$MINT3" status "TARGET-STATE: USDC 1:1 backing is a process rule, not enforced on-chain." \
+  --authority "$TMP/npcs-admin.json" --fee-payer "$TMP/npcs-admin.json" >/dev/null
+spl-token create-account -u "$URL" "$MINT3" --owner "$ADMIN" --fee-payer "$TMP/npcs-admin.json" >/dev/null
+spl-token mint -u "$URL" "$MINT3" 1 --recipient-owner "$ADMIN" --mint-authority "$TMP/npcs-admin.json" --fee-payer "$TMP/npcs-admin.json" >/dev/null
+npx tsx migrate.ts move-mint "$MINT3" --authority "$TMP/npcs-admin.json" >/dev/null
+USDC=$(spl-token create-token -u "$URL" --decimals 6 --mint-authority "$TMP/payer.json" --fee-payer "$TMP/payer.json" --output json \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).commandOutput.address')
+spl-token create-account -u "$URL" "$USDC" --owner "$VAULT" --fee-payer "$TMP/payer.json" >/dev/null
+SLEEVE=$(spl-token address -u "$URL" --token "$USDC" --owner "$VAULT" --verbose | awk '/Associated token address/ {print $NF}')
+spl-token mint -u "$URL" "$USDC" 0.5 "$SLEEVE" --mint-authority "$TMP/payer.json" --fee-payer "$TMP/payer.json" >/dev/null
+npx tsx migrate.ts propose-treasury "$MINT3" --sleeve "$SLEEVE" >/dev/null 2>&1 \
+  && fail "propose-treasury accepted a sleeve that cannot back the supply (I1)"
+spl-token mint -u "$URL" "$USDC" 0.5 "$SLEEVE" --mint-authority "$TMP/payer.json" --fee-payer "$TMP/payer.json" >/dev/null
+npx tsx migrate.ts propose-treasury "$MINT3" --sleeve "$SLEEVE"
+SIGNER=$(node -pe 'JSON.parse(require("fs").readFileSync(process.env.RECORD)).treasury.signer')
+TVAULT=$(node -pe 'JSON.parse(require("fs").readFileSync(process.env.RECORD)).treasury.vault')
+SHOWN=$(spl-token display -u "$URL" "$MINT3")
+grep -q "Mint authority: $SIGNER" <<<"$SHOWN" || fail "mint authority is not npcs-treasury's signer"
+grep -q "enforced on-chain by npcs-treasury $TREASURY_PROGRAM" <<<"$SHOWN" || fail "metadata status not updated"
+[ "$(spl-token balance -u "$URL" --address "$TVAULT")" = "1" ] || fail "backing USDC not in the treasury vault"
+[ "$(spl-token balance -u "$URL" --address "$SLEEVE")" = "0" ] || fail "sleeve still holds the backing"
+npx tsx migrate.ts verify
+# Minting now happens only through deposit, 1:1, and I1 keeps holding.
+PAYER_PK=$(solana-keygen pubkey "$TMP/payer.json")
+spl-token create-account -u "$URL" "$USDC" --owner "$PAYER_PK" --fee-payer "$TMP/payer.json" >/dev/null
+spl-token mint -u "$URL" "$USDC" 2 --recipient-owner "$PAYER_PK" --mint-authority "$TMP/payer.json" --fee-payer "$TMP/payer.json" >/dev/null
+spl-token create-account -u "$URL" "$MINT3" --owner "$PAYER_PK" --fee-payer "$TMP/payer.json" >/dev/null
+npx tsx testkit.ts treasury-deposit "$TREASURY_PROGRAM" "$MINT3" "$USDC" "$TMP/payer.json" 500000 >/dev/null
+[ "$(spl-token supply -u "$URL" "$MINT3")" = "1.5" ] || fail "deposit did not mint 0.5"
+[ "$(spl-token balance -u "$URL" --address "$TVAULT")" = "1.5" ] || fail "deposit did not land in the treasury vault"
+npx tsx migrate.ts verify
 
 echo "SQUADS MIGRATION TEST OK"

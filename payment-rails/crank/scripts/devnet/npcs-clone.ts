@@ -3,8 +3,10 @@
  * accounts a local validator must clone so `npcs-dvp.ts` runs against real
  * devnet state, plus the only three things that differ, written as files:
  *
- *   rails.so    — the approved Squads upgrade's buffer ELF (FqAJ…): the
- *                 exact build devnet will run once proposal #2 executes;
+ *   rails.so    — the pending Squads upgrade's buffer ELF (RAILS_BUFFER,
+ *                 default upgrade #3's FwMU…): the exact build devnet runs
+ *                 once the proposal executes; once it has (buffer closed),
+ *                 the live program's own bytes;
  *   lots.json   — holder H's credit-gate lot ledger with the seasoning
  *                 expiry moved into the past (on devnet it passes on
  *                 2026-10-11; nothing else in the ledger changes:
@@ -24,7 +26,11 @@ import { loadKeypair, makeCtx } from "../../src/ctx.ts";
 import { CREDIT_GATE } from "../../src/seasoning.ts";
 import { findAssociatedTokenPda } from "@solana-program/token";
 import { readDeployment } from "./common.ts";
-import { NPCS, TOKEN_ACL, UPGRADE_BUFFER } from "./npcs-dvp.ts";
+import { NPCS, TOKEN_ACL } from "./npcs-dvp.ts";
+import { UPGRADE_3_BUFFER } from "./auction-session.ts";
+
+const AUCTION = address("Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7");
+const MARK = address("79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH");
 
 const SAS = address("22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG");
 const SAS_RECORD = {
@@ -85,6 +91,10 @@ async function main() {
     address(d.reserve),
     operator,
     H,
+    // auction-engine + mark-engine state (#192): venue, its operator PDA, the NPCS feed.
+    await pda(AUCTION, "venue"),
+    await pda(AUCTION, "rails_operator"),
+    await pda(MARK, "feed", NPCS),
   ].filter((a) => a !== opUsdc);
 
   // Patched 1: H's lots, every lot's restriction_expiry → an hour ago.
@@ -107,15 +117,29 @@ async function main() {
   new DataView(ud.buffer).setBigUint64(64, 5_000_000n, true);
   writeFileSync(join(out, "usdc.json"), JSON.stringify(acct(opUsdc, ud, u.value!.lamports, u.value!.owner)));
 
-  // The upgrade's ELF: a Buffer account is tag(4) | Option<authority>(33) | program bytes.
-  const b = await ctx.rpc.getAccountInfo(UPGRADE_BUFFER, { encoding: "base64" }).send();
-  if (!b.value) throw new Error("upgrade buffer not found: proposal #2 already executed? rehearse against devnet's program instead");
-  const elf = Buffer.from(b.value.data[0], "base64").subarray(37);
+  // The rails build devnet will run. A Buffer account is tag(4) | Option<authority>(33) | ELF;
+  // ProgramData is tag(4) | slot(8) | Option<authority>(33) | ELF (zero-padded to its allocation).
+  const bufferA = address(process.env.RAILS_BUFFER ?? UPGRADE_3_BUFFER);
+  const b = await ctx.rpc.getAccountInfo(bufferA, { encoding: "base64" }).send();
+  let elf: Buffer;
+  let source: string;
+  if (b.value) {
+    elf = Buffer.from(b.value.data[0], "base64").subarray(37);
+    source = `pending upgrade buffer ${bufferA}`;
+  } else {
+    const [pdA] = await getProgramDerivedAddress({
+      programAddress: address("BPFLoaderUpgradeab1e11111111111111111111111"),
+      seeds: [getAddressEncoder().encode(address(d.programId))],
+    });
+    const pd = await ctx.rpc.getAccountInfo(pdA, { encoding: "base64" }).send();
+    elf = Buffer.from(pd.value!.data[0], "base64").subarray(45);
+    source = `live program ${d.programId} (buffer ${bufferA} closed: the upgrade executed)`;
+  }
   writeFileSync(join(out, "rails.so"), elf);
 
-  const plan = { clone, patched: { lots: lotsA, usdc: opUsdc }, programs: { gate: CREDIT_GATE, tokenAcl: TOKEN_ACL, sas: SAS, rails: d.programId } };
+  const plan = { clone, patched: { lots: lotsA, usdc: opUsdc }, programs: { gate: CREDIT_GATE, tokenAcl: TOKEN_ACL, sas: SAS, auction: AUCTION, mark: MARK, rails: d.programId }, railsSource: source };
   writeFileSync(join(out, "plan.json"), JSON.stringify(plan, null, 2));
-  console.log(`${clone.length} accounts to clone, 2 patched, rails.so ${elf.length} bytes`);
+  console.log(`${clone.length} accounts to clone, 2 patched, rails.so ${elf.length} bytes from ${source}`);
 }
 
 main().catch((e) => {
