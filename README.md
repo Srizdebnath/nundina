@@ -21,36 +21,38 @@ Everything marked ✅ below is real and independently checkable. Nothing is
 mocked, and nothing is claimed that isn't built. The pilot asset is a real,
 self-issued Token-2022 mint, but its USDC backing is maintained by process
 today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
+`npcs-treasury`, which enforces it, is deployed on devnet; the mint authority
+moves to it through a Squads vault proposal that is scripted and tested but
+not yet proposed (`DEPLOYMENTS.md`).
 
 | Component | Status | Where to verify |
 |---|---|---|
-| **`payment-rails`**: the USDC cash layer. Escrow and bonds (AE-P3/P4), permissionless never-pausable refunds (AE-P10), atomic one-fill DvP (AE-P8), issuer ROFR (AE-P7), facility funding, advances, interest and sweep (LF-P2/P6), exact-conservation cash waterfall (TE-P4) | ✅ **live devnet** · LiteSVM suite + kill-the-crank drill on a real validator. Auction, mark, claim and tranche *semantics* are not built; the rails move their cash | [`payment-rails/`](payment-rails/) · `bash payment-rails/crank/scripts/devnet/verify.sh` |
-| `credit-math`: shared fixed-point crate (NAV, clearing, pro-rata, waterfall, PV, prudential floor) | ✅ built · unit + property suites · CI gates 100% line + branch coverage. **Wired:** `payment-rails` uses 4 functions; clearing, pro-rata, NAV, haircut and PV have no program consumer yet | `cargo test --workspace` |
-| `credit-gate`: sRFC37 Gate Program | ✅ **on `main` (CG-P1..P7):** SAS attestation read (CG-P6), holder governor (CG-P4), block-list (CG-P5), lot ledger (CG-P3), `validate` + Token ACL `can_thaw`/`can_freeze` hooks (CG-P1), all against the **real** SAS and Token ACL programs in LiteSVM and on a validator. ⚠️ Devnet runs the **pre-#26 build** and NPCS is not yet handed to Token ACL: both need key holders (`ops/gate/README.md`) | `DEPLOYMENTS.md` |
-| **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** · manifest verified. Not yet gated or backed on-chain; one bootstrap key holds every authority | [`token/`](token/) · `DEPLOYMENTS.md` |
+| **`payment-rails`**: the USDC cash layer. Escrow and bonds (AE-P3/P4), permissionless never-pausable refunds (AE-P10), atomic one-fill DvP (AE-P8), issuer ROFR (AE-P7), facility funding, advances, interest and sweep (LF-P2/P6), exact-conservation cash waterfall (TE-P4) | ✅ **live devnet** · LiteSVM suite + kill-the-crank drill on a real validator. Squads upgrade #2 executed 2026-10-07; #3 (`GrantEngine`, fee cap 0) approved, executable 2026-10-09 20:43 UTC. The engines below drive it by CPI | [`payment-rails/`](payment-rails/) · `bash payment-rails/crank/scripts/devnet/verify.sh` |
+| `credit-math`: shared fixed-point crate (NAV, clearing, pro-rata, waterfall, PV, prudential floor) | ✅ built · unit + property suites · CI gates 100% line + branch coverage. **Wired:** clearing + pro-rata (`auction-engine`), haircuts (`mark-engine`), PV (`queue-claim`), waterfall, loss and accrual (`tranche-engine`), advance-rate bound (`liquidity-facility`), mul/div (`payment-rails`); `balance_after` and `fee_accrual_per_period` have no program caller | `cargo test --workspace` |
+| `credit-gate`: sRFC37 Gate Program | ✅ **on `main` (CG-P1..P7):** SAS attestation read (CG-P6), holder governor (CG-P4), block-list (CG-P5), lot ledger (CG-P3), `validate` + Token ACL `can_thaw`/`can_freeze` hooks (CG-P1), all against the **real** SAS and Token ACL programs in LiteSVM and on a validator. ✅ **live devnet** at `5ycY…X6XX` (#170), upgrade authority = Squads vault; NPCS thaws only through it (#171) | `DEPLOYMENTS.md` |
+| **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** (`6vt1…VKL4`, #171) · gated by credit-gate through Token ACL; mint, permanent-delegate and metadata authority = Squads vault. Backing by process until the `npcs-treasury` hand-over | [`token/`](token/) · `DEPLOYMENTS.md` |
 | Off-chain services (#141) | ✅ built, not hosted: indexer (Postgres, RPC backfill + Helius webhooks), read API, NAV publisher (`credit-math` arithmetic, `publish_nav`), treasury agent (I1 check), crank-runner (phases · refunds · seasoning · distribution), session evidence bundles. Verified on a local validator with the real programs and against devnet (gate history indexed; sleeve BACKED; NAV dry run 1.000000). No Supabase/Helius project provisioned | [`services/`](services/README.md) · `payment-rails/crank/` |
-| Next.js 16 app (#144) | ✅ the three demo screens, read live from the cluster: **session** (phase clock, sealed → revealed book, clearing curves vs reserve and NAV, fills settled DvP, print; wallet commit + reveal), **portfolio** (NPCS, lots with seasoning countdown, claims, advances, orders), **gate check** (simulates credit-gate's real `validate` and shows its typed `GateReject` with the inputs it read). Devnet: gate + portfolio show live NPCS state; sessions need the engines deployed (not yet). Full session flow end to end on a local validator with the real programs (`npm run localnet:e2e`). No `/admin`, `/data-room` or allowlist yet | [`app/`](app/README.md) |
-| CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ✅ green | `.github/workflows/ci.yml` |
+| Next.js 16 app (#144) | ✅ the three demo screens, read live from the cluster: **session** (phase clock, sealed → revealed book, clearing curves vs reserve and NAV, fills settled DvP, print; wallet commit + reveal), **portfolio** (NPCS, lots with seasoning countdown, claims, advances, orders), **gate check** (simulates credit-gate's real `validate` and shows its typed `GateReject` with the inputs it read). Plus (#199) the issuer ROFR decision, tranche positions, `/admin` (authority map from the chain; actions signed by the holding key or exported as a Squads proposal), `/data-room` (prints by disclosure class) and the private allowlist (wallet-signed sign-in + credit-gate admission; `access:e2e` passes on devnet). Full session flow end to end on a local validator (`npm run localnet:e2e`); on devnet once the first live session runs | [`app/`](app/README.md) |
+| CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ⚠️ the suite passes in a local mirror of `ci.yml` + `docs.yml`; GitHub Actions jobs are failing on billing (no job runs) | `.github/workflows/ci.yml` |
 | SAS attester (credential + 3 schemas) | ✅ **live devnet** (#122) | `ops/gate/deployment-devnet.json` · `npm run sas -- verify` |
 | Token ACL wiring of NPCS | ✅ devnet (#171): new mint `6vt1wHVQ…VKL4` thaws only through credit-gate; mint/delegate/metadata authority = Squads vault | `ops/gate/`, `token/` |
-| mark-engine · auction-engine · queue-claim · facility · tranching engines | scheduled P2–P5 (cash legs already in `payment-rails`) | SRS 08 §12 |
+| Engines: `auction-engine`, `mark-engine`, `queue-claim` (#192), `tranche-engine`, `npcs-treasury` (#200) | ✅ **deployed on devnet**; venue, NPCS feed (NAV #1 = 1.000000), print source and queue wired. `liquidity-facility` built, not deployed (SOL; needs a rails grant after #3). The first live session (`payment-rails/crank/scripts/devnet/auction-session.ts`) is rehearsed on a devnet clone and waits on rails #3 and H's seasoning (2026-10-11) | `DEPLOYMENTS.md` § Engines |
 
 ### Programs: as built vs roadmap
 
-Seven programs are named in the design (SRS 08 §4). Five have **no code**:
-their names appear only in docs and doc comments (#128). Anything in this
-repo that describes them is the target, not a shipped feature.
+Seven programs are named in the design (SRS 08 §4), plus `npcs-treasury`.
+All have code, tests and IDLs; the table says which are on devnet.
 
 | Program | Crate | IDL | Tests | Crank | State |
 |---|---|---|---|---|---|
 | `payment-rails` | ✅ | ✅ | ✅ LiteSVM + drill | ✅ | live devnet |
-| `credit-gate` | ✅ | ✅ | ✅ LiteSVM + real SAS/Token ACL | — | CG-P1..P7 on `main`; devnet redeploy pending (#45) |
-| `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 4 functions consumed by `payment-rails` |
-| `auction-engine` | ✅ | ✅ | ✅ unit + LiteSVM (real rails, gate, SAS, mark) | ⚠️ crankable (permissionless settle/expire), no runner yet (#141) | AE-P1..P11 on `main` (#136); not deployed |
-| `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | ME-P1..P7 on `main` (#137); not deployed; no nav-publisher yet (#141) |
-| `queue-claim` | ✅ | ✅ | ✅ LiteSVM: sell path through `auction-engine`, pledge path through `liquidity-facility` | — | QC-P1..P5 on `main` (#138); not deployed |
-| `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps, no runner yet (#141) | LF-P1..P6 on `main` (#139); not deployed |
-| `tranche-engine` | ✅ | ✅ | ✅ unit + LiteSVM (waterfall through rails) | ⚠️ permissionless `mark` / `distribute`, no runner yet (#141) | TE-P1..P7 on `main` (#140); not deployed |
+| `credit-gate` | ✅ | ✅ | ✅ LiteSVM + real SAS/Token ACL | — | live devnet `5ycY…X6XX` (#170), Squads-held |
+| `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 14 of 16 public functions called by programs |
+| `auction-engine` | ✅ | ✅ | ✅ unit + LiteSVM (real rails, gate, SAS, mark) | ✅ phase crank + `crank run` (#149, #141) | **live devnet** (#192); first session after rails #3 |
+| `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | **live devnet** (#192); NAV #1 published by `services` nav-publisher |
+| `queue-claim` | ✅ | ✅ | ✅ LiteSVM: sell path through `auction-engine`, pledge path through `liquidity-facility` | — | **live devnet** (#192); NPCS queue initialized |
+| `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps | LF-P1..P6 on `main` (#139); not deployed (after rails #3) |
+| `tranche-engine` | ✅ | ✅ | ✅ unit + LiteSVM (waterfall through rails) | ✅ `crank distribute` (#141) | **live devnet** (#200); no pool yet |
 
 Per-AC grades: [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
 
@@ -62,10 +64,10 @@ than badged complete.
 
 | # | Criterion (#4) | State | Evidence / deferral |
 |---|---|---|---|
-| 1 | `services/` (nav-publisher, crank-runner, indexer, evidence-exporter) | ⏭ **deferred to P1** | [`services/README.md`](services/README.md): none built; only `payment-rails/crank` exists (#58) |
+| 1 | `services/` (nav-publisher, crank-runner, indexer, evidence-exporter) | ⚠️ built, not hosted | [`services/README.md`](services/README.md): indexer, API, nav-publisher, treasury agent, crank-runner, evidence exporter built and tested (#191); no host (#141) |
 | 2 | `credit-math` skeleton with property tests running | ✅ | CI `credit-math — coverage` gates 100% lines + branches |
 | 3 | CI: anchor build + test; fmt/clippy; app lint | ✅ | `.github/workflows/ci.yml`: every job is a required check on `main`; `app — lint · typecheck · build` |
-| 4 | Squads 2-of-2 authority created; key ceremony + storage runbook | ⚠️ runbook ✅ · **Squads 2-of-2 live on devnet** (48h timelock), `payment-rails` upgrade authority moved ✅ · NPCS and `credit-gate` keys not on the migrating machine, their moves are scripted for the key holders | `ops/squads/`, `DEPLOYMENTS.md` § Squads (#126) |
+| 4 | Squads 2-of-2 authority created; key ceremony + storage runbook | ✅ runbook · **Squads 2-of-2 live on devnet** (48h timelock) holding the `payment-rails` and `credit-gate` upgrade authorities and the NPCS mint, delegate and metadata authorities; vault-signed upgrades #2 (executed) and #3 (approved). The engines stay on the deploy key until after the demo | `ops/squads/`, `DEPLOYMENTS.md` § Squads (#126) |
 | 5 | Verifiable builds; program-ID registry | ⚠️ registry ✅ · `anchor build --verifiable` **deferred to P1** | `DEPLOYMENTS.md` + keyless `verify.sh`; pinned toolchains, SHA-256-verified CLI installs and a lockfile-drift check on every SBF build (#98); deployed `.so` files published as release assets (#99). No deterministic (docker) build yet |
 | 6 | Helius (dev) + Supabase (dev) provisioned | ⏭ **deferred to P1** | not provisioned; nothing in the repo references them ([`services/README.md`](services/README.md)) |
 | 7 | Dependabot `npm` entries | ✅ | `.github/dependabot.yml`: npm ×3, cargo ×4, github-actions |
@@ -75,10 +77,10 @@ substantive P0 exit (HACKATHON §4) is open:
 
 | # | P0 exit | State | Blocker |
 |---|---|---|---|
-| 8 | An investor thaws **through** `credit-gate` (Token ACL) | ⚠️ | ✅ on a validator with the real programs (`ops/gate/test-localnet.sh`); on devnet NPCS's freeze authority is still the `2xhj…` wallet and the gate is the pre-#26 build (#45) |
+| 8 | An investor thaws **through** `credit-gate` (Token ACL) | ✅ | devnet (#170/#171): NPCS freeze authority = Token ACL → credit-gate `5ycY…`; holder H's account was thawed through the gate, a stranger gets `AttestationInvalid` (`/gate`) |
 | 9 | SAS attestation read by the gate | ✅ | credential + schemas live on devnet (`ops/gate/deployment-devnet.json`); CG-P6 read tested against the real SAS program (#122) |
-| 10 | R5 settles **live NPCS** | ❌ (ready) | R5 ran against a manifest mint (`payment-rails/PHASES.md`). The live-NPCS run is scripted and rehearsed (#145/#172): `payment-rails/crank/scripts/devnet/npcs-dvp.ts` passes end to end on a devnet clone with the exact pending rails build. It waits on three things `--preflight` reports: the approved Squads upgrade executed, holder H's lot seasoned (2026-10-11 07:53 UTC), 1.6 devnet USDC for the operator |
-| 11 | Auction session + queue-claim sale | ⚠️ | both built and tested end to end in LiteSVM against the real rails, gate and SAS: a claim sells in an auction session (#136, #138). Not deployed |
+| 10 | R5 settles **live NPCS** | ❌ (ready) | R5 ran against a manifest mint (`payment-rails/PHASES.md`). The live-NPCS run is scripted and rehearsed (#145/#172): `payment-rails/crank/scripts/devnet/npcs-dvp.ts` passes end to end on a devnet clone with the exact pending rails build. Squads upgrade #2 is executed (2026-10-07); `--preflight` now waits only on holder H's lot seasoning (2026-10-11 07:53 UTC). The auction-engine version of the same fill (`auction-session.ts`, #200) is rehearsed too |
+| 11 | Auction session + queue-claim sale | ⚠️ | engines live on devnet (#192); a sealed-bid session over NPCS is scripted and rehearsed on a devnet clone with rails #3's build (cleared 0.97 vs NAV 1.00, 2 fills DvP, #200). Runs on devnet after rails #3 (2026-10-09) and H's seasoning (2026-10-11); the queue-claim sale follows on the same venue |
 
 ## Repo structure
 
