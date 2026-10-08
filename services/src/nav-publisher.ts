@@ -90,10 +90,11 @@ export async function computeNav(
   const [mintA, sleeveA, feedA, clockA] = value;
   if (!mintA) throw new Error(`mint ${o.mint} not found`);
   if (!sleeveA) throw new Error(`treasury account ${sleeve} not found`);
+  if (!clockA) throw new Error("Clock sysvar not returned by the RPC");
   if (!feedA && !o.allowNoFeed) throw new Error(`no mark-engine feed for ${o.mint} (${feed})`);
   const sleeveData = fromBase64(sleeveA.data[0]);
   const feedState = feedA ? PROGRAMS["mark-engine"].decodeAccount("Feed", fromBase64(feedA.data[0])) : null;
-  const now = new DataView(fromBase64(clockA!.data[0]).buffer).getBigInt64(32, true);
+  const now = new DataView(fromBase64(clockA.data[0]).buffer).getBigInt64(32, true);
   const supply = mintSupply(fromBase64(mintA.data[0]));
   const treasury = tokenAmount(sleeveData);
   const prev = feedState && (feedState.publications as bigint) > 0n ? (feedState.computed_ts as bigint) : now;

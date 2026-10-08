@@ -103,7 +103,7 @@ test("engine IDL types: u128 and option round-trip (mark-engine Feed has u128 NA
   assert.throws(() => mark.encode("u128", 2n ** 128n), /out of range/);
   assert.deepEqual(mark.decodeAt({ option: "u64" }, mark.encode({ option: "u64" }, null), 0), [null, 1]);
   assert.deepEqual(mark.decodeAt({ option: "u64" }, mark.encode({ option: "u64" }, 7n), 0), [7n, 9]);
-  assert.throws(() => mark.decodeAt({ option: "u64" }, Uint8Array.of(2), 0), /bad tag/);
+  assert.throws(() => mark.decodeAt({ option: "u64" }, Uint8Array.of(2), 0), /bad option tag/);
   // FeedParams through the IDL, exactly as engines.ts sends it.
   const p = { warn_after: 1n, stale_after: 2n, warned_haircut_bps: 3n, stale_haircut_bps: 4n, print_policy: "Banded", band_bps: 5n, min_print_volume: 6n, min_print_investors: 7, outlier_band_bps: 8n, drills_enabled: false };
   assert.deepEqual(mark.decodeAt({ defined: { name: "FeedParams" } }, mark.encode({ defined: { name: "FeedParams" } }, p), 0)[0], { ...p, print_policy: "Banded" });

@@ -21,7 +21,7 @@
  *
  * Env: RPC_URL (default localhost), WS_URL, KEYPAIR (default
  * ~/.config/solana/id.json), EVIDENCE_KEYPAIR (signs exports; default
- * KEYPAIR), CRANK_KILL_FILE (runner sends nothing while it exists),
+ * KEYPAIR), CRANK_KILL_FILE (runner pauses everything but refunds while it exists),
  * PRIORITY_FEE_MIN/MAX (µlamports/CU),
  * MAX_ATTEMPTS, RETRY_BASE_MS. Exit code 1 on any failed action or a
  * reconciliation that isn't clean.

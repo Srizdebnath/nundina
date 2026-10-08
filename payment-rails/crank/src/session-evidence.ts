@@ -90,7 +90,7 @@ export async function exportSessionEvidence(
     const tx = await rpc.getTransaction(x.signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }).send();
     const logs = tx?.meta?.logMessages;
     if (!logs) continue;
-    txs++;
+    const had = records.length;
     for (const ev of sessionEventsFromLogs(logs)) {
       records.push({
         signature: x.signature,
@@ -101,6 +101,8 @@ export async function exportSessionEvidence(
         data: toJson(ev.data) as Record<string, unknown>,
       });
     }
+    // Only transactions that contributed an event: `transactions` cross-checks against events.jsonl.
+    if (records.length > had) txs++;
   }
 
   // State at export.
