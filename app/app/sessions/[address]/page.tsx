@@ -5,6 +5,7 @@ import { Addr, Banner, ErrorPanel, Stat, utc } from "@/components/ui";
 import { AutoRefresh, Countdown } from "@/components/client";
 import { ClearingChart } from "@/components/ClearingChart";
 import { SessionActions } from "@/components/SessionActions";
+import { RofrActions } from "@/components/RofrActions";
 import { hex, type Struct } from "@/lib/borsh";
 import { chainNow } from "@/lib/rpc";
 import { clockPhase, curves, fmt6, loadSession, navToPrice, PHASES } from "@/lib/session";
@@ -180,6 +181,25 @@ export default async function SessionPage({ params }: { params: Promise<{ addres
             ))}
           </tbody>
         </table>
+      )}
+
+      {s.phase === "IssuerRofr" && s.rails && (
+        <>
+          <h2>Issuer ROFR decision (AE-P7)</h2>
+          <RofrActions
+            session={s.address}
+            railsSession={s.railsSession}
+            assetMint={s.assetMint}
+            assetDecimals={s.assetDecimals}
+            usdcMint={usdcMint}
+            feeReceiver={s.rails.fee_receiver as string}
+            reserve={s.rails.reserve as string}
+            rofrAuthority={p.rofr_authority as string}
+            rofrEnd={revealEnd + Number(p.rofr_window as bigint)}
+            clearPrice={String(s.clearPrice)}
+            fills={s.fills.map((f) => ({ ...f, qty: String(f.qty) }))}
+          />
+        </>
       )}
 
       <h2>Print</h2>

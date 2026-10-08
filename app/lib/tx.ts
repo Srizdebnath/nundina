@@ -9,7 +9,7 @@
  * accounts, then the rails accounts it forwards by CPI.
  */
 import { AccountRole, type Address, type Instruction } from "@solana/kit";
-import { concat, u64le } from "./borsh";
+import { concat, u32le, u64le } from "./borsh";
 import { codecs, pdas, PROGRAMS, SYSTEM_PROGRAM } from "./programs";
 import { getAddressEncoder } from "@solana/kit";
 
@@ -96,4 +96,88 @@ export async function revealIx(
     ],
     data: concat(disc("reveal"), u64le(limit), u64le(qty), nonce),
   };
+}
+
+/** The token accounts and session terms one `exercise_rofr` moves value between. */
+export interface RofrAccounts {
+  session: Address;
+  railsSession: Address;
+  issuer: Address;
+  seller: Address;
+  assetMint: Address;
+  usdcMint: Address;
+  feeReceiver: Address;
+  reserve: Address;
+  /** Any USDC account the seller owns (rails: owner = escrow owner, mint = session USDC). */
+  sellerUsdc: Address;
+  issuerUsdc: Address;
+  issuerAsset: Address;
+  usdcTokenProgram: Address;
+  assetTokenProgram: Address;
+}
+
+/**
+ * AE-P7 `exercise_rofr(fill_index, qty)`: the issuer takes `qty` of fill
+ * `fillIndex` at the clearing price, settled at once through the rails
+ * `settle_rofr_fill` for the fill the engine appends (`newIndex` = current
+ * fill count). The 23 forwarded accounts follow `SettleRofrFill` (and the
+ * LiteSVM harness `exercise_rofr`); the operator PDA is de-signed, the
+ * engine signs for it.
+ */
+export async function exerciseRofrIx(a: RofrAccounts, fillIndex: number, newIndex: number, qty: bigint): Promise<Instruction> {
+  const operator = await pdas.operator();
+  const sellerEscrow = await pdas.escrow(a.railsSession, a.seller);
+  return {
+    programAddress: PROGRAMS.auction,
+    accounts: [
+      ro(await pdas.venue()),
+      w(a.session),
+      { address: a.issuer, role: AccountRole.WRITABLE_SIGNER },
+      w(operator),
+      ro(PROGRAMS.rails),
+      ro(SYSTEM_PROGRAM),
+      // payment-rails `settle_rofr_fill`, forwarded.
+      ro(await pdas.railsConfig()),
+      w(a.railsSession),
+      w(operator),
+      { address: a.issuer, role: AccountRole.READONLY_SIGNER },
+      w(await pdas.receipt(a.railsSession, newIndex)),
+      w(sellerEscrow),
+      w(await pdas.assetVault(sellerEscrow)),
+      w(a.sellerUsdc),
+      w(a.issuerUsdc),
+      w(a.issuerAsset),
+      w(a.feeReceiver),
+      w(a.reserve),
+      ro(a.usdcMint),
+      ro(a.assetMint),
+      ro(a.usdcTokenProgram),
+      ro(a.assetTokenProgram),
+      ro(SYSTEM_PROGRAM),
+      // RofrGate
+      ro(PROGRAMS.gate),
+      ro(await pdas.gateSettle()),
+      ro(await pdas.gateConfig(a.assetMint)),
+      ro(await pdas.blocked(a.assetMint, a.seller)),
+      ro(await pdas.blocked(a.assetMint, a.issuer)),
+      w(await pdas.lots(a.assetMint, a.seller)),
+    ],
+    data: concat(disc("exercise_rofr"), u32le(fillIndex), u64le(qty)),
+  };
+}
+
+/** AE-P7 `close_rofr`: the issuer declines (or is done); anyone once the window has passed. */
+export function closeRofrIx(session: Address, caller: Address): Instruction {
+  return {
+    programAddress: PROGRAMS.auction,
+    accounts: [w(session), { address: caller, role: AccountRole.READONLY_SIGNER }],
+    data: disc("close_rofr"),
+  };
+}
+
+const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
+
+/** `SetComputeUnitLimit`: an engine → rails → gate DvP needs more than the 200k default (the crank asks 600k). */
+export function computeUnitLimitIx(units: number): Instruction {
+  return { programAddress: COMPUTE_BUDGET, accounts: [], data: concat(Uint8Array.of(2), u32le(units)) };
 }
