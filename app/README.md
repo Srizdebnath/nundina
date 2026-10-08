@@ -11,13 +11,43 @@ All NPCS views carry the `PILOT-DEMO-ASSET` label.
 
 | Screen | Route | What it shows | Where it works today |
 |---|---|---|---|
-| Session | `/sessions/[address]` | phase timeline and countdowns; the order book, sealed (commitment hash) until revealed; uniform-price clearing as demand/supply step curves against the reserve and the mark-engine NAV (they draw in on load); pro-rata allocations; fills and their DvP settlement; the mark-engine print; the rails `CashSession` totals. **Commit a sealed bid** (escrow + bond in payment-rails) and **reveal** it with a connected wallet; the preimage stays in the browser (localStorage + a download) | local validator (the engines are not on devnet yet) |
+| Session | `/sessions/[address]` | phase timeline and countdowns; the order book, sealed (commitment hash) until revealed; uniform-price clearing as demand/supply step curves against the reserve and the mark-engine NAV (they draw in on load); pro-rata allocations; fills and their DvP settlement; the mark-engine print; the rails `CashSession` totals. **Commit a sealed bid** (escrow + bond in payment-rails) and **reveal** it with a connected wallet; the preimage stays in the browser (localStorage + a download) | local validator; on devnet the engines are deployed (2026-10-07) and sessions open once rails upgrade #3 adds `grant_engine` |
 | Portfolio | `/portfolio?wallet=` | NPCS balance and frozen/thawed state, gate admission, the CG-P3 lot ledger with a seasoning countdown per lot, queue-claim requests, liquidity-facility positions, orders across sessions | devnet (NPCS holder H) and local |
 | Gate check | `/gate?wallet=` | the gate-rejection view: **simulates credit-gate's real `validate`** for the wallet (nothing is signed or sent) and shows the program's own `ValidateDecision`, a typed `GateReject` or program error, next to every input it read: block entry, SAS attestations (signer, expiry vs horizon, jurisdiction, KYC, accreditation), holder governor, holder link, token account state, plus the simulation logs | devnet and local |
 | Dashboard | `/` | which programs are deployed on the cluster, the NPCS gate market, its mark feed, session count | both |
+| Data room | `/data-room` | every mark-engine print in full (price, volume, investors, eligibility, vs NAV) next to what its market's class (ME-P6: Public / Banded / AggregateOnly / DataRoom) discloses outside the room; eligible volume and VWAP. Allowlisted viewers only, in every access mode. The session page shows prints as the class discloses them | both |
+| Admin | `/admin` | the authority map (SRS 08 §8) read from the chain: each program's upgrade authority from its ProgramData, and who holds the rails config / operator / registrar, the gate root and market, the feed and its publishers, the venue, the queue. Actions: rails pause and depeg breaker, fees, `grant_engine` for the auction operator, feed suspend / resume, gate block / unblock. Signed here only by the key that holds the authority; when that is the Squads vault the page builds the vault proposal (program, accounts with roles, data) instead. No attestation issuance or NAV publication: those keys stay out of the browser | both |
 
-Not built yet (SRS 08 §7): `/admin`, `/data-room`, the private allowlist,
-a ROFR decision screen, tranche positions.
+The session page also carries the **issuer ROFR decision** (AE-P7): during
+`IssuerRofr` the ROFR authority's wallet takes part or all of an unsettled
+fill at the clearing price (`exercise_rofr` → rails `settle_rofr_fill` →
+gate) or closes the window. The portfolio shows **tranche positions**
+(tranche-engine: units, share, principal, allocated loss, coupon, lock-up).
+
+## Private allowlist
+
+SRS 08 §7: "connect + CG check against market policy before any page
+data". `NUNDINA_ACCESS=allowlist` puts every page behind a sign-in. The
+server issues a challenge (wallet, cluster, time, an HMAC'd nonce), the
+wallet signs it, and the server checks the signature, then admits the
+wallet if it is on `NUNDINA_ALLOWLIST` (operators) or credit-gate's own
+`validate`, simulated on the NPCS market, approves it and it is not
+block-listed. The answer is an HMAC'd httpOnly cookie for 12 h; nothing is
+read from the cluster for a page before that. Without the variable (local
+development) only `/data-room` and `/admin` ask for a sign-in. The
+on-chain accounts stay readable by anyone with an RPC: this gates the
+product, not the ledger.
+
+```bash
+NUNDINA_ACCESS=allowlist NUNDINA_ACCESS_SECRET=$(openssl rand -hex 32) npm run start -- -p 3123 &
+BASE=http://127.0.0.1:3123 HOLDER=~/.config/nundina/npcs-devnet/holder-h.json npm run access:e2e
+```
+
+`access:e2e` signs real challenges against devnet: a stranger sees the gate
+on every page, a fresh wallet is refused (`AttestationInvalid`), a signature
+over another wallet's challenge is refused, holder H is admitted through
+credit-gate and its cookie opens `/admin` and `/data-room`, a forged cookie
+does not.
 
 ## Run against devnet
 

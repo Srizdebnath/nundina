@@ -79,6 +79,7 @@ export const pdas = {
   investor: (mint: Address, id: Uint8Array) => pda(PROGRAMS.gate, ["investor", A(mint), id]),
   lots: (mint: Address, w: Address) => pda(PROGRAMS.gate, ["lots", A(mint), A(w)]),
   blocklist: (mint: Address) => pda(PROGRAMS.gate, ["blocklist", A(mint)]),
+  gateRoot: () => pda(PROGRAMS.gate, ["gate_root"]),
   attestation: (credential: Address, schema: Address, owner: Address) =>
     pda(SAS_PROGRAM, ["attestation", A(credential), A(schema), A(owner)]),
   // auction-engine
@@ -96,4 +97,7 @@ export const pdas = {
   receipt: (railsSession: Address, fillIndex: number) => pda(PROGRAMS.rails, ["fill", A(railsSession), u32le(fillIndex)]),
   /** The rails' settlement signer: the only caller credit-gate takes `settle_check` from. */
   gateSettle: () => pda(PROGRAMS.rails, ["gate_settle"]),
+  engineGrant: (engine: Address) => pda(PROGRAMS.rails, ["engine", A(engine)]),
+  // queue-claim
+  queue: (mint: Address) => pda(PROGRAMS.queue, ["queue", A(mint)]),
 };
