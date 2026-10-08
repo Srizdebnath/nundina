@@ -18,6 +18,7 @@
  *      X, Y `deposit`;
  *   3. reveals reported, two fills settled DvP through the gate;
  *   4. finish → refunds → reconcile → signed evidence bundle.
+ *   (Before 2: H's seasoned lots are folded into FREE with `merge_expired`.)
  *
  *   npx tsx scripts/devnet/npcs-dvp.ts --preflight     # read-only: what still blocks the run
  *   npx tsx scripts/devnet/npcs-dvp.ts                 # the run
@@ -59,7 +60,7 @@ import { exportEvidence } from "../../src/evidence.ts";
 import { ix } from "../../src/idl.ts";
 import { formatReport, reconcileSession } from "../../src/ledger.ts";
 import { assetVaultPda, escrowPda, sessionPda, vaultPda } from "../../src/pda.ts";
-import { CREDIT_GATE } from "../../src/seasoning.ts";
+import { CREDIT_GATE, mergeExpiredIx } from "../../src/seasoning.ts";
 import { findAssociatedTokenPda } from "@solana-program/token";
 import { ensureAta, explorer, must, readDeployment, stateDir, transferSol, transferToken, waitUntil, writeJson } from "./common.ts";
 
@@ -223,6 +224,18 @@ async function main(): Promise<void> {
   const hUsdc = await ensureAta(ops, H.address, usdc, usdcTp);
   await must(ops, "fund H's ask bond", [transferToken(authUsdc, hUsdc, usdc, authority, BOND, usdcTp)]);
   const hNpcs = (await ownerTokenAccount(ops.rpc, H.address, NPCS))!;
+
+  // 1b. fold H's seasoned lots into FREE (CG-P3 `merge_expired`, permissionless:
+  // the seasoning crank's job). `debit` would also merge on demand inside
+  // settle_check; doing it here makes the ask sell from FREE explicitly and
+  // checks it before any escrow is opened.
+  const hLots = await lotsPda(H.address);
+  const before = sellable((await rawAccount(ops.rpc, hLots))!.data, await clockNow(ops.rpc));
+  if (before.seasonedInLots > 0n) {
+    record(`1 · H's seasoned lots merged into FREE (+${before.seasonedInLots})`, await must(ops, "merge_expired", [mergeExpiredIx(hLots, NPCS)]));
+  }
+  const after = sellable((await rawAccount(ops.rpc, hLots))!.data, await clockNow(ops.rpc));
+  if (after.free < U) throw new Error(`H's FREE is ${after.free} after merge_expired; the ask needs ${U}`);
 
   // 2. session over NPCS; H's ask; buyers' cash.
   const now = await clockNow(ops.rpc);
