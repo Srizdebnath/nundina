@@ -54,6 +54,16 @@
           "signer": true
         },
         {
+          "name": "program",
+          "docs": [
+            "This program, to locate its ProgramData. The first caller of initialize_feed would own the feed: only the upgrade authority may create one."
+          ],
+          "address": "79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -784,6 +794,11 @@
       "code": 6015,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6016,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority may do this"
     }
   ],
   "types": [

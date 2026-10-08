@@ -604,6 +604,11 @@ pub struct InitializeFeed<'info> {
     pub asset_mint: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
+    /// This program, to locate its ProgramData. The first caller of initialize_feed would own the feed: only the upgrade authority may create one.
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()))]
+    pub program: Program<'info, crate::program::MarkEngine>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ MarkError::NotUpgradeAuthority)]
+    pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
 }
 
@@ -747,6 +752,8 @@ pub enum MarkError {
     NotAMint,
     #[msg("arithmetic overflow")]
     MathOverflow,
+    #[msg("Only the program's upgrade authority may do this")]
+    NotUpgradeAuthority,
 }
 
 #[cfg(test)]

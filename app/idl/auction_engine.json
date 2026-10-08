@@ -792,6 +792,16 @@
           "signer": true
         },
         {
+          "name": "program",
+          "docs": [
+            "This program, to locate its ProgramData. The singleton venue's authority opens every session: only the upgrade authority may create it."
+          ],
+          "address": "Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -1501,6 +1511,11 @@
       "code": 6022,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6023,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority may do this"
     }
   ],
   "types": [

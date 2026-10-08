@@ -103,6 +103,8 @@ fn load_queue(env: &mut Env) -> Q {
             asset_mint: npcs,
             usdc_mint: env.mint,
             authority: auth.pubkey(),
+            program: queue_claim::ID,
+            program_data: programdata(&queue_claim::ID),
             system_program: SYSTEM,
         }
         .to_account_metas(None),
@@ -626,4 +628,34 @@ fn cancel_returns_the_npcs_and_burns_the_claim() {
     assert_eq!(env.bal(&holder.asset), 10 * UNIT);
     assert_eq!(env.bal(&q.holder_claim(id)), 0);
     assert_eq!(request_state(&env, &q, id).state, ClaimState::Cancelled);
+}
+
+/// The first caller of `init_queue` would own the queue and name its attester.
+#[test]
+fn only_the_upgrade_authority_creates_a_queue() {
+    let mut env = Env::new(Tp::Spl);
+    load_root_program(&mut env, queue_claim::ID, "queue_claim");
+    let npcs = env.asset_mint;
+    let stranger = env.funded();
+    let ix = Instruction {
+        program_id: queue_claim::ID,
+        accounts: qacc::InitQueue {
+            queue: qpda(&[queue_claim::QUEUE_SEED, npcs.as_ref()]),
+            asset_mint: npcs,
+            usdc_mint: env.mint,
+            authority: stranger.pubkey(),
+            program: queue_claim::ID,
+            program_data: programdata(&queue_claim::ID),
+            system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+        data: qix::InitQueue {
+            attester: stranger.pubkey(),
+        }
+        .data(),
+    };
+    assert_eq!(
+        env.send(&[ix], &[&stranger]).unwrap_err(),
+        qc(QcError::NotUpgradeAuthority)
+    );
 }

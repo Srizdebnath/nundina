@@ -361,6 +361,16 @@
           "signer": true
         },
         {
+          "name": "program",
+          "docs": [
+            "This program, to locate its ProgramData. Opening a facility makes the signer its authority and lets it drive the rails through this program's single granted signer PDA, so it is a governance act."
+          ],
+          "address": "PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "rails_program"
         },
         {
@@ -1189,6 +1199,11 @@
       "code": 6017,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6018,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority may do this"
     }
   ],
   "types": [

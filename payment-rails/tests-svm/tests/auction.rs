@@ -473,3 +473,19 @@ fn past_the_deadline_any_session_expires_and_refunds() {
     env.refund(&crank, &rs, &b1.key.pubkey(), &b1.usdc).unwrap();
     assert_eq!(env.bal(&b1.usdc), 10 * UNIT + BOND);
 }
+
+/// The venue's authority opens every session: only the upgrade authority may create it.
+#[test]
+fn only_the_upgrade_authority_creates_the_venue() {
+    let mut env = Env::new(Tp::Spl);
+    load_root_program(&mut env, auction_engine::ID, "auction_engine");
+    let stranger = env.funded();
+    let ix = venue_init_ix(&stranger.pubkey());
+    assert_eq!(
+        env.send(&[ix], &[&stranger]).unwrap_err(),
+        aerr(AuctionError::NotUpgradeAuthority)
+    );
+    let auth = env.authority.insecure_clone();
+    env.send(&[venue_init_ix(&auth.pubkey())], &[&auth])
+        .expect("the upgrade authority creates it");
+}
