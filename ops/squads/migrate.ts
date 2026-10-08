@@ -11,6 +11,11 @@
  *                       [--spill <addr>]                    #   whose authority is the vault →
  *                                                           #   propose + 2 approvals (#172)
  *   tsx migrate.ts execute-upgrade <program>                # once the timelock allows
+ *   tsx migrate.ts propose-treasury <mint> --sleeve <usdc>  # vault tx: NPCS mint authority →
+ *                                                           #   npcs-treasury (#148), initialize it
+ *                                                           #   (authority = vault), move the backing
+ *                                                           #   USDC in, update the metadata status
+ *   tsx migrate.ts execute-treasury                         # once the timelock allows
  *   tsx migrate.ts verify                                   # keyless: every recorded move holds
  *
  * Env: CLUSTER (devnet | localnet), RPC_URL (overrides), PAYER (fee payer
@@ -27,6 +32,8 @@ import { join } from "node:path";
 import {
   AuthorityType,
   createSetAuthorityInstruction,
+  createTransferCheckedInstruction,
+  getAccount,
   getExtensionData,
   ExtensionType,
   getMint,
@@ -35,7 +42,7 @@ import {
   getPermanentDelegate,
   getTokenMetadata,
 } from "@solana/spl-token";
-import { createUpdateAuthorityInstruction } from "@solana/spl-token-metadata";
+import { createUpdateAuthorityInstruction, createUpdateFieldInstruction } from "@solana/spl-token-metadata";
 import {
   ComputeBudgetProgram,
   Connection,
@@ -83,6 +90,26 @@ export interface Record {
   proofs: { transactionIndex: string; proposeSignature: string; approvals: string[]; executeSignature?: string }[];
   /** Program upgrades the vault signed (#172). Absent in older records. */
   upgrades?: Upgrade[];
+  /** The NPCS mint authority handed to npcs-treasury (#148). */
+  treasury?: TreasuryHandover;
+}
+
+export interface TreasuryHandover {
+  program: string;
+  mint: string;
+  treasury: string;
+  /** The treasury's signer PDA: the mint authority after execution. */
+  signer: string;
+  vault: string;
+  usdcMint: string;
+  sleeve: string;
+  /** USDC moved from the sleeve into the treasury vault (= supply / scale: I1 holds at once). */
+  amount: string;
+  status: string;
+  transactionIndex: string;
+  proposeSignature: string;
+  approvals: string[];
+  executeSignature?: string;
 }
 
 export interface Upgrade {
@@ -145,8 +172,13 @@ export const aclMintConfig = (mint: PublicKey) =>
   PublicKey.findProgramAddressSync([Buffer.from("MINT_CONFIG"), mint.toBuffer()], TOKEN_ACL)[0].toBase58();
 
 /** Is `holder` where authority `k` of `mint` should end up after a move? */
-export const custodied = (k: string, holder: string | null, vault: string, mint: PublicKey) =>
-  k === "hasMetadataPointer" || holder === null || holder === vault || (k === "freeze" && holder === aclMintConfig(mint));
+export const custodied = (k: string, holder: string | null, vault: string, mint: PublicKey, mintAuthority?: string) =>
+  k === "hasMetadataPointer" ||
+  holder === null ||
+  holder === vault ||
+  (k === "freeze" && holder === aclMintConfig(mint)) ||
+  // After the treasury hand-over (#148) the mint authority is npcs-treasury's signer PDA, by design.
+  (k === "mint" && mintAuthority !== undefined && holder === mintAuthority);
 
 /** Every authority on an NPCS-shaped Token-2022 mint. */
 export async function mintAuthorities(conn: Connection, mint: PublicKey) {
@@ -463,12 +495,149 @@ export async function verify(conn: Connection, r: Record): Promise<string[]> {
       if (a !== r.vault) problems.push(`${mv.target} upgrade authority is ${a}`);
     } else {
       const mint = new PublicKey(mv.target);
+      const handedOver = r.treasury?.executeSignature && r.treasury.mint === mv.target ? r.treasury.signer : undefined;
       for (const [k, v] of Object.entries(await mintAuthorities(conn, mint))) {
-        if (!custodied(k, v as string | null, r.vault, mint)) problems.push(`${mv.target} ${k} authority is ${v}`);
+        if (!custodied(k, v as string | null, r.vault, mint, handedOver)) problems.push(`${mv.target} ${k} authority is ${v}`);
       }
     }
   }
+  if (r.treasury?.executeSignature) problems.push(...(await treasuryProblems(conn, r.treasury)));
   return problems;
+}
+
+const TREASURY_PROGRAM = new PublicKey(process.env.TREASURY_PROGRAM ?? "4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y");
+const anchorDisc = (name: string) => createHash("sha256").update(`global:${name}`).digest().subarray(0, 8);
+
+/** The NPCS metadata `status` once the backing is the program's, not a process. */
+export const treasuryStatus = (program: PublicKey) =>
+  `IN FORCE: USDC 1:1 backing enforced on-chain by npcs-treasury ${program.toBase58()} (mint only on deposit; I1 supply == vault USDC checked at every mint and burn); ` +
+  "thaw/freeze through Token ACL to credit-gate; permanent-delegate and metadata authority = Squads 2-of-2 vault";
+
+export function treasuryPdas(program: PublicKey, mint: PublicKey) {
+  const [treasury] = PublicKey.findProgramAddressSync([Buffer.from("treasury"), mint.toBuffer()], program);
+  const [signer] = PublicKey.findProgramAddressSync([Buffer.from("treasury_signer"), treasury.toBuffer()], program);
+  const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), treasury.toBuffer()], program);
+  return { treasury, signer, vault };
+}
+
+/**
+ * #148: hand the NPCS mint authority to npcs-treasury in ONE vault
+ * transaction, so there is no moment in which anyone could call the
+ * treasury's `initialize` (which makes its caller the treasury authority)
+ * or in which I1 does not hold:
+ *   1. Token-2022 SetAuthority(MintTokens): vault → the treasury signer PDA;
+ *   2. npcs-treasury `initialize`, authority (and rent payer) = the vault;
+ *   3. the backing USDC, supply / scale, sleeve → the treasury vault;
+ *   4. the metadata `status` field says the backing is now enforced
+ *      (the vault first tops the mint up for the longer value's rent).
+ */
+async function proposeTreasury(conn: Connection, payer: Keypair, mint: PublicKey, sleeve: PublicKey, program = TREASURY_PROGRAM): Promise<void> {
+  const r = readRecord();
+  if (r.treasury && !r.treasury.executeSignature) throw new Error(`treasury hand-over #${r.treasury.transactionIndex} is pending: execute-treasury`);
+  if (r.treasury?.executeSignature) throw new Error(`the mint authority already went to ${r.treasury.signer}`);
+  const vault = new PublicKey(r.vault);
+  const prog = await conn.getAccountInfo(program);
+  if (!prog?.executable) throw new Error(`npcs-treasury ${program} is not deployed on ${CLUSTER}`);
+  const m = await getMint(conn, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
+  if (m.mintAuthority?.toBase58() !== r.vault) throw new Error(`mint authority is ${m.mintAuthority}, not the vault`);
+  const sleeveInfo = await conn.getAccountInfo(sleeve);
+  if (!sleeveInfo) throw new Error(`sleeve ${sleeve} not found`);
+  const usdcTp = sleeveInfo.owner;
+  const sl = await getAccount(conn, sleeve, "confirmed", usdcTp);
+  if (sl.owner.toBase58() !== r.vault) throw new Error(`sleeve ${sleeve} is owned by ${sl.owner}, not the vault`);
+  const usdc = await getMint(conn, sl.mint, "confirmed", usdcTp);
+  if (m.decimals < usdc.decimals) throw new Error("asset decimals below USDC's");
+  const scale = 10n ** BigInt(m.decimals - usdc.decimals);
+  if (m.supply % scale !== 0n) throw new Error(`supply ${m.supply} is not a whole number of USDC units`);
+  const amount = m.supply / scale;
+  if (sl.amount < amount) throw new Error(`sleeve holds ${sl.amount} < ${amount} needed to back supply ${m.supply}: I1 would not hold`);
+  const { treasury, signer, vault: tvault } = treasuryPdas(program, mint);
+
+  // Metadata: the new status, and the rent the longer value needs.
+  const meta = await getTokenMetadata(conn, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
+  const status = treasuryStatus(program);
+  const old = meta?.additionalMetadata.find(([k]) => k === "status")?.[1];
+  const ixs: TransactionInstruction[] = [
+    createSetAuthorityInstruction(mint, vault, AuthorityType.MintTokens, signer, [], TOKEN_2022_PROGRAM_ID),
+    new TransactionInstruction({
+      programId: program,
+      keys: [
+        { pubkey: treasury, isSigner: false, isWritable: true },
+        { pubkey: tvault, isSigner: false, isWritable: true },
+        { pubkey: signer, isSigner: false, isWritable: false },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: sl.mint, isSigner: false, isWritable: false },
+        { pubkey: vault, isSigner: true, isWritable: true },
+        { pubkey: usdcTp, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: anchorDisc("initialize"),
+    }),
+    createTransferCheckedInstruction(sleeve, sl.mint, tvault, vault, amount, usdc.decimals, [], usdcTp),
+  ];
+  let topUp = 0;
+  if (meta) {
+    const mintAcc = (await conn.getAccountInfo(mint))!;
+    // Borsh (u32 len + bytes) per string: a new entry adds key + value, an update the length difference.
+    const grow = old === undefined ? 8 + Buffer.byteLength("status") + Buffer.byteLength(status) : Buffer.byteLength(status) - Buffer.byteLength(old);
+    const need = await conn.getMinimumBalanceForRentExemption(mintAcc.data.length + Math.max(grow, 0));
+    topUp = Math.max(0, need - mintAcc.lamports);
+    if (topUp > 0) ixs.push(SystemProgram.transfer({ fromPubkey: vault, toPubkey: mint, lamports: topUp }));
+    ixs.push(createUpdateFieldInstruction({ programId: TOKEN_2022_PROGRAM_ID, metadata: mint, updateAuthority: vault, field: "status", value: status }));
+  }
+  // The vault pays the treasury + vault-account rent and the top-up inside the vault transaction.
+  const rent = (await conn.getMinimumBalanceForRentExemption(8 + 32 * 4 + 8 + 8 + 1 + 1 + 1)) + (await conn.getMinimumBalanceForRentExemption(165)) + topUp;
+  const have = await conn.getBalance(vault);
+  if (have < rent + 1_000_000) await send(conn, [SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: vault, lamports: rent + 1_000_000 - have })], [payer]);
+
+  const { index, propose, approvals } = await proposeAndApprove(conn, payer, r, ixs);
+  r.treasury = {
+    program: program.toBase58(), mint: mint.toBase58(), treasury: treasury.toBase58(), signer: signer.toBase58(), vault: tvault.toBase58(),
+    usdcMint: sl.mint.toBase58(), sleeve: sleeve.toBase58(), amount: amount.toString(), status,
+    transactionIndex: index.toString(), proposeSignature: propose, approvals,
+  };
+  writeRecord(r);
+  console.log(`treasury hand-over proposal #${index}: mint ${mint} → npcs-treasury ${treasury} (signer ${signer}), ${amount} USDC sleeve → ${tvault}: created, approved by both members`);
+  const sig = await executeWhenReady(conn, payer, r, index);
+  if (sig) await finishTreasury(conn, r, sig);
+}
+
+async function treasuryProblems(conn: Connection, t: TreasuryHandover): Promise<string[]> {
+  const problems: string[] = [];
+  const mint = new PublicKey(t.mint);
+  const m = await getMint(conn, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
+  if (m.mintAuthority?.toBase58() !== t.signer) problems.push(`mint authority is ${m.mintAuthority}, not the treasury signer ${t.signer}`);
+  const acct = await conn.getAccountInfo(new PublicKey(t.treasury));
+  if (!acct || acct.owner.toBase58() !== t.program) problems.push(`treasury ${t.treasury} missing or not owned by ${t.program}`);
+  // Treasury: disc(8) | authority — redeem power must sit with the vault, not whoever called initialize.
+  else if (new PublicKey(acct.data.subarray(8, 40)).toBase58() !== readRecord().vault) {
+    problems.push(`treasury authority is ${new PublicKey(acct.data.subarray(8, 40))}, not the vault`);
+  }
+  const vInfo = await conn.getAccountInfo(new PublicKey(t.vault));
+  if (!vInfo) problems.push(`treasury vault ${t.vault} missing`);
+  else {
+    const v = await getAccount(conn, new PublicKey(t.vault), "confirmed", vInfo.owner);
+    const usdc = await getMint(conn, new PublicKey(t.usdcMint), "confirmed", vInfo.owner);
+    const scale = 10n ** BigInt(m.decimals - usdc.decimals);
+    if (v.amount * scale !== m.supply) problems.push(`I1 broken: supply ${m.supply} != vault ${v.amount} × ${scale}`);
+  }
+  return problems;
+}
+
+async function finishTreasury(conn: Connection, r: Record, sig: string): Promise<void> {
+  r.treasury!.executeSignature = sig;
+  writeRecord(r);
+  const problems = await treasuryProblems(conn, r.treasury!);
+  if (problems.length) throw new Error(`hand-over executed (${sig}) but:\n  ${problems.join("\n  ")}`);
+  console.log(`treasury hand-over executed: ${sig}\nmint authority = ${r.treasury!.signer} (npcs-treasury); I1 holds`);
+}
+
+async function executeTreasury(conn: Connection, payer: Keypair): Promise<void> {
+  const r = readRecord();
+  if (!r.treasury) throw new Error("no treasury hand-over proposed");
+  if (r.treasury.executeSignature) return console.log(`already executed: ${r.treasury.executeSignature}`);
+  const sig = await executeWhenReady(conn, payer, r, BigInt(r.treasury.transactionIndex));
+  if (sig) await finishTreasury(conn, r, sig);
 }
 
 async function main(): Promise<void> {
@@ -499,6 +668,10 @@ async function main(): Promise<void> {
     }
     case "execute-upgrade":
       return executeUpgrade(conn, payer(), new PublicKey(need(arg, "<program>")));
+    case "propose-treasury":
+      return proposeTreasury(conn, payer(), new PublicKey(need(arg, "<mint>")), new PublicKey(need(flag("sleeve"), "--sleeve")));
+    case "execute-treasury":
+      return executeTreasury(conn, payer());
     case "verify": {
       const problems = await verify(conn, readRecord());
       if (problems.length) throw new Error(`verify FAILED:\n  ${problems.join("\n  ")}`);
@@ -507,7 +680,7 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      throw new Error("usage: migrate.ts <create|move-program|move-mint|prove|propose-upgrade|execute-upgrade|verify> — see the header");
+      throw new Error("usage: migrate.ts <create|move-program|move-mint|prove|propose-upgrade|execute-upgrade|propose-treasury|execute-treasury|verify> — see the header");
   }
 }
 

@@ -18,6 +18,7 @@ to match.
 | mark-engine v0.1.0 (ME-P1..P7: feed, NAV publication, prints, staleness haircuts; #137) | devnet | `79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH` | 508551724 | `RomDYUFy5KT6EAiqtdVqhuzPt3JT2ZRo1Ttmsct5FBf6hbhAYLzoeCm1hbvPef1aWU9DaQhF8oehiLzWNMkPABf` | `23dbbd22ea2937960bfccbe8ef2a68bba629e72d31127448f3f031f4299a0c0a` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer; Squads hand-over pending, as for credit-gate) |
 | auction-engine v0.1.0 (AE-P1..P11: sealed-bid sessions, uniform clear, ROFR; #136) | devnet | `Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7` | 508552044 | `USqwBa1X4NJoc549FvdcrjemsTZ3G6jaXMoqnrGQTEmYnxkAydg2RFgT23YW1Gbaca9UtkDnpqBRjt3Kk6vZSnh` | `8957e87deb0dfe6390ffd481ad6605060f683b70a5f2e8a398e2c2b74ca283cc` | `9WH1…2uDZ` (as above) |
 | queue-claim v0.1.0 (QC-P1..P5: redemption queue claims; #138) | devnet | `2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4` | 508552133 | `5AgmEw858PeSYaYu2CaP3TckFRMPnH8ngBMxX1jo425KNTbmytkWyYbSpnadmyUCUzGxKGrhGGoQUSLP1sLZosBe` | `960d3e745ff5ffc8cdac09d23d10ac2e62538eed59e0b144bc0b20d32ba531a7` | `9WH1…2uDZ` (as above) |
+| npcs-treasury v0.1.0 (I1 mint-on-deposit / redeem; #148) | devnet | `4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y` | 508779613 | `3p93oRn2iThavs6MpzKZ8qGzQHxLgMDEcGM2bvno7ER2oYN3E7wKF6nT2QxeEr8311BdKrwnEsYXAy7Rb27DhFY7` | `b387d3c1d656bd997b8fb2f4acd8f30396b09b3453da85817296d528e6c78027` | `9WH1…2uDZ` (as above; on-chain dump == local build) |
 
 **Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
 `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
@@ -74,6 +75,29 @@ cleared 0.970000 against NAV 1.00 (reserve 0.95), 2 fills settled DvP,
 X 0.6 / Y 0.4 NPCS, printed, refunds, reconciliation clean, evidence 41 events
 in 15 transactions, transfer proof 2/2. That run is the evidence #145 / #172
 ask for once it happens on devnet itself.
+
+**NPCS backing → npcs-treasury (#148): program deployed, hand-over not yet
+proposed.** npcs-treasury's `initialize` makes its caller the treasury
+authority once the mint authority is its signer PDA, so the hand-over is one
+Squads vault transaction (`ops/squads` `propose-treasury`): the NPCS mint
+authority vault → treasury signer PDA, `initialize` with the vault as
+authority, the 1.000000 USDC backing sleeve `B78W…NKAz` → the treasury vault
+(I1 holds from the first instant), and the metadata `status` updated to say
+the backing is enforced. Tested end to end against the real Squads program on
+a local validator (`ops/squads/test-localnet.sh`: an under-funded sleeve is
+refused; after execution `deposit` mints 1:1 and `verify` checks the mint
+authority, the treasury authority and I1). The devnet proposal needs an
+operator to run it:
+
+```bash
+cd ops/squads && CLUSTER=devnet PAYER=~/.config/solana/turbine-devnet.json KEYS_DIR=~/.config/nundina/squads-devnet \
+  npx tsx migrate.ts propose-treasury 6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4 --sleeve B78WTdsY4MYhAvT757xtdb6KZ61pkBTPzKCtohK3NKAz
+# 48 h later:
+CLUSTER=devnet PAYER=… KEYS_DIR=… npx tsx migrate.ts execute-treasury
+```
+
+After execution the weekly NAV reads the treasury vault instead of the
+sleeve (`services` nav-publisher `--source treasury:<treasury PDA>`).
 
 **The init instructions are first-caller-wins.** `initialize_feed`,
 `initialize_venue` and `init_queue` make whoever calls them first the
