@@ -60,6 +60,21 @@ liquidity-facility, tranche-engine, npcs-treasury. They go up after #3
 refunds its buffer rent, each deploy immediately followed by its init
 (see the next paragraph).
 
+**First live session: runbook.** `payment-rails/crank/scripts/devnet/auction-session.ts`
+runs one sealed-bid auction-engine session over the live NPCS mint end to end
+(`grant_engine` if missing → buyers attested, validated, thawed → `open_session`
+→ H's sealed ask, X's and Y's sealed bids → reveals → the crank's `clear`,
+`allocate`, `settle` per fill (DvP through rails `settle_fill` + credit-gate
+`settle_check`), `finish` (print) → refunds, reconciliation, signed session
+evidence). `--preflight` lists what still blocks it; on 2026-10-08 that is
+exactly two dates: rails upgrade #3 (executable 2026-10-09 20:43 UTC) and H's
+lot seasoning (2026-10-11 07:53 UTC). Rehearsed on a local clone of devnet
+with #3's buffer build (`bash scripts/devnet/rehearse-npcs.sh auction-session`):
+cleared 0.970000 against NAV 1.00 (reserve 0.95), 2 fills settled DvP,
+X 0.6 / Y 0.4 NPCS, printed, refunds, reconciliation clean, evidence 41 events
+in 15 transactions, transfer proof 2/2. That run is the evidence #145 / #172
+ask for once it happens on devnet itself.
+
 **The init instructions are first-caller-wins.** `initialize_feed`,
 `initialize_venue` and `init_queue` make whoever calls them first the
 authority. Here they ran right after each deploy, and `engines.ts` fails

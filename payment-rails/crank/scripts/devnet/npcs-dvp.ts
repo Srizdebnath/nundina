@@ -118,7 +118,7 @@ export function sellable(lots: Uint8Array, now: bigint): { free: bigint; seasone
   return { free, seasonedInLots, nextExpiry };
 }
 
-async function lotsPda(owner: Address): Promise<Address> {
+export async function lotsPda(owner: Address): Promise<Address> {
   const enc = getAddressEncoder();
   const [a] = await getProgramDerivedAddress({
     programAddress: CREDIT_GATE,
@@ -127,7 +127,7 @@ async function lotsPda(owner: Address): Promise<Address> {
   return a;
 }
 
-function gateCli(script: "sas.ts" | "wire.ts", args: string[], rpcUrl: string, payerPath: string): string {
+export function gateCli(script: "sas.ts" | "wire.ts", args: string[], rpcUrl: string, payerPath: string): string {
   return execFileSync("npx", ["tsx", script, ...args], {
     cwd: OPS_GATE,
     env: { ...process.env, CLUSTER: "devnet", RPC_URL: rpcUrl, PAYER: payerPath },
