@@ -36,6 +36,19 @@ pub fn load_root_program(env: &mut Env, id: Pubkey, name: &str) {
     let bytes = std::fs::read(&so)
         .unwrap_or_else(|e| panic!("{so}: {e} — run `anchor build` at the repo root"));
     env.svm.add_program(id, &bytes).expect("load engine");
+    // As a real deploy: the rails authority is each engine's upgrade
+    // authority, which gates the init / open instructions (first caller
+    // would otherwise own them). ProgramData: u32 tag | u64 slot | Option<Pubkey>.
+    let pd_addr = programdata(&id);
+    let mut pd = env.svm.get_account(&pd_addr).expect("engine programdata");
+    pd.data[12] = 1;
+    pd.data[13..45].copy_from_slice(env.authority.pubkey().as_ref());
+    env.svm.set_account(pd_addr, pd).unwrap();
+}
+
+/// An upgradeable program's ProgramData address.
+pub fn programdata(id: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[id.as_ref()], &super::LOADER_V3).0
 }
 
 /// One NPCS = 1 USDC at the NAV scale (micro-USDC per base unit × 10¹²).
@@ -73,19 +86,31 @@ impl Env {
 
     /// Create the feed for `mint` (the rails authority is the feed
     /// authority) with `publisher` as its only publisher.
-    pub fn init_feed(&mut self, mint: &Pubkey, params: FeedParams, publisher: &Pubkey) {
-        let auth = self.authority.insecure_clone();
-        let init = Instruction {
+    /// `initialize_feed` signed by `authority` (must be mark-engine's upgrade authority).
+    pub fn init_feed_ix(
+        &self,
+        mint: &Pubkey,
+        params: FeedParams,
+        authority: &Pubkey,
+    ) -> Instruction {
+        Instruction {
             program_id: mark_engine::ID,
             accounts: macc::InitializeFeed {
                 feed: feed_pda(mint),
                 asset_mint: *mint,
-                authority: auth.pubkey(),
+                authority: *authority,
+                program: mark_engine::ID,
+                program_data: programdata(&mark_engine::ID),
                 system_program: SYSTEM,
             }
             .to_account_metas(None),
             data: mix::InitializeFeed { params }.data(),
-        };
+        }
+    }
+
+    pub fn init_feed(&mut self, mint: &Pubkey, params: FeedParams, publisher: &Pubkey) {
+        let auth = self.authority.insecure_clone();
+        let init = self.init_feed_ix(mint, params, &auth.pubkey());
         let set = self.feed_admin_ix(
             mint,
             mix::SetPublishers {
@@ -169,6 +194,26 @@ impl Env {
 
 // ── auction-engine (#136) ───────────────────────────────────────────────
 
+/// `initialize_venue` signed by `authority` (must be auction-engine's upgrade authority).
+pub fn venue_init_ix(authority: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: auction_engine::ID,
+        accounts: aacc::InitializeVenue {
+            venue: venue_pda(),
+            operator: operator_pda().0,
+            authority: *authority,
+            program: auction_engine::ID,
+            program_data: programdata(&auction_engine::ID),
+            system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+        data: aix::InitializeVenue {
+            forced_sale_opener: Pubkey::default(),
+        }
+        .data(),
+    }
+}
+
 pub fn venue_pda() -> Pubkey {
     Pubkey::find_program_address(&[VENUE_SEED], &auction_engine::ID).0
 }
@@ -223,20 +268,7 @@ impl Env {
         self.init_feed(&mint, feed_params(), &publisher.pubkey());
         self.publish_nav(&mint, &publisher, NAV_ONE).expect("nav");
         let auth = self.authority.insecure_clone();
-        let venue = Instruction {
-            program_id: auction_engine::ID,
-            accounts: aacc::InitializeVenue {
-                venue: venue_pda(),
-                operator: operator_pda().0,
-                authority: auth.pubkey(),
-                system_program: SYSTEM,
-            }
-            .to_account_metas(None),
-            data: aix::InitializeVenue {
-                forced_sale_opener: Pubkey::default(),
-            }
-            .data(),
-        };
+        let venue = venue_init_ix(&auth.pubkey());
         self.send(&[venue], &[&auth]).expect("venue");
         self.grant_engine(&operator_pda().0, EngineGrant::ROLE_SESSIONS)
             .expect("grant");
@@ -703,6 +735,19 @@ impl Env {
             data: aix::SetForcedSaleOpener { opener: signer }.data(),
         };
         self.send(&[opener], &[&auth]).expect("forced-sale opener");
+        let ix = self.open_facility_ix(id, params, &auth.pubkey());
+        self.send(&[ix], &[&auth]).expect("open facility");
+        publisher
+    }
+
+    /// `open_facility` signed by `authority` (must be liquidity-facility's upgrade authority).
+    pub fn open_facility_ix(
+        &self,
+        id: u64,
+        params: FacilityParams,
+        authority: &Pubkey,
+    ) -> Instruction {
+        let signer = lf_signer().0;
         let rails_facility = lf_rails_facility(id);
         let mut ix = Instruction {
             program_id: liquidity_facility::ID,
@@ -711,7 +756,9 @@ impl Env {
                 signer,
                 feed: feed_pda(&self.asset_mint),
                 usdc_mint: self.mint,
-                authority: auth.pubkey(),
+                authority: *authority,
+                program: liquidity_facility::ID,
+                program_data: programdata(&liquidity_facility::ID),
                 rails_program: payment_rails::ID,
                 system_program: SYSTEM,
             }
@@ -734,8 +781,7 @@ impl Env {
         .to_account_metas(None);
         rails.push(AccountMeta::new_readonly(grant_pda(&signer), false));
         ix.accounts.extend(forwarded_lf(rails));
-        self.send(&[ix], &[&auth]).expect("open facility");
-        publisher
+        ix
     }
 
     pub fn pledge(&mut self, id: u64, borrower: &Party, qty: u64, amount: u64) -> Res {

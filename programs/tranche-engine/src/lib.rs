@@ -790,6 +790,11 @@ pub struct CreatePool<'info> {
     pub signer: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
+    /// This program, to locate its ProgramData. A pool's coupons run through the rails on this program's granted signer PDA; the SPV authority that creates it is the upgrade authority (multisig).
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()))]
+    pub program: Program<'info, crate::program::TrancheEngine>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ TeError::NotUpgradeAuthority)]
+    pub program_data: Account<'info, ProgramData>,
     pub tranche_token_program: Interface<'info, TokenInterface>,
     pub collateral_token_program: Interface<'info, TokenInterface>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -1011,6 +1016,8 @@ pub enum TeError {
     SubordinationBreach,
     #[msg("arithmetic overflow")]
     MathOverflow,
+    #[msg("Only the program's upgrade authority may do this")]
+    NotUpgradeAuthority,
 }
 
 #[cfg(test)]

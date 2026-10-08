@@ -477,6 +477,16 @@
           "signer": true
         },
         {
+          "name": "program",
+          "docs": [
+            "This program, to locate its ProgramData. The first caller of init_queue would own the queue and name its attester: only the upgrade authority may create one."
+          ],
+          "address": "2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -1319,6 +1329,11 @@
       "code": 6014,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6015,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority may do this"
     }
   ],
   "types": [

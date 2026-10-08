@@ -100,11 +100,18 @@ CLUSTER=devnet PAYER=… KEYS_DIR=… npx tsx migrate.ts execute-treasury
 After execution the weekly NAV reads the treasury vault instead of the
 sleeve (`services` nav-publisher `--source treasury:<treasury PDA>`).
 
-**The init instructions are first-caller-wins.** `initialize_feed`,
-`initialize_venue` and `init_queue` make whoever calls them first the
-authority. Here they ran right after each deploy, and `engines.ts` fails
-if an account exists under another authority. For mainnet, gate them on
-the program upgrade authority.
+**The init instructions were first-caller-wins; on `main` they are gated.**
+`initialize_feed`, `initialize_venue` and `init_queue` made whoever called
+them first the authority, and `open_facility` / `create_pool` let anyone
+open a facility or pool that drives the rails on the engine's single granted
+signer PDA. On `main` all five take the program's ProgramData and accept only
+its upgrade authority (the Squads vault once the engines move to it), with a
+LiteSVM test each that a stranger gets `NotUpgradeAuthority`. The devnet
+builds of mark-engine, auction-engine and queue-claim (2026-10-07) predate the
+gate; their accounts were created right after each deploy by the upgrade
+authority, so nothing is left to claim. tranche-engine (deployed 2026-10-08)
+gets the gated build before any pool exists or `ROLE_COUPON` is granted, and
+liquidity-facility is deployed only with it.
 
 ## NPCS asset (Token-2022 mint)
 

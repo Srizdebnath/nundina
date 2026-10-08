@@ -970,6 +970,11 @@ pub struct OpenFacility<'info> {
     pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut)]
     pub authority: Signer<'info>,
+    /// This program, to locate its ProgramData. Opening a facility makes the signer its authority and lets it drive the rails through this program's single granted signer PDA, so it is a governance act.
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()))]
+    pub program: Program<'info, crate::program::LiquidityFacility>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ LfError::NotUpgradeAuthority)]
+    pub program_data: Account<'info, ProgramData>,
     /// CHECK: payment-rails (address-checked in `forward`).
     pub rails_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
@@ -1349,6 +1354,8 @@ pub enum LfError {
     NotWorkout,
     #[msg("arithmetic overflow")]
     MathOverflow,
+    #[msg("Only the program's upgrade authority may do this")]
+    NotUpgradeAuthority,
 }
 
 #[cfg(test)]

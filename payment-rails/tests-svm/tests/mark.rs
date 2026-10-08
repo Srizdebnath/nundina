@@ -299,3 +299,21 @@ fn eligible_prints_set_the_protective_mark_and_others_are_stored_flagged() {
     let rec = &events::<PrintRecorded>(&meta.logs)[0];
     assert_eq!((rec.price, rec.volume), (None, Some(3_000_000)));
 }
+
+/// The first caller of `initialize_feed` would own the feed: only the upgrade authority may create one.
+#[test]
+fn only_the_upgrade_authority_creates_a_feed() {
+    let mut env = Env::new(Tp::Spl);
+    env.load_mark_engine();
+    let mint = env.asset_mint;
+    let stranger = env.funded();
+    let ix = env.init_feed_ix(&mint, feed_params(), &stranger.pubkey());
+    assert_eq!(
+        env.send(&[ix], &[&stranger]).unwrap_err(),
+        mark_err(MarkError::NotUpgradeAuthority)
+    );
+    let auth = env.authority.insecure_clone();
+    let ix = env.init_feed_ix(&mint, feed_params(), &auth.pubkey());
+    env.send(&[ix], &[&auth])
+        .expect("the upgrade authority creates it");
+}

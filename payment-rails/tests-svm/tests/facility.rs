@@ -70,6 +70,14 @@ fn fx() -> Fx {
         lender_workout: lender.pubkey(),
     };
     let _ = env.setup_facility(ID, params);
+    // LF-P2: a facility drives the rails on the engine's one granted signer,
+    // so only the upgrade authority opens one.
+    let stranger = env.funded();
+    let ix = env.open_facility_ix(ID + 1, params, &stranger.pubkey());
+    assert_eq!(
+        env.send(&[ix], &[&stranger]).unwrap_err(),
+        lf(LfError::NotUpgradeAuthority)
+    );
     let funder = env.party(100 * UNIT, 0);
     let rails_facility = lf_rails_facility(ID);
     env.fund_facility(&rails_facility, &funder, 100 * UNIT)

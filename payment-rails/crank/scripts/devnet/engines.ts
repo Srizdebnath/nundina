@@ -9,8 +9,10 @@
  *   3. mark-engine `set_print_source` = the auction-engine print PDA;
  *   4. queue-claim `init_queue` for NPCS (attester = the rails authority).
  *
- * The three init instructions are first-caller-wins (whoever creates the
- * account becomes its authority), so run this right after the deploys.
+ * The init instructions take the program's ProgramData and accept only its
+ * upgrade authority, so nobody can claim a feed, the venue or a
+ * queue first. (The devnet builds of 2026-10-07 predate that gate; there
+ * the accounts were created right after each deploy.)
  * Idempotent: an account that exists is checked, not re-created.
  *
  * Not here: payment-rails `grant_engine` for the auction operator PDA. The
@@ -36,6 +38,9 @@ const queue = makeCodec(loadIdl("queue_claim"));
 const SYSTEM = address("11111111111111111111111111111111");
 
 const enc = getAddressEncoder();
+const LOADER_V3 = address("BPFLoaderUpgradeab1e11111111111111111111111");
+/** The init instructions are gated on the program's upgrade authority: they take the program and its ProgramData. */
+const gate = async (program: Address) => ({ program, program_data: await pda(LOADER_V3, program) });
 const pda = async (program: Address, ...seeds: (string | Address)[]) =>
   (
     await getProgramDerivedAddress({
@@ -100,7 +105,7 @@ async function main(): Promise<void> {
     step(
       `1 · mark-engine feed for NPCS created, publisher ${publisher}`,
       await must(ctx, "initialize_feed", [
-        mark.ix("initialize_feed", { feed, asset_mint: NPCS, authority, system_program: SYSTEM }, { params: DEVNET_FEED_PARAMS }),
+        mark.ix("initialize_feed", { feed, asset_mint: NPCS, authority, ...(await gate(mark.programId)), system_program: SYSTEM }, { params: DEVNET_FEED_PARAMS }),
         mark.ix("set_publishers", { feed, authority }, { publishers: [publisher] }),
       ]),
     );
@@ -119,7 +124,7 @@ async function main(): Promise<void> {
       await must(ctx, "initialize_venue", [
         auction.ix(
           "initialize_venue",
-          { venue, operator: await pda(auction.programId, "rails_operator"), authority, system_program: SYSTEM },
+          { venue, operator: await pda(auction.programId, "rails_operator"), authority, ...(await gate(auction.programId)), system_program: SYSTEM },
           { forced_sale_opener: SYSTEM },
         ),
       ]),
@@ -143,7 +148,7 @@ async function main(): Promise<void> {
     step(
       "4 · queue-claim queue for NPCS created",
       await must(ctx, "init_queue", [
-        queue.ix("init_queue", { queue: q, asset_mint: NPCS, usdc_mint: usdc, authority, system_program: SYSTEM }, { attester: authority.address }),
+        queue.ix("init_queue", { queue: q, asset_mint: NPCS, usdc_mint: usdc, authority, ...(await gate(queue.programId)), system_program: SYSTEM }, { attester: authority.address }),
       ]),
     );
   } else {

@@ -62,6 +62,10 @@ fn pool_of(env: &Env, pool: &Pubkey) -> Pool {
 }
 
 fn create_ix(env: &Env, id: u32, params: PoolParams) -> Instruction {
+    create_ix_by(env, id, params, &env.authority.pubkey())
+}
+
+fn create_ix_by(env: &Env, id: u32, params: PoolParams, authority: &Pubkey) -> Instruction {
     let pool = tpda(&[tranche_engine::POOL_SEED, &id.to_le_bytes()]);
     Instruction {
         program_id: tranche_engine::ID,
@@ -75,7 +79,9 @@ fn create_ix(env: &Env, id: u32, params: PoolParams) -> Instruction {
             cash: tpda(&[tranche_engine::CASH_SEED, pool.as_ref()]),
             usdc_mint: env.mint,
             signer: tranche_engine::signer_pda().0,
-            authority: env.authority.pubkey(),
+            authority: *authority,
+            program: tranche_engine::ID,
+            program_data: programdata(&tranche_engine::ID),
             tranche_token_program: Tp::T22.id(),
             collateral_token_program: env.asset_tp.id(),
             token_program: env.tp.id(),
@@ -138,6 +144,14 @@ fn fx() -> Fx {
     let ix = create_ix(&env, 1, params);
     assert_eq!(env.send(&[ix], &[&a]).unwrap_err(), te(TeError::MissingDoc));
     params.legal_doc_hash = DOC;
+    // TE-P1: the SPV authority is the upgrade authority (multisig); anyone
+    // else creating a pool would drive the rails on the engine's grant.
+    let stranger = env.funded();
+    let ix = create_ix_by(&env, 1, params, &stranger.pubkey());
+    assert_eq!(
+        env.send(&[ix], &[&stranger]).unwrap_err(),
+        te(TeError::NotUpgradeAuthority)
+    );
     let ix = create_ix(&env, 1, params);
     env.send(&[ix], &[&a]).expect("create pool");
     let pool = tpda(&[tranche_engine::POOL_SEED, &1u32.to_le_bytes()]);

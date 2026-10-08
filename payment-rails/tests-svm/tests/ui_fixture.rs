@@ -233,6 +233,8 @@ fn export_ui_fixture() {
             usdc_mint: env.mint,
             signer: tranche_engine::signer_pda().0,
             authority: auth.pubkey(),
+            program: tranche_engine::ID,
+            program_data: programdata(&tranche_engine::ID),
             tranche_token_program: Tp::T22.id(),
             collateral_token_program: env.asset_tp.id(),
             token_program: env.tp.id(),

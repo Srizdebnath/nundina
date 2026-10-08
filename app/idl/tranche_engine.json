@@ -205,6 +205,16 @@
           "signer": true
         },
         {
+          "name": "program",
+          "docs": [
+            "This program, to locate its ProgramData. A pool's coupons run through the rails on this program's granted signer PDA; the SPV authority that creates it is the upgrade authority (multisig)."
+          ],
+          "address": "CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "tranche_token_program"
         },
         {
@@ -937,6 +947,11 @@
       "code": 6013,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6014,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority may do this"
     }
   ],
   "types": [
