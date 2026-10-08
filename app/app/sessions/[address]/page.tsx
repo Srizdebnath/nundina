@@ -8,7 +8,8 @@ import { SessionActions } from "@/components/SessionActions";
 import { RofrActions } from "@/components/RofrActions";
 import { hex, type Struct } from "@/lib/borsh";
 import { chainNow } from "@/lib/rpc";
-import { clockPhase, curves, fmt6, loadSession, navToPrice, PHASES } from "@/lib/session";
+import { clockPhase, curves, fmt6, loadSession, navToPrice, PHASES, type SessionView } from "@/lib/session";
+import { disclose, enumName, type PrintPolicy } from "@/lib/prints";
 
 export const dynamic = "force-dynamic";
 
@@ -204,10 +205,7 @@ export default async function SessionPage({ params }: { params: Promise<{ addres
 
       <h2>Print</h2>
       {s.print ? (
-        <p className="small">
-          {fmt6(s.print.price as bigint, 4)} × {fmt6(s.print.volume as bigint, 2)} · {s.print.n_investor_ids as number} investors ·{" "}
-          {String(s.print.eligibility)} · recorded {utc(Number(s.print.recorded_at as bigint))}
-        </p>
+        <PrintLine s={s} />
       ) : (
         <p className="muted small">Not printed yet: `finish` records the print in mark-engine.</p>
       )}
@@ -232,5 +230,20 @@ function RailsSummary({ r }: { r: Struct }) {
       <Stat k="gross settled" v={fmt6(r.gross_settled as bigint)} />
       <Stat k="shortfalls (cash / asset)" v={`${fmt6(r.total_cash_shortfall as bigint)} / ${fmt6(r.total_asset_shortfall as bigint)}`} />
     </div>
+  );
+}
+
+/** The print as its market's class discloses it (ME-P6); the full record is in the data room. */
+function PrintLine({ s }: { s: SessionView }) {
+  const pr = s.print!;
+  const params = (s.feedState?.params ?? {}) as Struct;
+  const policy = (s.feedState ? enumName(params.print_policy) : "DataRoom") as PrintPolicy;
+  const d = disclose(policy, pr.price as bigint, pr.volume as bigint, (params.band_bps as bigint | undefined) ?? 0n);
+  return (
+    <p className="small">
+      {d.price !== null ? fmt6(d.price, 4) : "price withheld"} × {d.volume !== null ? fmt6(d.volume, 2) : "volume withheld"} ·{" "}
+      {pr.n_investor_ids as number} investors · {enumName(pr.eligibility)} · recorded {utc(Number(pr.recorded_at as bigint))} · class{" "}
+      {policy} · <Link href="/data-room">full record in the data room</Link>
+    </p>
   );
 }
