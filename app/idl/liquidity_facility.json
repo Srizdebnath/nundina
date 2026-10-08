@@ -1,0 +1,2479 @@
+{
+  "address": "PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY",
+  "metadata": {
+    "name": "liquidity_facility",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "NAV-collateralized advances underwritten at MARK_PROTECTIVE, maintenance health checks, no liquidation on a stale mark, and the liquidation ladder issuer ROFR -> backstop -> forced-sale auction -> workout (SRS 08 §4.5, LF-P1..P6). Audit-scope-critical."
+  },
+  "instructions": [
+    {
+      "name": "add_collateral",
+      "docs": [
+        "Add collateral (cures a breach at the next `check_health`)."
+      ],
+      "discriminator": [
+        127,
+        82,
+        121,
+        42,
+        161,
+        176,
+        249,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "borrower",
+          "signer": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "borrower_asset",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "asset_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "check_health",
+      "docs": [
+        "LF-P3: debt over value at `MARK_PROTECTIVE` against the maintenance",
+        "LTV. Breach starts the grace clock; a healthy reading cures it.",
+        "Permissionless."
+      ],
+      "discriminator": [
+        71,
+        59,
+        207,
+        58,
+        136,
+        156,
+        153,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "rails_facility"
+        },
+        {
+          "name": "advance"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "ladder_buy",
+      "docs": [
+        "LF-P5 steps 1–2: the issuer (at `MARK_PROTECTIVE`) or the backstop",
+        "(at its contracted haircut) buys the whole collateral. The price",
+        "repays the rails advance first; the surplus goes to the borrower; a",
+        "shortfall is booked. Remaining accounts: rails `Repay` list."
+      ],
+      "discriminator": [
+        130,
+        55,
+        79,
+        41,
+        27,
+        60,
+        249,
+        102
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "signer": true
+        },
+        {
+          "name": "buyer_usdc",
+          "writable": true
+        },
+        {
+          "name": "buyer_asset",
+          "writable": true
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "proceeds",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "borrower_usdc",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "rails_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "list_forced_sale",
+      "docs": [
+        "LF-P5 step 3b: list the whole collateral as the session's ask at the",
+        "lowest limit (a forced sale has no reserve). The caller funds the",
+        "ask bond. Remaining accounts: rails `OpenAssetVault` (8), then the",
+        "auction-engine `Commit` list (3) and its rails `DepositAsk` list (13)."
+      ],
+      "discriminator": [
+        131,
+        123,
+        209,
+        19,
+        140,
+        245,
+        166,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "caller_usdc",
+          "writable": true
+        },
+        {
+          "name": "proceeds",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "auction_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_facility",
+      "docs": [
+        "LF-P2: open a facility and its rails fund (curator = signer PDA).",
+        "Remaining accounts: rails `OpenFacility` list + the signer's",
+        "`EngineGrant`."
+      ],
+      "discriminator": [
+        3,
+        64,
+        248,
+        119,
+        95,
+        41,
+        149,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "facility_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "facility_id",
+          "type": "u64"
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "FacilityParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "open_forced_sale",
+      "docs": [
+        "LF-P5 step 3a: open the forced-sale auction session (the signer PDA",
+        "is the venue's forced-sale opener). Remaining accounts: the",
+        "auction-engine `OpenSession` list followed by its rails list."
+      ],
+      "discriminator": [
+        159,
+        80,
+        233,
+        192,
+        104,
+        121,
+        81,
+        27
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "auction_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_id",
+          "type": "u64"
+        },
+        {
+          "name": "schedule",
+          "type": {
+            "defined": {
+              "name": "ForcedSchedule"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pass_step",
+      "docs": [
+        "LF-P5: pass the current step — its buyer declines, or anyone once",
+        "its window has closed. ROFR → backstop → forced sale."
+      ],
+      "discriminator": [
+        26,
+        167,
+        5,
+        118,
+        232,
+        67,
+        165,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "caller",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "pledge_and_advance",
+      "docs": [
+        "LF-P1: pledge `qty` of the asset and draw `amount` USDC. Remaining",
+        "accounts: rails `AdvanceFunds` list."
+      ],
+      "discriminator": [
+        252,
+        216,
+        220,
+        117,
+        52,
+        87,
+        98,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  102,
+                  97,
+                  99,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.facility_id",
+                "account": "FacilityConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "borrower"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position"
+              }
+            ]
+          }
+        },
+        {
+          "name": "proceeds",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  101,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position"
+              }
+            ]
+          }
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "borrower",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "borrower_asset",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "rails_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "docs": [
+        "The advance is fully repaid (rails closed it): collateral goes back",
+        "to the borrower and the position closes. Permissionless."
+      ],
+      "discriminator": [
+        253,
+        249,
+        15,
+        206,
+        28,
+        127,
+        193,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "advance"
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "borrower_asset",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "asset_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "reveal_forced_sale",
+      "docs": [
+        "LF-P5 step 3c: reveal the forced-sale ask (permissionless, inside",
+        "the reveal window). Remaining accounts: the auction-engine `Reveal`",
+        "list followed by its rails list."
+      ],
+      "discriminator": [
+        79,
+        176,
+        143,
+        225,
+        207,
+        88,
+        127,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position"
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auction_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "settle_forced_sale",
+      "docs": [
+        "LF-P5 steps 3d + 4: once the forced-sale session has printed (or",
+        "failed) and the rails have refunded the ask escrow, apply the",
+        "proceeds (advance first, surplus to the borrower, shortfall booked)",
+        "and assign any unsold collateral to the lender's workout account.",
+        "Remaining accounts: rails `Repay` list."
+      ],
+      "discriminator": [
+        215,
+        173,
+        177,
+        22,
+        86,
+        129,
+        218,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "auction_session"
+        },
+        {
+          "name": "ask_escrow"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "proceeds",
+          "writable": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "borrower_usdc",
+          "writable": true
+        },
+        {
+          "name": "workout_asset",
+          "writable": true
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "rails_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "start_liquidation",
+      "docs": [
+        "LF-P4/P5: past the grace window and still breached at a Fresh or",
+        "Warned mark, the ladder starts at the issuer's ROFR. Permissionless."
+      ],
+      "discriminator": [
+        244,
+        93,
+        90,
+        214,
+        192,
+        166,
+        191,
+        21
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "feed"
+        },
+        {
+          "name": "rails_facility"
+        },
+        {
+          "name": "advance"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "FacilityConfig",
+      "discriminator": [
+        141,
+        211,
+        18,
+        72,
+        18,
+        184,
+        90,
+        18
+      ]
+    },
+    {
+      "name": "Position",
+      "discriminator": [
+        170,
+        188,
+        143,
+        228,
+        122,
+        64,
+        247,
+        208
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CollateralAdded",
+      "discriminator": [
+        172,
+        68,
+        58,
+        249,
+        157,
+        64,
+        74,
+        141
+      ]
+    },
+    {
+      "name": "FacilityOpened",
+      "discriminator": [
+        202,
+        162,
+        204,
+        65,
+        87,
+        227,
+        180,
+        47
+      ]
+    },
+    {
+      "name": "ForcedSaleOpened",
+      "discriminator": [
+        253,
+        79,
+        2,
+        14,
+        132,
+        62,
+        70,
+        44
+      ]
+    },
+    {
+      "name": "ForcedSaleSettled",
+      "discriminator": [
+        188,
+        197,
+        215,
+        30,
+        187,
+        68,
+        10,
+        9
+      ]
+    },
+    {
+      "name": "HealthChecked",
+      "discriminator": [
+        158,
+        109,
+        186,
+        27,
+        1,
+        81,
+        244,
+        40
+      ]
+    },
+    {
+      "name": "LadderSale",
+      "discriminator": [
+        232,
+        170,
+        152,
+        114,
+        111,
+        198,
+        37,
+        235
+      ]
+    },
+    {
+      "name": "LadderStep",
+      "discriminator": [
+        108,
+        134,
+        155,
+        111,
+        131,
+        111,
+        170,
+        226
+      ]
+    },
+    {
+      "name": "Pledged",
+      "discriminator": [
+        98,
+        154,
+        68,
+        227,
+        24,
+        48,
+        26,
+        16
+      ]
+    },
+    {
+      "name": "Released",
+      "discriminator": [
+        232,
+        229,
+        255,
+        136,
+        101,
+        189,
+        15,
+        220
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "AdvanceRateAboveCeiling",
+      "msg": "advance rate above the H1 hard ceiling"
+    },
+    {
+      "code": 6001,
+      "name": "BadParams",
+      "msg": "facility parameters out of bounds"
+    },
+    {
+      "code": 6002,
+      "name": "ZeroAmount",
+      "msg": "amount must be positive"
+    },
+    {
+      "code": 6003,
+      "name": "RailsAccounts",
+      "msg": "rails / auction accounts do not match"
+    },
+    {
+      "code": 6004,
+      "name": "FeedMismatch",
+      "msg": "feed or mint does not match the facility"
+    },
+    {
+      "code": 6005,
+      "name": "MarkNotFresh",
+      "msg": "new advances need a Fresh mark"
+    },
+    {
+      "code": 6006,
+      "name": "AdvanceAboveRate",
+      "msg": "advance above collateral value x advance rate"
+    },
+    {
+      "code": 6007,
+      "name": "StaleMark",
+      "msg": "no liquidation on a Stale or Suspended mark (H4)"
+    },
+    {
+      "code": 6008,
+      "name": "WrongState",
+      "msg": "position is not in the state this step needs"
+    },
+    {
+      "code": 6009,
+      "name": "GraceActive",
+      "msg": "grace window still running"
+    },
+    {
+      "code": 6010,
+      "name": "NotBreached",
+      "msg": "position is not breached at the current mark"
+    },
+    {
+      "code": 6011,
+      "name": "WindowClosed",
+      "msg": "ladder step window has closed"
+    },
+    {
+      "code": 6012,
+      "name": "NotLadderBuyer",
+      "msg": "signer is not this ladder step's buyer"
+    },
+    {
+      "code": 6013,
+      "name": "SaleNotDone",
+      "msg": "forced sale not finished or ask escrow not refunded"
+    },
+    {
+      "code": 6014,
+      "name": "StillOwed",
+      "msg": "advance still owed"
+    },
+    {
+      "code": 6015,
+      "name": "NotBorrower",
+      "msg": "signer / account is not the borrower's"
+    },
+    {
+      "code": 6016,
+      "name": "NotWorkout",
+      "msg": "workout account not owned by the lender's workout key"
+    },
+    {
+      "code": 6017,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Advance",
+      "docs": [
+        "One borrower's advance from one facility (LF-P1/P6)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "facility",
+            "docs": [
+              "Facility (`has_one`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "borrower",
+            "docs": [
+              "Borrower (the pledging claim holder)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "collateral_ref_hash",
+            "docs": [
+              "Hash of the pledged collateral reference (claim / lot id)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "collateral_value",
+            "docs": [
+              "Collateral mark the advance was sized against (micro-USDC), as",
+              "supplied by the curator (#94). There is no mark engine yet, so the",
+              "rails cannot verify it; they bound the advance by it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "advance_rate_bps",
+            "docs": [
+              "Advance rate the curator applied, in bps; at most the H1 ceiling",
+              "`credit_math::MAX_ADVANCE_RATE_BPS` (#94). Original principal ≤",
+              "`collateral_value × advance_rate_bps / 10⁴`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "principal",
+            "docs": [
+              "Principal still owed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "interest",
+            "docs": [
+              "Interest accrued and not yet paid."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_accrual",
+            "docs": [
+              "Last accrual time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CollateralAdded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Facility",
+      "docs": [
+        "A liquidity-facility fund (LF-P1/P2): USDC in a program-owned vault,",
+        "lent out as advances to registered destinations only."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "curator",
+            "docs": [
+              "Curator key (the liquidity-facility engine's signer; underwriting —",
+              "advance rate vs `MARK_PROTECTIVE` — happens there, not here)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "facility_id",
+            "docs": [
+              "Curator-chosen id; part of the PDA seed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "usdc_mint",
+            "docs": [
+              "Settlement mint snapshot."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "Vault token account (`[\"facility_vault\", facility]`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rate_bps",
+            "docs": [
+              "Simple APR in bps (pilot: 1_200 = 12%), ≤ `MAX_RATE_BPS`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "principal_outstanding",
+            "docs": [
+              "Principal currently lent out across live advances."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_funded",
+            "docs": [
+              "Lifetime cash in from funders."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "interest_collected",
+            "docs": [
+              "Lifetime interest collected."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FacilityConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "facility_id",
+            "type": "u64"
+          },
+          {
+            "name": "rails_facility",
+            "docs": [
+              "payment-rails `Facility` (curator = this program's signer PDA)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "feed",
+            "docs": [
+              "mark-engine feed of the collateral."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FacilityParams"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "signer_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FacilityOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "rails_facility",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FacilityParams"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FacilityParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "rate_bps",
+            "docs": [
+              "Interest APR (rails `rate_bps`, ≤ rails `MAX_RATE_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "advance_rate_bps",
+            "docs": [
+              "Curator advance rate (≤ H1 `MAX_ADVANCE_RATE_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "maintenance_ltv_bps",
+            "docs": [
+              "Breach when debt / value exceeds this (> advance rate, ≤ 100%)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "grace_seconds",
+            "docs": [
+              "Top-up window between breach and the ladder (LF-P3)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "issuer",
+            "docs": [
+              "Ladder step 1: the issuer (ROFR at MARK_PROTECTIVE)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "issuer_window",
+            "type": "i64"
+          },
+          {
+            "name": "backstop",
+            "docs": [
+              "Ladder step 2: the pre-registered backstop bidder."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "backstop_haircut_bps",
+            "type": "u64"
+          },
+          {
+            "name": "backstop_window",
+            "type": "i64"
+          },
+          {
+            "name": "forced_sale_max_cash",
+            "docs": [
+              "Ladder step 3: per-investor cash cap of the forced-sale session."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lender_workout",
+            "docs": [
+              "Ladder step 4: owner of the lender's workout asset account."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Feed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "docs": [
+              "auction-engine's print PDA (the only `record_print` signer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "n_publishers",
+            "type": "u8"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          },
+          {
+            "name": "nav_pico",
+            "docs": [
+              "Latest official NAV at [`NAV_SCALE`] (0 = never published)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "docs": [
+              "When the NAV was written on-chain; ages are measured from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "publications",
+            "type": "u64"
+          },
+          {
+            "name": "last_drill",
+            "docs": [
+              "The latest NAV came from `publish_drill_nav`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "suspended",
+            "type": "bool"
+          },
+          {
+            "name": "suspend_reason",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_state",
+            "docs": [
+              "Last evented state (transitions are evented once)."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "docs": [
+              "Implied NAV from the latest eligible print (0 = none)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "implied_ts",
+            "type": "i64"
+          },
+          {
+            "name": "prints_accepted",
+            "type": "u32"
+          },
+          {
+            "name": "prints_rejected",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "warn_after",
+            "docs": [
+              "Age at which a Fresh mark becomes Warned."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stale_after",
+            "docs": [
+              "Age at which the mark becomes Stale."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "warned_haircut_bps",
+            "docs": [
+              "Haircut applied while Warned (≤ `MAX_WARNED_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stale_haircut_bps",
+            "docs": [
+              "Haircut applied while Stale or Suspended (≤ `MAX_STALE_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "print_policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "band_bps",
+            "docs": [
+              "BANDED width, bps of price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_volume",
+            "docs": [
+              "Minimum print volume (base units) to enter the implied curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_investors",
+            "docs": [
+              "Minimum distinct investor_ids on a print (G2)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "outlier_band_bps",
+            "docs": [
+              "Maximum |print − NAV| / NAV for an eligible print."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drills_enabled",
+            "docs": [
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Fill",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "rofr",
+            "docs": [
+              "Issuer ROFR fill (settled at exercise)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ForcedSaleOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "auction_session",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ForcedSaleSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "sold",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "repaid",
+            "type": "u64"
+          },
+          {
+            "name": "to_borrower",
+            "type": "u64"
+          },
+          {
+            "name": "shortfall",
+            "type": "u64"
+          },
+          {
+            "name": "to_workout",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ForcedSchedule",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commit_end",
+            "type": "i64"
+          },
+          {
+            "name": "reveal_end",
+            "type": "i64"
+          },
+          {
+            "name": "settle_deadline",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HealthChecked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "debt",
+            "type": "u64"
+          },
+          {
+            "name": "collateral_value",
+            "type": "u64"
+          },
+          {
+            "name": "ltv_bps",
+            "type": "u64"
+          },
+          {
+            "name": "maintenance_ltv_bps",
+            "type": "u64"
+          },
+          {
+            "name": "mark_state",
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "PositionState"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LadderSale",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "step",
+            "type": {
+              "defined": {
+                "name": "PositionState"
+              }
+            }
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "repaid",
+            "type": "u64"
+          },
+          {
+            "name": "to_borrower",
+            "type": "u64"
+          },
+          {
+            "name": "shortfall",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LadderStep",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "docs": [
+              "The borrower of the position."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": {
+              "defined": {
+                "name": "PositionState"
+              }
+            }
+          },
+          {
+            "name": "to",
+            "type": {
+              "defined": {
+                "name": "PositionState"
+              }
+            }
+          },
+          {
+            "name": "deadline",
+            "type": "i64"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkState",
+      "docs": [
+        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fresh"
+          },
+          {
+            "name": "Warned"
+          },
+          {
+            "name": "Stale"
+          },
+          {
+            "name": "Suspended"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Order",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "escrowed",
+            "docs": [
+              "Cash (buy) or asset (sell) escrowed in the rails at commit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "revealed",
+            "type": "bool"
+          },
+          {
+            "name": "limit",
+            "type": "u64"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "alloc",
+            "docs": [
+              "Allocation at the clearing price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "alloc_left",
+            "docs": [
+              "Allocation not yet paired into a fill (AE-P6 cursor)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "AE-P2 phases (06 §2)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Commit"
+          },
+          {
+            "name": "Reveal"
+          },
+          {
+            "name": "Allocating"
+          },
+          {
+            "name": "IssuerRofr"
+          },
+          {
+            "name": "Settling"
+          },
+          {
+            "name": "Printed"
+          },
+          {
+            "name": "Failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pledged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrower",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "collateral_value",
+            "type": "u64"
+          },
+          {
+            "name": "advanced",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Position",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrower",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Collateral held (0 once sold, released or worked out)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "collateral_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proceeds",
+            "docs": [
+              "Liquidation proceeds (owner = signer PDA)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "advanced",
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "PositionState"
+              }
+            }
+          },
+          {
+            "name": "breach_ts",
+            "type": "i64"
+          },
+          {
+            "name": "step_deadline",
+            "docs": [
+              "Current ladder step's deadline."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "auction_session",
+            "type": "pubkey"
+          },
+          {
+            "name": "shortfall",
+            "docs": [
+              "Debt left after the ladder (non-recourse)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Breached"
+          },
+          {
+            "name": "IssuerRofr"
+          },
+          {
+            "name": "Backstop"
+          },
+          {
+            "name": "ForcedSale"
+          },
+          {
+            "name": "Closed"
+          },
+          {
+            "name": "Workout"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintPolicy",
+      "docs": [
+        "ME-P6 print policy classes."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Public"
+          },
+          {
+            "name": "Banded"
+          },
+          {
+            "name": "AggregateOnly"
+          },
+          {
+            "name": "DataRoom"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Released",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Session",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "venue",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_id",
+            "type": "u64"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "feed",
+            "docs": [
+              "mark-engine feed of the asset."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rails_session",
+            "docs": [
+              "payment-rails `CashSession` (operator = this program's PDA)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "SessionParams"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "reserve_price",
+            "type": "u64"
+          },
+          {
+            "name": "reference_mark",
+            "type": "u64"
+          },
+          {
+            "name": "clear_price",
+            "type": "u64"
+          },
+          {
+            "name": "cleared_volume",
+            "type": "u64"
+          },
+          {
+            "name": "rofr_qty",
+            "type": "u64"
+          },
+          {
+            "name": "fills_settled",
+            "type": "u32"
+          },
+          {
+            "name": "orders",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Order"
+                }
+              }
+            }
+          },
+          {
+            "name": "fills",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Fill"
+                }
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionParams",
+      "docs": [
+        "AE-P1: everything snapshotted at open; immutable afterwards."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commit_end",
+            "type": "i64"
+          },
+          {
+            "name": "reveal_end",
+            "type": "i64"
+          },
+          {
+            "name": "rofr_window",
+            "docs": [
+              "ROFR window length after `reveal_end` (0 with no ROFR authority)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "settle_deadline",
+            "docs": [
+              "Hard deadline: settlement closes, every escrow refundable."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Forfeitable bond per order (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_cash",
+            "docs": [
+              "Per-investor cash cap (micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_reveals",
+            "docs": [
+              "Fewer revealed orders than this ⇒ Failed (G13)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_discount_bps",
+            "docs": [
+              "Reserve floor = NAV_effective × (1 − max_discount_bps)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "forced_sale",
+            "docs": [
+              "AE-P11: opened by the facility; no reserve; flagged print."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "rofr_authority",
+            "docs": [
+              "Issuer ROFR authority; `Pubkey::default()` disables ROFR."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "disclosure_hash",
+            "docs": [
+              "Hash of the session disclosure, carried on every transfer record."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Side",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Buy"
+          },
+          {
+            "name": "Sell"
+          }
+        ]
+      }
+    }
+  ]
+}

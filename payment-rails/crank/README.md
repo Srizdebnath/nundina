@@ -161,5 +161,11 @@ It keeps no state: a restarted or competing crank re-reads the session.
 Refunds after `finish` / `expire` are the rails' own (`refunds`). Seasoning
 merges are `seasoning --mint` (above); bonded keepers cover the SLA.
 `tests/phases.spec.ts` pins the planner to the program's guards and the
-decoder to the program's IDL. **Not yet run against a live validator**: the
-engines are not deployed (see SRS §6).
+decoder to the program's IDL. **Run on a validator** with the real programs
+by the UI's local demo (`app/scripts/localnet-e2e.mts`, #144): clear,
+allocate, two settles and finish to `Printed`. That run found the `settle`
+step is 1,684 bytes as a plain transaction (rails `settle_fill` + gate
+`settle_check` ≈ 30 accounts; LiteSVM has no packet limit), so settle steps
+go through an address lookup table the crank creates and extends on demand
+(`src/alt.ts`, `tests/alt.spec.ts`). The table costs rent, paid by the crank
+wallet; it is not closed automatically.

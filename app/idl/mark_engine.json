@@ -1,0 +1,1436 @@
+{
+  "address": "79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH",
+  "metadata": {
+    "name": "mark_engine",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "NAV feeds, Fresh/Warned/Stale/Suspended mark states, NAV_effective haircuts, auction print ingestion and MARK_PROTECTIVE (SRS 08 §4.3, ME-P1..P7)."
+  },
+  "instructions": [
+    {
+      "name": "initialize_feed",
+      "docs": [
+        "Create the feed for `asset_mint`. The signer becomes the feed",
+        "authority (the protocol Squads vault on devnet/mainnet)."
+      ],
+      "discriminator": [
+        167,
+        251,
+        140,
+        58,
+        66,
+        138,
+        187,
+        95
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "FeedParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "publish_drill_nav",
+      "docs": [
+        "AC-9 drill (devnet only, `drills_enabled` at init): the authority",
+        "sets a mark directly. Evented with `admin_drill = true` so no print,",
+        "export or demo can present it as a real NAV."
+      ],
+      "discriminator": [
+        209,
+        243,
+        170,
+        168,
+        147,
+        63,
+        151,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "publication",
+          "type": {
+            "defined": {
+              "name": "NavPublication"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "publish_nav",
+      "docs": [
+        "ME-P1: publish a NAV computed off-chain from treasury holdings",
+        "(`credit_math::weekly_publish`). Only a publisher-set key signs."
+      ],
+      "discriminator": [
+        45,
+        146,
+        87,
+        144,
+        84,
+        228,
+        177,
+        59
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "publisher",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "publication",
+          "type": {
+            "defined": {
+              "name": "NavPublication"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_print",
+      "docs": [
+        "ME-P4/P6: an auction session's clearing print. Only the feed's print",
+        "source (auction-engine's print PDA, which signs via CPI) may report.",
+        "One record per session; ineligible prints are stored, flagged, and",
+        "never enter the implied curve."
+      ],
+      "discriminator": [
+        47,
+        143,
+        239,
+        62,
+        190,
+        29,
+        46,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "docs": [
+            "One record per session: a replayed print fails (account exists)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed"
+              },
+              {
+                "kind": "arg",
+                "path": "print.session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "print_source",
+          "docs": [
+            "auction-engine's print PDA (signs via CPI)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "print",
+          "type": {
+            "defined": {
+              "name": "PrintInput"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "refresh",
+      "docs": [
+        "ME-P2: event the state the clock has moved the feed into",
+        "(permissionless; idempotent)."
+      ],
+      "discriminator": [
+        170,
+        155,
+        22,
+        254,
+        147,
+        181,
+        49,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "resume",
+      "docs": [
+        "Lift a suspension (authority). The feed returns to its age state."
+      ],
+      "discriminator": [
+        1,
+        166,
+        51,
+        170,
+        127,
+        32,
+        141,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_params",
+      "docs": [
+        "Change the feed's parameters (authority only; bounded, evented)."
+      ],
+      "discriminator": [
+        27,
+        234,
+        178,
+        52,
+        147,
+        2,
+        187,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "FeedParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_print_source",
+      "docs": [
+        "Point the feed at the auction-engine print authority PDA allowed to",
+        "report clearing prints (authority only; ME-P4)."
+      ],
+      "discriminator": [
+        88,
+        172,
+        227,
+        196,
+        113,
+        183,
+        112,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "print_source",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_publishers",
+      "docs": [
+        "Replace the publisher set (authority only; ME-P1)."
+      ],
+      "discriminator": [
+        66,
+        17,
+        107,
+        83,
+        48,
+        94,
+        160,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "publishers",
+          "type": {
+            "vec": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "suspend",
+      "docs": [
+        "ME-P2/P7: Suspended is explicit only (authority)."
+      ],
+      "discriminator": [
+        96,
+        208,
+        75,
+        109,
+        28,
+        113,
+        126,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "reason_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Feed",
+      "discriminator": [
+        69,
+        191,
+        16,
+        227,
+        132,
+        187,
+        84,
+        227
+      ]
+    },
+    {
+      "name": "PrintRecord",
+      "discriminator": [
+        55,
+        23,
+        208,
+        86,
+        249,
+        198,
+        171,
+        7
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "FeedConfigured",
+      "discriminator": [
+        18,
+        23,
+        81,
+        38,
+        11,
+        227,
+        187,
+        164
+      ]
+    },
+    {
+      "name": "MarkStateChanged",
+      "discriminator": [
+        204,
+        96,
+        177,
+        22,
+        112,
+        51,
+        37,
+        184
+      ]
+    },
+    {
+      "name": "NavPublished",
+      "discriminator": [
+        32,
+        6,
+        85,
+        61,
+        90,
+        251,
+        51,
+        56
+      ]
+    },
+    {
+      "name": "PrintRecorded",
+      "discriminator": [
+        216,
+        197,
+        19,
+        15,
+        132,
+        21,
+        33,
+        137
+      ]
+    },
+    {
+      "name": "PrintSourceChanged",
+      "discriminator": [
+        142,
+        16,
+        101,
+        233,
+        132,
+        102,
+        23,
+        91
+      ]
+    },
+    {
+      "name": "PublishersChanged",
+      "discriminator": [
+        153,
+        202,
+        62,
+        36,
+        37,
+        213,
+        85,
+        48
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotAuthority",
+      "msg": "signer is not the feed authority"
+    },
+    {
+      "code": 6001,
+      "name": "NotPublisher",
+      "msg": "signer is not in the feed's publisher set"
+    },
+    {
+      "code": 6002,
+      "name": "NotPrintSource",
+      "msg": "signer is not the feed's print source"
+    },
+    {
+      "code": 6003,
+      "name": "BadPublisherSet",
+      "msg": "publisher set must hold 1..=4 non-default keys"
+    },
+    {
+      "code": 6004,
+      "name": "BadSchedule",
+      "msg": "warn_after/stale_after outside the hard bounds"
+    },
+    {
+      "code": 6005,
+      "name": "HaircutAboveCeiling",
+      "msg": "haircut above its hard on-chain ceiling"
+    },
+    {
+      "code": 6006,
+      "name": "BadOutlierBand",
+      "msg": "outlier band outside (0, 50%]"
+    },
+    {
+      "code": 6007,
+      "name": "BadBand",
+      "msg": "band width outside (0, 100%]"
+    },
+    {
+      "code": 6008,
+      "name": "ZeroNav",
+      "msg": "NAV must be positive"
+    },
+    {
+      "code": 6009,
+      "name": "FutureNav",
+      "msg": "computed_ts is in the future"
+    },
+    {
+      "code": 6010,
+      "name": "NavNotNewer",
+      "msg": "computed_ts is not newer than the current mark"
+    },
+    {
+      "code": 6011,
+      "name": "Suspended",
+      "msg": "the feed is suspended"
+    },
+    {
+      "code": 6012,
+      "name": "DrillsDisabled",
+      "msg": "drill marks are disabled on this feed"
+    },
+    {
+      "code": 6013,
+      "name": "ZeroPrint",
+      "msg": "print price and volume must be positive"
+    },
+    {
+      "code": 6014,
+      "name": "NotAMint",
+      "msg": "account is not an SPL Token / Token-2022 mint"
+    },
+    {
+      "code": 6015,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "BreakerLevel",
+      "docs": [
+        "doc 06 §11 system breaker hierarchy (ME-P7)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Normal"
+          },
+          {
+            "name": "Cautious"
+          },
+          {
+            "name": "Restricted"
+          },
+          {
+            "name": "Standstill"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Feed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "docs": [
+              "auction-engine's print PDA (the only `record_print` signer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "n_publishers",
+            "type": "u8"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          },
+          {
+            "name": "nav_pico",
+            "docs": [
+              "Latest official NAV at [`NAV_SCALE`] (0 = never published)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "docs": [
+              "When the NAV was written on-chain; ages are measured from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "publications",
+            "type": "u64"
+          },
+          {
+            "name": "last_drill",
+            "docs": [
+              "The latest NAV came from `publish_drill_nav`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "suspended",
+            "type": "bool"
+          },
+          {
+            "name": "suspend_reason",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_state",
+            "docs": [
+              "Last evented state (transitions are evented once)."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "docs": [
+              "Implied NAV from the latest eligible print (0 = none)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "implied_ts",
+            "type": "i64"
+          },
+          {
+            "name": "prints_accepted",
+            "type": "u32"
+          },
+          {
+            "name": "prints_rejected",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedConfigured",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "warn_after",
+            "docs": [
+              "Age at which a Fresh mark becomes Warned."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stale_after",
+            "docs": [
+              "Age at which the mark becomes Stale."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "warned_haircut_bps",
+            "docs": [
+              "Haircut applied while Warned (≤ `MAX_WARNED_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stale_haircut_bps",
+            "docs": [
+              "Haircut applied while Stale or Suspended (≤ `MAX_STALE_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "print_policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "band_bps",
+            "docs": [
+              "BANDED width, bps of price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_volume",
+            "docs": [
+              "Minimum print volume (base units) to enter the implied curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_investors",
+            "docs": [
+              "Minimum distinct investor_ids on a print (G2)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "outlier_band_bps",
+            "docs": [
+              "Maximum |print − NAV| / NAV for an eligible print."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drills_enabled",
+            "docs": [
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkState",
+      "docs": [
+        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fresh"
+          },
+          {
+            "name": "Warned"
+          },
+          {
+            "name": "Stale"
+          },
+          {
+            "name": "Suspended"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkStateChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "to",
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "breaker",
+            "type": {
+              "defined": {
+                "name": "BreakerLevel"
+              }
+            }
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NavPublication",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nav_pico",
+            "docs": [
+              "NAV at [`NAV_SCALE`] (`credit_math::nav_published_pico`)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "docs": [
+              "When the publisher computed it (≤ now, strictly newer than the last)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "docs": [
+              "SHA-256 of the raw inputs (treasury snapshot, supply, fee accrual)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "NavPublished",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "nav_pico",
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "admin_drill",
+            "docs": [
+              "AC-9 drill mark (`publish_drill_nav`), never a real NAV."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintEligibility",
+      "docs": [
+        "Why a print did or did not enter the implied curve (ME-P4)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Eligible"
+          },
+          {
+            "name": "ForcedSale"
+          },
+          {
+            "name": "BelowMinVolume"
+          },
+          {
+            "name": "TooFewInvestors"
+          },
+          {
+            "name": "Outlier"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "The auction-engine session that printed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Uniform clearing price, micro-USDC per whole asset unit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "volume",
+            "docs": [
+              "Executed quantity, base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "n_investor_ids",
+            "type": "u16"
+          },
+          {
+            "name": "forced_sale",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintPolicy",
+      "docs": [
+        "ME-P6 print policy classes."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Public"
+          },
+          {
+            "name": "Banded"
+          },
+          {
+            "name": "AggregateOnly"
+          },
+          {
+            "name": "DataRoom"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintRecord",
+      "docs": [
+        "One clearing print per auction session (ME-P4: rejected prints stored)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "volume",
+            "type": "u64"
+          },
+          {
+            "name": "n_investor_ids",
+            "type": "u16"
+          },
+          {
+            "name": "forced_sale",
+            "type": "bool"
+          },
+          {
+            "name": "eligibility",
+            "type": {
+              "defined": {
+                "name": "PrintEligibility"
+              }
+            }
+          },
+          {
+            "name": "recorded_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Omitted for AGGREGATE_ONLY / DATA_ROOM; band floor for BANDED."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "volume",
+            "docs": [
+              "Omitted for DATA_ROOM."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "n_investor_ids",
+            "type": "u16"
+          },
+          {
+            "name": "forced_sale",
+            "type": "bool"
+          },
+          {
+            "name": "eligibility",
+            "type": {
+              "defined": {
+                "name": "PrintEligibility"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintSourceChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PublishersChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "vec": "pubkey"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

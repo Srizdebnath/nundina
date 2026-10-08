@@ -108,7 +108,7 @@ The SRS (`08`) is a ~24-week plan that includes a 10-week audit. For the hackath
 | **P1 — should** | `mark-engine` (minimal): publish NAV, Fresh→Stale states, and the auction print feeding the discount curve | AC-2 (simplified) | ⚠️ program built and tested (#137); nothing publishes on devnet yet (nav-publisher, #141) |
 | **P1 — should** | `liquidity-facility`: pledge a claim → USDC advance, plus a demo of "no liquidation on a stale mark" | AC-8 pledge path, part of AC-9 | ⚠️ AC-9 code met in LiteSVM (#139): stale/suspended marks refuse every liquidation step; each ladder rung runs. The claim pledge path lands with `queue-claim` (#138) |
 | **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides | 🗺 roadmap (the cash waterfall alone is built in `payment-rails`) |
-| **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, and a gate-rejection view | 3-minute demo video | ❌ shell only (one static page) |
+| **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, and a gate-rejection view | 3-minute demo video | ⚠️ **built (#144), reads live chain state.** Gate-rejection view and portfolio run against devnet NPCS today (holder H admitted, a stranger rejected with `GateReject::AttestationInvalid` from the real program). The session page needs the engines on devnet: until then it runs on a local validator with the real programs, where `app/npm run localnet:e2e` commits and reveals through the page's own builders and the crank prints the session (`app/README.md`) |
 
 **P0 is not met** (#129). #4 was closed with P0 badges; the substantive
 P0 story (gate thaw through `credit-gate` + SAS, an auction session, a
