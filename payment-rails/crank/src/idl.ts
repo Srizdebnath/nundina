@@ -96,7 +96,7 @@ function encodeInto(t: IdlType, v: Value, out: number[]): void {
     case "pubkey": out.push(...addrEnc.encode(v as Address)); return;
   }
   if ("option" in t) {
-    if (v === null) { out.push(0); return; }
+    if (v === null || v === undefined) { out.push(0); return; }
     out.push(1);
     encodeInto(t.option, v, out);
     return;
