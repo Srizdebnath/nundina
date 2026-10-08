@@ -10,6 +10,8 @@ import { apiServer } from "../src/api.ts";
 import { openDb, type Db } from "../src/db.ts";
 import { ingest, parseWebhook, webhookHandler, type RawTx } from "../src/indexer.ts";
 import { eventsFromLogs } from "../src/logs.ts";
+import { programId } from "../src/programs.ts";
+import { address, getAddressEncoder } from "@solana/kit";
 
 const TXS = JSON.parse(readFileSync(new URL("./fixtures/localnet-txs.json", import.meta.url), "utf8")) as RawTx[];
 let db: Db;
@@ -127,6 +129,46 @@ test("webhook: Helius raw shape, authorization required", async () => {
   assert.equal(((await r.json()) as { txs: number }).txs, 1);
   srv.close();
   await d.close();
+});
+
+test("webhook: oversized body is 413, a database error is 500 (no unhandled rejection)", async () => {
+  const t = TXS[0]!;
+  const body = JSON.stringify([{ slot: t.slot, blockTime: t.blockTime, meta: { err: null, logMessages: t.logs }, transaction: { signatures: [t.signature] } }]);
+  const d = await openDb("pglite:memory");
+  const small = webhookHandler(d, "s3cret", 64);
+  const broken = webhookHandler({ ...d, query: async () => { throw new Error("db down"); } } as Db, "s3cret");
+  const serve = (h: typeof small) => {
+    const srv = createServer((req, res) => void h(req, res)).listen(0);
+    return { srv, url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}/` };
+  };
+  const a = serve(small);
+  assert.equal((await fetch(a.url, { method: "POST", headers: { authorization: "s3cret" }, body })).status, 413);
+  a.srv.close();
+  const b = serve(broken);
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    // No try/catch → no response at all: the timeout turns that into a failure, not a hang.
+    assert.equal((await fetch(b.url, { method: "POST", headers: { authorization: "s3cret" }, body, signal: AbortSignal.timeout(5_000) })).status, 500);
+  } finally {
+    console.error = logged;
+  }
+  b.srv.close();
+  await d.close();
+});
+
+test("a late SessionFailed never overwrites a terminal Printed", async () => {
+  const s = await one<{ session: string; phase: string }>(`SELECT session, phase FROM sessions WHERE phase = 'Printed'`);
+  const AUCTION = programId("auction-engine");
+  const data = Buffer.concat([
+    Buffer.from([103, 232, 4, 103, 254, 254, 62, 253]), // SessionFailed
+    Buffer.from(getAddressEncoder().encode(address(s.session))),
+    Buffer.from([3]), // FailReason::Deadline
+  ]).toString("base64");
+  const n = await ingest(db, { signature: "late-failed", slot: 10n ** 12n, blockTime: null, err: null, logs: [`Program ${AUCTION} invoke [1]`, `Program data: ${data}`, `Program ${AUCTION} success`] });
+  assert.equal(n, 1);
+  const row = await one<{ phase: string; failed_reason: string | null }>(`SELECT phase, failed_reason FROM sessions WHERE session = $1`, [s.session]);
+  assert.deepEqual(row, { phase: "Printed", failed_reason: null });
 });
 
 test("api serves the projections read-only", async () => {

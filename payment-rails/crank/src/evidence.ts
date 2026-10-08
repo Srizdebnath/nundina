@@ -189,7 +189,7 @@ export async function exportEvidence(
       .send();
     const logs = tx?.meta?.logMessages;
     if (!logs) continue;
-    txs++;
+    const had = records.length;
     for (const ev of eventsFromLogs(logs)) {
       records.push({
         signature: s.signature,
@@ -199,6 +199,8 @@ export async function exportEvidence(
         data: toJson(ev.data) as Record<string, unknown>,
       });
     }
+    // Only transactions that contributed an event: `transactions` cross-checks against events.jsonl.
+    if (records.length > had) txs++;
   }
 
   mkdirSync(outDir, { recursive: true });

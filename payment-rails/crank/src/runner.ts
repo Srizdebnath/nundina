@@ -14,9 +14,11 @@
  *                 paid from the runner wallet's USDC (TE-P4).
  *
  * Stateless like every crank: a restart re-reads the chain. The kill switch
- * (`CRANK_KILL_FILE`, the AC-11 drill) stops all sends while it exists; the
- * protocol's liveness never depends on this runner (every step is
- * permissionless, refunds are never pausable).
+ * (`CRANK_KILL_FILE`, the AC-11 drill) pauses steps 1, 3 and 4 while it
+ * exists; refunds (step 2) keep running, because refunds are never pausable
+ * (AE-P10). The file is checked once at the start of each tick, so a tick
+ * already in progress finishes. The protocol's liveness never depends on
+ * this runner: every step is permissionless.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { address, getBase64Encoder, type Address, type Base64EncodedBytes } from "@solana/kit";
@@ -73,8 +75,8 @@ export async function listAuctionSessions(ctx: Ctx): Promise<{ address: Address;
 }
 
 export async function tick(ctx: Ctx, cfg: RunnerConfig): Promise<Outcome[]> {
-  if (killed()) return [{ target: "runner", result: "skipped", detail: "kill switch engaged" }];
-  const out: Outcome[] = [];
+  const kill = killed();
+  const out: Outcome[] = kill ? [{ target: "runner", result: "skipped", detail: "kill switch engaged: refunds only" }] : [];
   if (cfg.auctions !== false) {
     for (const { address: a, session: s } of await listAuctionSessions(ctx)) {
       if (s.phase === "Printed" || s.phase === "Failed") {
@@ -82,9 +84,10 @@ export async function tick(ctx: Ctx, cfg: RunnerConfig): Promise<Outcome[]> {
         if (cs && cs.open_escrows > 0) out.push(...(await refundAll(ctx, s.rails_session)));
         continue;
       }
-      out.push(...(await runPhases(ctx, a, ctx.payer, { maxSteps: 16 })).filter((o) => o.result !== "already-done"));
+      if (!kill) out.push(...(await runPhases(ctx, a, ctx.payer, { maxSteps: 16 })).filter((o) => o.result !== "already-done"));
     }
   }
+  if (kill) return out;
   for (const m of cfg.seasoningMints ?? []) {
     out.push(...(await seasonAll(ctx, address(m))).filter((o) => o.result !== "already-done" && o.result !== "not-yet"));
   }
