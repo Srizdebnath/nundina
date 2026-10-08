@@ -151,6 +151,8 @@ export interface Manifest {
   slotRange: [string, string] | null;
   file: string;
   sha256: string;
+  /** Session bundles (#141): the state snapshot next to the events, hashed too. */
+  snapshot?: { file: string; sha256: string };
   attestation: Attestation;
 }
 
@@ -239,6 +241,12 @@ export async function verifyEvidence(dir: string, expectedSigner?: string): Prom
   const body = readFileSync(join(dir, manifest.file), "utf8");
   if (createHash("sha256").update(body).digest("hex") !== manifest.sha256) {
     problems.push(`${manifest.file} does not hash to the manifest's sha256 (edited after export)`);
+  }
+  if (manifest.snapshot) {
+    const snap = readFileSync(join(dir, manifest.snapshot.file), "utf8");
+    if (createHash("sha256").update(snap).digest("hex") !== manifest.snapshot.sha256) {
+      problems.push(`${manifest.snapshot.file} does not hash to the manifest's snapshot sha256 (edited after export)`);
+    }
   }
   const lines = body.split("\n").filter((l) => l.length > 0).length;
   if (lines !== manifest.events) problems.push(`${manifest.file} has ${lines} events, manifest says ${manifest.events}`);
