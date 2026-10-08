@@ -19,6 +19,7 @@ to match.
 | auction-engine v0.1.0 (AE-P1..P11: sealed-bid sessions, uniform clear, ROFR; #136) | devnet | `Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7` | 508552044 | `USqwBa1X4NJoc549FvdcrjemsTZ3G6jaXMoqnrGQTEmYnxkAydg2RFgT23YW1Gbaca9UtkDnpqBRjt3Kk6vZSnh` | `8957e87deb0dfe6390ffd481ad6605060f683b70a5f2e8a398e2c2b74ca283cc` | `9WH1…2uDZ` (as above) |
 | queue-claim v0.1.0 (QC-P1..P5: redemption queue claims; #138) | devnet | `2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4` | 508552133 | `5AgmEw858PeSYaYu2CaP3TckFRMPnH8ngBMxX1jo425KNTbmytkWyYbSpnadmyUCUzGxKGrhGGoQUSLP1sLZosBe` | `960d3e745ff5ffc8cdac09d23d10ac2e62538eed59e0b144bc0b20d32ba531a7` | `9WH1…2uDZ` (as above) |
 | npcs-treasury v0.1.0 (I1 mint-on-deposit / redeem; #148) | devnet | `4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y` | 508779613 | `3p93oRn2iThavs6MpzKZ8qGzQHxLgMDEcGM2bvno7ER2oYN3E7wKF6nT2QxeEr8311BdKrwnEsYXAy7Rb27DhFY7` | `b387d3c1d656bd997b8fb2f4acd8f30396b09b3453da85817296d528e6c78027` | `9WH1…2uDZ` (as above; on-chain dump == local build) |
+| tranche-engine v0.1.0 (TE-P1..P7: senior/junior pools, three-book waterfall; #140) | devnet | `CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS` | 508808253 | `4SDXWe8YSwkdVwpyAdpw3hDQGLWe4kjAu4UZEFRpQynsmZK4iwVGdamV8xowpWLnmLCYdqUMGX5EnBdFvRdtRs5Z` | `445d725b032d52c24caff7199f3615adba5ddeb1c6d34f135a0fa0703e235bde` | `9WH1…2uDZ` (as above; on-chain dump == local build). No pool yet: `create_pool` is per pool id and its coupons need a rails `ROLE_COUPON` grant (after upgrade #3) |
 
 **Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
 `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
@@ -56,10 +57,10 @@ Published by `services` `npm run svc -- nav` (#141), weekly from here on.
 the auction operator PDA. The live rails build (Squads upgrade #2,
 executed 2026-10-07) predates `GrantEngine` (#181), so upgrade #3 to
 main is proposed and approved; its 48 h timelock opens 2026-10-09 20:43
-UTC (row 6 of the Squads table below). Not deployed yet:
-liquidity-facility, tranche-engine, npcs-treasury. They go up after #3
-refunds its buffer rent, each deploy immediately followed by its init
-(see the next paragraph).
+UTC (row 6 of the Squads table below). npcs-treasury and tranche-engine
+were deployed on 2026-10-08 (rows above). Not deployed yet:
+liquidity-facility (~3.5 SOL; it goes up once #3 refunds its buffer rent,
+and `open_facility` needs a rails `ROLE_FACILITY` grant anyway).
 
 **First live session: runbook.** `payment-rails/crank/scripts/devnet/auction-session.ts`
 runs one sealed-bid auction-engine session over the live NPCS mint end to end
