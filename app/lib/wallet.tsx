@@ -31,7 +31,12 @@ type SignTxFeature = {
   ) => Promise<readonly { signedTransaction: Uint8Array }[]>;
 };
 
+type SignMsgFeature = {
+  signMessage: (...inputs: { account: WalletAccount; message: Uint8Array }[]) => Promise<readonly { signature: Uint8Array }[]>;
+};
+
 const SIGN = "solana:signTransaction";
+const SIGN_MESSAGE = "solana:signMessage";
 
 function solanaWallets(): Wallet[] {
   return getWallets()
@@ -47,6 +52,8 @@ interface Ctx {
   disconnect: () => Promise<void>;
   /** Sign with the connected wallet, send, wait for `confirmed`. Returns the signature. */
   send: (ixs: Instruction[]) => Promise<string>;
+  /** Sign an off-chain message (the allowlist challenge). */
+  signMessage: (message: Uint8Array) => Promise<Uint8Array>;
 }
 
 const WalletCtx = createContext<Ctx | null>(null);
@@ -111,9 +118,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [wallet, acct],
   );
 
+  const signMessage = useCallback(
+    async (message: Uint8Array) => {
+      if (!wallet || !acct) throw new Error("connect a wallet first");
+      const f = wallet.features[SIGN_MESSAGE] as SignMsgFeature | undefined;
+      if (!f) throw new Error(`${wallet.name} cannot sign messages`);
+      const [out] = await f.signMessage({ account: acct, message });
+      if (!out) throw new Error("wallet returned no signature");
+      return out.signature;
+    },
+    [wallet, acct],
+  );
+
   const value = useMemo<Ctx>(
-    () => ({ wallets, wallet, account: acct ? address(acct.address) : null, connect, disconnect, send }),
-    [wallets, wallet, acct, connect, disconnect, send],
+    () => ({ wallets, wallet, account: acct ? address(acct.address) : null, connect, disconnect, send, signMessage }),
+    [wallets, wallet, acct, connect, disconnect, send, signMessage],
   );
   return <WalletCtx.Provider value={value}>{children}</WalletCtx.Provider>;
 }

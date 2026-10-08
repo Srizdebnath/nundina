@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { address } from "@solana/kit";
+import { address, type Address } from "@solana/kit";
 import { mintSupply, tranchePosition } from "@/lib/tranche";
 import { TOKEN_PROGRAM } from "@/lib/programs";
 
@@ -17,7 +17,7 @@ const p = {
   junior_loss: 50_000_000n,
   params: { senior_coupon_bps: 600, junior_coupon_bps: 1_400 },
 };
-const h = (mint: typeof senior, amount: bigint, frozen = false) => ({
+const h = (mint: Address, amount: bigint, frozen = false) => ({
   account: address("11111111111111111111111111111112"),
   mint,
   amount,
