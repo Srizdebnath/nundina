@@ -15,7 +15,7 @@
  * 4. The answer is a MAC'd, httpOnly cookie naming the wallet, for 12 hours.
  *
  * `NUNDINA_ACCESS=allowlist` gates every page; otherwise (local
- * development) only `/data-room` is gated. In allowlist mode a missing
+ * development) only `/data-room` and `/admin` are gated. In allowlist mode a missing
  * `NUNDINA_ACCESS_SECRET` fails closed.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
