@@ -2,7 +2,7 @@
 //! for their root-workspace `anchor build` artifacts and instruction
 //! wrappers shared by the engine suites.
 
-use super::gate::{gate_pda, investor_of};
+use super::gate::{gate_pda, investor_of, GATE_ID};
 use super::{
     advance_pda, asset_vault_pda, dest_pda, escrow_pda, facility_pda, facility_vault_pda,
     receipt_pda, session_pda, vault_pda, Env, Fill, Party, Res,
@@ -15,7 +15,10 @@ use auction_engine::{
     accounts as aacc, instruction as aix, operator_pda, print_pda, Session as AuctionSession,
     SessionParams as AuctionParams, Side, VENUE_SEED,
 };
-use credit_gate::{HolderLink, InvestorRecord};
+use credit_gate::{
+    accounts as gacc, instruction as gix, pledge_holder, Custodian, HolderLink, InvestorRecord,
+    MarketConfig,
+};
 use liquidity_facility::{
     accounts as lacc, instruction as lix, signer_pda as lf_signer, FacilityParams, ForcedSchedule,
     Position,
@@ -783,6 +786,54 @@ pub fn lf_rails_facility(id: u64) -> Pubkey {
 }
 
 impl Env {
+    /// The facility signer's custodian registration (LF-P5).
+    pub fn custodian_record(&self) -> Pubkey {
+        gate_pda(&[
+            Custodian::SEED,
+            self.asset_mint.as_ref(),
+            lf_signer().0.as_ref(),
+        ])
+    }
+
+    /// The pledge ledger of `position` (LF-P5).
+    pub fn pledge_lots(&self, position: &Pubkey) -> Pubkey {
+        self.lots_pda(&pledge_holder(&self.asset_mint, &lf_signer().0, position))
+    }
+
+    /// The gate accounts of a custody move: `position`'s pledge ledger and
+    /// `other`'s ledger and block entry.
+    pub fn lf_gate(&self, position: &Pubkey, other: &Pubkey) -> lacc::GateCustody {
+        lacc::GateCustody {
+            gate_program: GATE_ID,
+            gate_config: gate_pda(&[MarketConfig::SEED, self.asset_mint.as_ref()]),
+            custodian_record: self.custodian_record(),
+            pledge_lots: self.pledge_lots(position),
+            other_lots: self.lots_pda(other),
+            block_entry: self.block_entry(other),
+        }
+    }
+
+    /// `register_custodian(signer PDA)` by the gate authority (LF-P5).
+    pub fn register_lf_custodian(&mut self) -> Res {
+        let auth = self.authority.insecure_clone();
+        let ix = Instruction {
+            program_id: GATE_ID,
+            accounts: gacc::RegisterCustodian {
+                config: self.gate_config(),
+                record: self.custodian_record(),
+                mint: self.asset_mint,
+                gate_config_authority: auth.pubkey(),
+                system_program: SYSTEM,
+            }
+            .to_account_metas(None),
+            data: gix::RegisterCustodian {
+                custodian: lf_signer().0,
+            }
+            .data(),
+        };
+        self.send(&[ix], &[&auth])
+    }
+
     pub fn position(&self, cfg: &Pubkey, borrower: &Pubkey) -> Position {
         let a = self
             .svm
@@ -812,6 +863,11 @@ impl Env {
         self.send(&[opener], &[&auth]).expect("forced-sale opener");
         let ix = self.open_facility_ix(id, params, &auth.pubkey());
         self.send(&[ix], &[&auth]).expect("open facility");
+        // LF-P5: on a gated mint the signer is the market's custodian (a
+        // queue-claim token has no gate market).
+        if self.exists(&self.gate_config()) {
+            self.register_lf_custodian().expect("custodian");
+        }
         publisher
     }
 
@@ -887,6 +943,15 @@ impl Env {
                 token_program: self.tp.id(),
                 rails_program: payment_rails::ID,
                 system_program: SYSTEM,
+                gate: lacc::GateCustody {
+                    // `block_entry` is the pledge holder's: the ledger it opens.
+                    block_entry: self.block_entry(&pledge_holder(
+                        &self.asset_mint,
+                        &signer,
+                        &position,
+                    )),
+                    ..self.lf_gate(&position, &b)
+                },
             }
             .to_account_metas(None),
             data: lix::PledgeAndAdvance { qty, amount }.data(),
@@ -977,6 +1042,8 @@ impl Env {
                 token_program: self.tp.id(),
                 asset_token_program: self.asset_tp.id(),
                 rails_program: payment_rails::ID,
+                buyer_link: self.link_pda(&buyer.key.pubkey()),
+                gate: self.lf_gate(&position, &buyer.key.pubkey()),
             }
             .to_account_metas(None),
             data: lix::LadderBuy {}.data(),
@@ -1079,6 +1146,9 @@ impl Env {
                 token_program: self.tp.id(),
                 rails_program: payment_rails::ID,
                 auction_program: auction_engine::ID,
+                asset_mint: self.asset_mint,
+                system_program: SYSTEM,
+                gate: self.lf_gate(&position, &signer),
             }
             .to_account_metas(None),
             data: lix::ListForcedSale {}.data(),
@@ -1218,6 +1288,7 @@ impl Env {
         let position = position_pda(&cfg, &b);
         let signer = lf_signer().0;
         let rs = self.rails_session_of(session_id);
+        let workout_owner = self.token_owner(workout_asset);
         let mut ix = Instruction {
             program_id: liquidity_facility::ID,
             accounts: lacc::SettleForcedSale {
@@ -1235,6 +1306,10 @@ impl Env {
                 token_program: self.tp.id(),
                 asset_token_program: self.asset_tp.id(),
                 rails_program: payment_rails::ID,
+                signer_lots: self.lots_pda(&signer),
+                payer: caller.pubkey(),
+                system_program: SYSTEM,
+                gate: self.lf_gate(&position, &workout_owner),
             }
             .to_account_metas(None),
             data: lix::SettleForcedSale {}.data(),
@@ -1258,6 +1333,7 @@ impl Env {
                 borrower_asset: borrower.asset,
                 asset_mint: self.asset_mint,
                 asset_token_program: self.asset_tp.id(),
+                gate: self.lf_gate(&position, &b),
             }
             .to_account_metas(None),
             data: lix::Release {}.data(),

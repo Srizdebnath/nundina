@@ -12,6 +12,9 @@
  *   tsx wire.ts thaw    <token-account> --mint <mint>                   # anyone: Token ACL thaw
  *   tsx wire.ts append-lot <wallet> --authority <kp> --mint <mint>      # CG-P3 primary-mint lot
  *                       --qty <base units>                               #   (gate-config authority)
+ *   tsx wire.ts register-custodian <custodian> --authority <kp>         # LF-P5: a wallet that
+ *                       --mint <mint>                                    #   holds lots for others
+ *                                                                        #   (facility signer PDA)
  *   tsx wire.ts verify  --mint <mint>                                   # keyless
  *
  * The SAS side (credential, schemas, attester) comes from `sas.ts`'s
@@ -144,6 +147,14 @@ export function appendLotIx(authority: PublicKey, mint: PublicKey, wallet: Publi
   ], Buffer.concat([disc("append_lot"), q, Buffer.from([0, 0, 3])]));
 }
 
+/** LF-P5: register `custodian` (liquidity-facility's signer PDA) on the market. */
+export function registerCustodianIx(authority: PublicKey, mint: PublicKey, custodian: PublicKey) {
+  return ix(GATE, [
+    meta(seeds.config(mint)), meta(pda(["custodian", mint.toBuffer(), custodian.toBuffer()]), true),
+    meta(mint), meta(authority, true, true), meta(SystemProgram.programId),
+  ], Buffer.concat([disc("register_custodian"), custodian.toBuffer()]));
+}
+
 /** Token ACL ThawPermissionless (6); the gate's extras in its TLV order. */
 export async function thawIx(c: Connection, payer: PublicKey, mint: PublicKey, tokenAccount: PublicKey) {
   const ta = await c.getAccountInfo(tokenAccount);
@@ -254,6 +265,11 @@ async function main() {
       console.log(await send(c, [appendLotIx(auth.publicKey, mint(), new PublicKey(arg!), qty)], [auth]));
       return;
     }
+    case "register-custodian": {
+      const auth = loadKeypair(o.authority!);
+      console.log(await send(c, [registerCustodianIx(auth.publicKey, mint(), new PublicKey(arg!))], [auth]));
+      return;
+    }
     case "verify": {
       const problems = await verify(c, mint());
       if (problems.length) throw new Error(`verify FAILED:\n  ${problems.join("\n  ")}`);
@@ -261,7 +277,7 @@ async function main() {
       return;
     }
     default:
-      throw new Error("usage: wire.ts <root|market|acl|validate|thaw|append-lot|verify> — see the header");
+      throw new Error("usage: wire.ts <root|market|acl|validate|thaw|append-lot|register-custodian|verify> — see the header");
   }
 }
 
