@@ -10,8 +10,8 @@
 //! Lifecycle (AE-P2), every transition evented:
 //!
 //! ```text
-//! Commit ─(commit_end)→ Reveal ─(reveal_end, clear)→ Allocating ─→ IssuerRofr ─→ Settling ─(finish)→ Printed
-//!    └──────────────── Failed (too few reveals · no cross ≥ reserve · suspended mark · settle deadline) ┘
+//! Commit ─(commit_end)→ Reveal ─(reveal_end, screen_*)→ Clearing ─(clear)→ Allocating ─→ IssuerRofr ─→ Settling ─(finish)→ Printed
+//!    └──────────────── Failed (too few eligible reveals · no cross ≥ reserve · suspended mark · settle deadline) ┘
 //! ```
 //!
 //! - AE-P1 `open_session` snapshots every parameter into the [`Session`]
@@ -23,9 +23,21 @@
 //! - AE-P4 `reveal`: preimage check, budget check against the escrow, then
 //!   rails `mark_revealed`. Unrevealed escrows forfeit their bond in the
 //!   rails (`forfeit_bond` / `refund`).
-//! - AE-P5 `clear`: `credit_math::find_uniform_clear_price` over revealed
-//!   orders, reserve floor `NAV_effective × (1 − max_discount)` and
-//!   reference `MARK_PROTECTIVE` from mark-engine; no cross ⇒ Failed.
+//! - AE-P6 gate check, `screen_bid` / `screen_ask` (permissionless, one
+//!   order per call, after `reveal_end`): every revealed order is checked
+//!   against credit-gate's own state before it can clear — a buyer must be
+//!   admitted (its `HolderLink` and `InvestorRecord`), pass the block-list
+//!   and its SAS attestations for the settlement horizon (the gate's
+//!   `evaluate`, the same function `settle_check` runs), have lot-ledger
+//!   room, and pass the gate's `project_and_check` (CPI, CG-P4 governor);
+//!   a seller must pass the block-list and hold enough seasoned lots. An
+//!   order that fails is excluded with its reason (`OrderScreened`), never
+//!   an error: the clear runs over eligible orders only, so its volume is
+//!   reallocated to the others (AC-7), and no single ineligible order can
+//!   wedge settlement. Its escrow is refunded after `finish`.
+//! - AE-P5 `clear`: `credit_math::find_uniform_clear_price` over eligible
+//!   revealed orders, reserve floor `NAV_effective × (1 − max_discount)`
+//!   and reference `MARK_PROTECTIVE` from mark-engine; no cross ⇒ Failed.
 //! - AE-P6 `allocate`: pro-rata at the margin (`credit_math::allocate_
 //!   pro_rata`), then deterministic buyer×seller pairing into fills, in
 //!   resumable chunks (cursor in the session).
@@ -50,6 +62,10 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::{system_program, InstructionData};
+use credit_gate::{
+    BlockEntry, HolderLink, HolderLots, InvestorRecord, MarketConfig, MarketPolicy,
+    MAX_LOTS as GATE_MAX_LOTS,
+};
 use credit_math::{allocate_pro_rata, find_uniform_clear_price, mul_div, Order as MathOrder};
 use mark_engine::{Feed, MarkState, PrintInput, PrintPolicy};
 
@@ -349,10 +365,171 @@ pub mod auction_engine {
         Ok(())
     }
 
+    /// AE-P6 gate check, buy side: screen revealed bid `order_index`
+    /// against credit-gate (admission, block-list, SAS attestations through
+    /// the settlement horizon, lot-ledger room, `project_and_check`).
+    /// Permissionless once reveals close; the first screen moves the
+    /// session to Clearing. A failing bid is excluded, not an error.
+    pub fn screen_bid(ctx: Context<ScreenBid>, order_index: u8) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let session_key = ctx.accounts.session.key();
+        let (owner, mint) = begin_screen(&mut ctx.accounts.session, order_index, Side::Buy, now)?;
+        let a = &ctx.accounts;
+        let gate = &credit_gate::ID;
+        require_keys_eq!(
+            a.block_entry.key(),
+            gate_pda(&[BlockEntry::SEED, mint.as_ref(), owner.as_ref()]),
+            AuctionError::GateAccounts
+        );
+        require_keys_eq!(
+            a.holder_link.key(),
+            gate_pda(&[HolderLink::SEED, mint.as_ref(), owner.as_ref()]),
+            AuctionError::GateAccounts
+        );
+        require_keys_eq!(
+            a.buyer_lots.key(),
+            gate_pda(&[HolderLots::SEED, mint.as_ref(), owner.as_ref()]),
+            AuctionError::GateAccounts
+        );
+        let sells = a
+            .session
+            .orders
+            .iter()
+            .filter(|o| o.side == Side::Sell && o.revealed)
+            .count();
+        let exclusion = 'screen: {
+            if credit_gate::screen(&a.gate_config, &a.block_entry)?.is_some() {
+                break 'screen Some(Exclusion::Blocklisted);
+            }
+            let Some(link) = load_gate::<HolderLink>(&a.holder_link, gate)? else {
+                break 'screen Some(Exclusion::NotAdmitted);
+            };
+            // The attestations are the ones the admission rests on, so a
+            // crank cannot exclude a buyer by passing others.
+            require_keys_eq!(
+                a.identity_attestation.key(),
+                link.identity_attestation,
+                AuctionError::GateAccounts
+            );
+            require_keys_eq!(
+                a.accreditation_attestation.key(),
+                link.accreditation_attestation,
+                AuctionError::GateAccounts
+            );
+            require_keys_eq!(
+                a.investor.key(),
+                gate_pda(&[InvestorRecord::SEED, mint.as_ref(), &link.investor_id]),
+                AuctionError::GateAccounts
+            );
+            match credit_gate::evaluate(
+                &a.gate_config,
+                &a.gate_policy,
+                &owner,
+                &a.block_entry,
+                &a.identity_attestation,
+                &a.accreditation_attestation,
+                now,
+            )? {
+                Err(_) => break 'screen Some(Exclusion::AttestationRejected),
+                Ok(e) if e.identity.investor_id != link.investor_id => {
+                    break 'screen Some(Exclusion::InvestorIdChanged)
+                }
+                Ok(_) => {}
+            }
+            if load_gate::<InvestorRecord>(&a.investor, gate)?.is_none() {
+                break 'screen Some(Exclusion::NotAdmitted);
+            }
+            let Some(lots) = load_gate::<HolderLots>(&a.buyer_lots, gate)? else {
+                break 'screen Some(Exclusion::NotAdmitted);
+            };
+            // One new lot per fill, at most one fill per seller.
+            let unexpired = lots
+                .live()
+                .iter()
+                .filter(|l| l.restriction_expiry > now)
+                .count();
+            if unexpired + sells > GATE_MAX_LOTS {
+                break 'screen Some(Exclusion::LotLedgerFull);
+            }
+            // CG-P4: the gate's own projection for this investor.
+            anchor_lang::solana_program::program::invoke(
+                &Instruction {
+                    program_id: credit_gate::ID,
+                    accounts: credit_gate::accounts::ProjectAndCheck {
+                        config: a.gate_config.key(),
+                        policy: a.gate_policy.key(),
+                        investor: a.investor.key(),
+                        mint: a.mint.key(),
+                    }
+                    .to_account_metas(None),
+                    data: credit_gate::instruction::ProjectAndCheck {
+                        _investor_id: link.investor_id,
+                    }
+                    .data(),
+                },
+                &[
+                    a.gate_config.to_account_info(),
+                    a.gate_policy.to_account_info(),
+                    a.investor.to_account_info(),
+                    a.mint.to_account_info(),
+                    a.gate_program.to_account_info(),
+                ],
+            )?;
+            None
+        };
+        finish_screen(
+            session_key,
+            &mut ctx.accounts.session,
+            order_index,
+            owner,
+            exclusion,
+        );
+        Ok(())
+    }
+
+    /// AE-P6 gate check, sell side: screen revealed ask `order_index` —
+    /// block-list, and seasoned lots covering the revealed quantity (the
+    /// lots only season further before settlement). Permissionless once
+    /// reveals close. A failing ask is excluded, not an error.
+    pub fn screen_ask(ctx: Context<ScreenAsk>, order_index: u8) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let session_key = ctx.accounts.session.key();
+        let (owner, mint) = begin_screen(&mut ctx.accounts.session, order_index, Side::Sell, now)?;
+        let a = &ctx.accounts;
+        require_keys_eq!(
+            a.block_entry.key(),
+            gate_pda(&[BlockEntry::SEED, mint.as_ref(), owner.as_ref()]),
+            AuctionError::GateAccounts
+        );
+        require_keys_eq!(
+            a.seller_lots.key(),
+            gate_pda(&[HolderLots::SEED, mint.as_ref(), owner.as_ref()]),
+            AuctionError::GateAccounts
+        );
+        let qty = a.session.orders[usize::from(order_index)].qty;
+        let exclusion = if credit_gate::screen(&a.gate_config, &a.block_entry)?.is_some() {
+            Some(Exclusion::Blocklisted)
+        } else {
+            match load_gate::<HolderLots>(&a.seller_lots, &credit_gate::ID)? {
+                Some(lots) if lots.sellable(now)? >= qty => None,
+                _ => Some(Exclusion::NotSeasoned),
+            }
+        };
+        finish_screen(
+            session_key,
+            &mut ctx.accounts.session,
+            order_index,
+            owner,
+            exclusion,
+        );
+        Ok(())
+    }
+
     /// AE-P5 + AE-P6 (margin): compute the uniform clearing price and each
-    /// order's allocation. Permissionless once reveals close. A session
-    /// with too few reveals, no cross at or above the reserve floor, or a
-    /// suspended mark fails (rails `fail_session`; all escrow refundable).
+    /// order's allocation over the eligible orders. Permissionless once
+    /// reveals close and every revealed order is screened. A session with
+    /// too few eligible reveals, no cross at or above the reserve floor, or
+    /// a suspended mark fails (rails `fail_session`; all escrow refundable).
     /// Remaining accounts: rails session, operator.
     pub fn clear<'info>(ctx: Context<'info, Clear<'info>>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
@@ -367,8 +544,16 @@ pub mod auction_engine {
             AuctionError::OutsideWindow
         );
         require!(
-            matches!(session.phase, Phase::Commit | Phase::Reveal),
+            matches!(
+                session.phase,
+                Phase::Commit | Phase::Reveal | Phase::Clearing
+            ),
             AuctionError::WrongPhase
+        );
+        // AE-P6: the gate check has run on every revealed order.
+        require!(
+            session.orders.iter().all(|o| !o.revealed || o.screened),
+            AuctionError::ScreeningPending
         );
         let outcome = compute_clear(session, &ctx.accounts.feed, now)?;
         match outcome {
@@ -797,6 +982,8 @@ fn commit<'info>(
         qty: 0,
         alloc: 0,
         alloc_left: 0,
+        screened: false,
+        eligible: false,
     });
     // The owner signs the outer transaction; the rails deposit runs under
     // that signature (no engine signer needed).
@@ -826,6 +1013,74 @@ fn commit<'info>(
         escrowed,
     });
     Ok(())
+}
+
+/// AE-P6: the common checks of `screen_bid` / `screen_ask`. Returns the
+/// order's owner and the session's asset mint; moves Commit/Reveal to
+/// Clearing on the first screen.
+fn begin_screen(
+    session: &mut Account<Session>,
+    order_index: u8,
+    side: Side,
+    now: i64,
+) -> Result<(Pubkey, Pubkey)> {
+    require!(
+        now >= session.params.reveal_end && now < session.params.settle_deadline,
+        AuctionError::OutsideWindow
+    );
+    require!(
+        matches!(
+            session.phase,
+            Phase::Commit | Phase::Reveal | Phase::Clearing
+        ),
+        AuctionError::WrongPhase
+    );
+    let order = session
+        .orders
+        .get(usize::from(order_index))
+        .ok_or(AuctionError::NoOrder)?;
+    require!(order.side == side, AuctionError::WrongSide);
+    require!(order.revealed, AuctionError::NotRevealed);
+    require!(!order.screened, AuctionError::AlreadyScreened);
+    let owner = order.owner;
+    if session.phase != Phase::Clearing {
+        let key = session.key();
+        set_phase(key, session, Phase::Clearing, now);
+    }
+    Ok((owner, session.asset_mint))
+}
+
+fn finish_screen(
+    session_key: Pubkey,
+    session: &mut Session,
+    order_index: u8,
+    owner: Pubkey,
+    exclusion: Option<Exclusion>,
+) {
+    let order = &mut session.orders[usize::from(order_index)];
+    order.screened = true;
+    order.eligible = exclusion.is_none();
+    emit!(OrderScreened {
+        session: session_key,
+        owner,
+        side: order.side,
+        exclusion,
+    });
+}
+
+/// credit-gate's PDA for `seeds`.
+fn gate_pda(seeds: &[&[u8]]) -> Pubkey {
+    Pubkey::find_program_address(seeds, &credit_gate::ID).0
+}
+
+/// A credit-gate account at an address the caller already pinned: `None`
+/// when it does not exist (not gate-owned or empty), the decoded account
+/// otherwise.
+fn load_gate<T: AccountDeserialize>(ai: &AccountInfo, gate: &Pubkey) -> Result<Option<T>> {
+    if ai.owner != gate || ai.data_is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(T::try_deserialize(&mut &ai.try_borrow_data()?[..])?))
 }
 
 /// Forward `rails` to payment-rails with `data`, the operator PDA signing.
@@ -933,8 +1188,8 @@ fn compute_clear(
     feed: &Feed,
     now: i64,
 ) -> Result<core::result::Result<ClearOk, FailReason>> {
-    let revealed = session.orders.iter().filter(|o| o.revealed).count();
-    if revealed < usize::from(session.params.min_reveals) {
+    let eligible = session.orders.iter().filter(|o| o.is_live()).count();
+    if eligible < usize::from(session.params.min_reveals) {
         return Ok(Err(FailReason::TooFewReveals));
     }
     let (reserve, reference) = if session.params.forced_sale {
@@ -969,7 +1224,7 @@ fn compute_clear(
         .orders
         .iter()
         .enumerate()
-        .filter(|(_, o)| o.revealed)
+        .filter(|(_, o)| o.is_live())
         .map(|(i, o)| MathOrder {
             bidder_id: i as u64,
             limit_price: u128::from(o.limit),
@@ -1027,6 +1282,30 @@ pub enum Phase {
     Settling,
     Printed,
     Failed,
+    /// AE-P6: reveals closed, orders being screened against the gate
+    /// (appended: variant indices are wire-stable).
+    Clearing,
+}
+
+/// Why `screen_bid` / `screen_ask` excluded an order (AE-P6). Wire-stable;
+/// append only.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
+pub enum Exclusion {
+    /// On the market's block-list (CG-P5).
+    Blocklisted,
+    /// Buyer not admitted by the gate (no holder link, investor record or
+    /// lot ledger): `validate` first. A new investor past the holder cap
+    /// cannot be admitted, so its bid lands here (CG-P4, AC-7).
+    NotAdmitted,
+    /// Buyer's SAS attestations fail the gate's `evaluate` now or within
+    /// the settlement horizon.
+    AttestationRejected,
+    /// Buyer's identity attestation names another investor than its link.
+    InvestorIdChanged,
+    /// Buyer's lot ledger has no room for the fills it could receive.
+    LotLedgerFull,
+    /// Seller's seasoned quantity is short of its revealed ask (C2).
+    NotSeasoned,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
@@ -1098,6 +1377,17 @@ pub struct Order {
     pub alloc: u64,
     /// Allocation not yet paired into a fill (AE-P6 cursor).
     pub alloc_left: u64,
+    /// AE-P6: the gate check ran on this order.
+    pub screened: bool,
+    /// AE-P6: it passed; only eligible orders clear.
+    pub eligible: bool,
+}
+
+impl Order {
+    /// Revealed and passed the AE-P6 gate check: takes part in the clear.
+    pub fn is_live(&self) -> bool {
+        self.revealed && self.screened && self.eligible
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
@@ -1246,6 +1536,56 @@ pub struct Clear<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ScreenBid<'info> {
+    #[account(mut, seeds = [SESSION_SEED, session.venue.as_ref(), &session.session_id.to_le_bytes()], bump = session.bump)]
+    pub session: Box<Account<'info, Session>>,
+    #[account(
+        seeds = [MarketConfig::SEED, session.asset_mint.as_ref()],
+        bump = gate_config.bump,
+        seeds::program = credit_gate::ID
+    )]
+    pub gate_config: Box<Account<'info, MarketConfig>>,
+    #[account(
+        seeds = [MarketPolicy::SEED, session.asset_mint.as_ref()],
+        bump = gate_policy.bump,
+        seeds::program = credit_gate::ID
+    )]
+    pub gate_policy: Box<Account<'info, MarketPolicy>>,
+    /// CHECK: the buyer's gate block entry (address checked in the handler).
+    pub block_entry: UncheckedAccount<'info>,
+    /// CHECK: the buyer's gate `HolderLink`; may not exist.
+    pub holder_link: UncheckedAccount<'info>,
+    /// CHECK: the `InvestorRecord` of the link's investor_id; may not exist.
+    pub investor: UncheckedAccount<'info>,
+    /// CHECK: the buyer's gate `HolderLots`; may not exist.
+    pub buyer_lots: UncheckedAccount<'info>,
+    /// CHECK: the identity attestation named by the link; read by the gate's `evaluate`.
+    pub identity_attestation: UncheckedAccount<'info>,
+    /// CHECK: the accreditation attestation named by the link; read by `evaluate`.
+    pub accreditation_attestation: UncheckedAccount<'info>,
+    /// CHECK: the session's asset mint (derives the gate PDAs).
+    #[account(address = session.asset_mint @ AuctionError::AssetMismatch)]
+    pub mint: UncheckedAccount<'info>,
+    pub gate_program: Program<'info, credit_gate::program::CreditGate>,
+}
+
+#[derive(Accounts)]
+pub struct ScreenAsk<'info> {
+    #[account(mut, seeds = [SESSION_SEED, session.venue.as_ref(), &session.session_id.to_le_bytes()], bump = session.bump)]
+    pub session: Box<Account<'info, Session>>,
+    #[account(
+        seeds = [MarketConfig::SEED, session.asset_mint.as_ref()],
+        bump = gate_config.bump,
+        seeds::program = credit_gate::ID
+    )]
+    pub gate_config: Box<Account<'info, MarketConfig>>,
+    /// CHECK: the seller's gate block entry (address checked in the handler).
+    pub block_entry: UncheckedAccount<'info>,
+    /// CHECK: the seller's gate `HolderLots`; may not exist.
+    pub seller_lots: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct Crank<'info> {
     #[account(mut, seeds = [SESSION_SEED, session.venue.as_ref(), &session.session_id.to_le_bytes()], bump = session.bump)]
     pub session: Box<Account<'info, Session>>,
@@ -1351,6 +1691,15 @@ pub struct OrderRevealed {
     pub side: Side,
     pub limit: u64,
     pub qty: u64,
+}
+
+/// AE-P6: one order's gate check. `exclusion` is `None` when it passed.
+#[event]
+pub struct OrderScreened {
+    pub session: Pubkey,
+    pub owner: Pubkey,
+    pub side: Side,
+    pub exclusion: Option<Exclusion>,
 }
 
 #[event]
@@ -1469,6 +1818,16 @@ pub enum AuctionError {
     MathOverflow,
     #[msg("Only the program's upgrade authority may do this")]
     NotUpgradeAuthority,
+    #[msg("revealed orders still need the gate check (screen_bid / screen_ask)")]
+    ScreeningPending,
+    #[msg("credit-gate accounts do not match the order")]
+    GateAccounts,
+    #[msg("order is on the other side")]
+    WrongSide,
+    #[msg("order was not revealed")]
+    NotRevealed,
+    #[msg("order already screened")]
+    AlreadyScreened,
 }
 
 #[cfg(test)]

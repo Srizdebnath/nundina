@@ -128,6 +128,7 @@ export default async function SessionPage({ params }: { params: Promise<{ addres
             <th className="r">escrowed</th>
             <th className="r">limit</th>
             <th className="r">qty</th>
+            <th>gate check</th>
             <th className="r">allocated</th>
           </tr>
         </thead>
@@ -142,6 +143,9 @@ export default async function SessionPage({ params }: { params: Promise<{ addres
               <td className="r">{o.side === "Buy" ? `${fmt6(o.escrowed)} USDC` : fmt6(o.escrowed, 2)}</td>
               <td className="r">{o.revealed ? fmt6(o.limit, 4) : <span className="muted">sealed</span>}</td>
               <td className="r">{o.revealed ? fmt6((o.qty * 1_000_000n) / unit, 2) : <span className="muted">sealed</span>}</td>
+              <td className="small">
+                {!o.revealed ? <span className="muted">—</span> : !o.screened ? <span className="muted">pending</span> : o.eligible ? "eligible" : <span className="bad">excluded</span>}
+              </td>
               <td className="r">{o.alloc > 0n ? fmt6((o.alloc * 1_000_000n) / unit, 2) : "—"}</td>
             </tr>
           ))}

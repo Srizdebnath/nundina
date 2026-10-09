@@ -5,7 +5,7 @@ import { clockPhase, curves, fmt6, gross, navToPrice, parseUnits, type OrderView
 import { commitment } from "@/lib/tx";
 
 const owner = address("BJL7L58MX82DiGxtjcq5VbzWuLLZe26U6R8PCfdJ2EMh");
-const o = (side: "Buy" | "Sell", limit: bigint, qty: bigint, revealed = true): OrderView => ({
+const o = (side: "Buy" | "Sell", limit: bigint, qty: bigint, revealed = true, screened = false, eligible = false): OrderView => ({
   owner,
   side,
   commitment: new Uint8Array(32),
@@ -14,6 +14,8 @@ const o = (side: "Buy" | "Sell", limit: bigint, qty: bigint, revealed = true): O
   limit,
   qty,
   alloc: 0n,
+  screened,
+  eligible,
 });
 
 describe("session math", () => {
@@ -29,6 +31,20 @@ describe("session math", () => {
       { price: 970_000n, qty: 6_000_000n },
       { price: 950_000n, qty: 12_000_000n },
       { price: 930_000n, qty: 16_000_000n },
+    ]);
+    expect(supply).toEqual([{ price: 900_000n, qty: 10_000_000n }]);
+  });
+
+  it("leaves orders the AE-P6 gate check excluded off the curves", () => {
+    const { demand, supply } = curves([
+      o("Sell", 900_000n, 10_000_000n, true, true, true),
+      o("Buy", 990_000n, 10_000_000n, true, true, false), // excluded: not on the curve
+      o("Buy", 950_000n, 6_000_000n, true, true, true),
+      o("Buy", 930_000n, 6_000_000n, true, false), // not screened yet: still shown
+    ]);
+    expect(demand).toEqual([
+      { price: 950_000n, qty: 6_000_000n },
+      { price: 930_000n, qty: 12_000_000n },
     ]);
     expect(supply).toEqual([{ price: 900_000n, qty: 10_000_000n }]);
   });

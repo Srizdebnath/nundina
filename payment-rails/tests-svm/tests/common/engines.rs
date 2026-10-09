@@ -2,6 +2,7 @@
 //! for their root-workspace `anchor build` artifacts and instruction
 //! wrappers shared by the engine suites.
 
+use super::gate::{gate_pda, investor_of};
 use super::{
     advance_pda, asset_vault_pda, dest_pda, escrow_pda, facility_pda, facility_vault_pda,
     receipt_pda, session_pda, vault_pda, Env, Fill, Party, Res,
@@ -14,6 +15,7 @@ use auction_engine::{
     accounts as aacc, instruction as aix, operator_pda, print_pda, Session as AuctionSession,
     SessionParams as AuctionParams, Side, VENUE_SEED,
 };
+use credit_gate::{HolderLink, InvestorRecord};
 use liquidity_facility::{
     accounts as lacc, instruction as lix, signer_pda as lf_signer, FacilityParams, ForcedSchedule,
     Position,
@@ -500,9 +502,82 @@ impl Env {
         .to_account_metas(None)
     }
 
-    pub fn clear_auction(&mut self, id: u64, caller: &Keypair) -> Res {
+    /// AE-P6 screen of order `index` (bid or ask, by its side).
+    pub fn screen_ix(&self, id: u64, index: u8) -> Instruction {
+        let session = self.auction(id);
+        let order = session.orders[usize::from(index)];
+        let owner = order.owner;
+        let mint = self.asset_mint;
+        match order.side {
+            Side::Buy => {
+                let link = self.svm.get_account(&self.link_pda(&owner));
+                let investor_id = link
+                    .and_then(|a| HolderLink::try_deserialize(&mut &a.data[..]).ok())
+                    .map(|l| l.investor_id)
+                    .unwrap_or(investor_of(&owner));
+                Instruction {
+                    program_id: auction_engine::ID,
+                    accounts: aacc::ScreenBid {
+                        session: auction_pda(id),
+                        gate_config: self.gate_config(),
+                        gate_policy: self.gate_policy(),
+                        block_entry: self.block_entry(&owner),
+                        holder_link: self.link_pda(&owner),
+                        investor: gate_pda(&[InvestorRecord::SEED, mint.as_ref(), &investor_id]),
+                        buyer_lots: self.lots_pda(&owner),
+                        identity_attestation: self.identity_att(&owner),
+                        accreditation_attestation: self.accreditation_att(&owner),
+                        mint,
+                        gate_program: credit_gate::ID,
+                    }
+                    .to_account_metas(None),
+                    data: aix::ScreenBid { order_index: index }.data(),
+                }
+            }
+            Side::Sell => Instruction {
+                program_id: auction_engine::ID,
+                accounts: aacc::ScreenAsk {
+                    session: auction_pda(id),
+                    gate_config: self.gate_config(),
+                    block_entry: self.block_entry(&owner),
+                    seller_lots: self.lots_pda(&owner),
+                }
+                .to_account_metas(None),
+                data: aix::ScreenAsk { order_index: index }.data(),
+            },
+        }
+    }
+
+    pub fn screen(&mut self, id: u64, index: u8, caller: &Keypair) -> Res {
+        let ix = self.screen_ix(id, index);
+        self.send(&[ix], &[caller])
+    }
+
+    /// AE-P6: screen every revealed, unscreened order (what the crank does).
+    pub fn screen_all(&mut self, id: u64, caller: &Keypair) {
+        let orders = self.auction(id).orders;
+        for (i, o) in orders.iter().enumerate() {
+            if o.revealed && !o.screened {
+                self.screen(id, i as u8, caller).expect("screen");
+            }
+        }
+    }
+
+    /// `clear` alone, without screening first.
+    pub fn clear_only(&mut self, id: u64, caller: &Keypair) -> Res {
         let ix = self.engine_session_ix(id, self.clear_accounts(id), aix::Clear {}.data());
         self.send(&[ix], &[caller])
+    }
+
+    /// Screen every revealed order (AE-P6), then `clear`. Screening needs
+    /// `reveal_end` to have passed; before that, `clear` runs bare so its
+    /// own window check is what fails.
+    pub fn clear_auction(&mut self, id: u64, caller: &Keypair) -> Res {
+        let s = self.auction(id);
+        if self.now() >= s.params.reveal_end && self.now() < s.params.settle_deadline {
+            self.screen_all(id, caller);
+        }
+        self.clear_only(id, caller)
     }
 
     pub fn expire_auction(&mut self, id: u64, caller: &Keypair) -> Res {

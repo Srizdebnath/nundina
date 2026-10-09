@@ -3,7 +3,8 @@
  * AE-P2/P10, #149).
  *
  * The engine's phases advance only when someone calls the permissionless
- * instruction for the next step: `clear` once reveals close, `allocate`
+ * instruction for the next step: `screen_bid` / `screen_ask` on every
+ * revealed order once reveals close (AE-P6 gate check), `clear`, `allocate`
  * in chunks, `close_rofr` once the ROFR window lapses, `settle` per fill,
  * `finish` (rails `finish_session` + the print into mark-engine), and
  * `expire` past the hard deadline. This crank reads the session, asks
@@ -25,7 +26,7 @@ import {
 import { CrankLookupTable } from "./alt.ts";
 import { clockNow, ownerTokenAccount, rawAccount, tokenProgramOf } from "./chain.ts";
 import type { Outcome } from "./crank.ts";
-import { fillGateAccounts } from "./gate.ts";
+import { fillGateAccounts, screenGateAccounts } from "./gate.ts";
 import { decodeAccount, ix as railsIx, loadIdl, makeCodec, PROGRAM_ID as RAILS, type Struct } from "./idl.ts";
 import { assetVaultPda, configPda, escrowPda, receiptPda, vaultPda } from "./pda.ts";
 import { send, type Ctx } from "./send.ts";
@@ -41,6 +42,12 @@ export interface Fill extends Struct {
   rofr: boolean;
   settled: boolean;
 }
+export interface Order extends Struct {
+  owner: Address;
+  side: string;
+  revealed: boolean;
+  screened: boolean;
+}
 export interface AuctionSession extends Struct {
   session_id: bigint;
   asset_mint: Address;
@@ -49,10 +56,12 @@ export interface AuctionSession extends Struct {
   params: Struct & { reveal_end: bigint; rofr_window: bigint; settle_deadline: bigint };
   phase: string;
   clear_price: bigint;
+  orders: Order[];
   fills: Fill[];
 }
 
 export type PhaseAction =
+  | { kind: "screen"; index: number; side: "Buy" | "Sell" }
   | { kind: "clear" }
   | { kind: "allocate" }
   | { kind: "close_rofr" }
@@ -73,7 +82,13 @@ export function planPhase(s: AuctionSession, now: bigint): PhaseAction | null {
   switch (s.phase) {
     case "Commit":
     case "Reveal":
-      return now >= p.reveal_end ? { kind: "clear" } : null;
+    case "Clearing": {
+      if (now < p.reveal_end) return null;
+      // AE-P6: every revealed order is screened before the clear.
+      const i = s.orders.findIndex((o) => o.revealed && !o.screened);
+      if (i < 0) return { kind: "clear" };
+      return { kind: "screen", index: i, side: s.orders[i]!.side === "Sell" ? "Sell" : "Buy" };
+    }
     case "Allocating":
       return { kind: "allocate" };
     case "IssuerRofr":
@@ -122,6 +137,39 @@ async function buildStep(ctx: Ctx, sessionAddr: Address, s: AuctionSession, a: P
     accounts: [...(instruction.accounts ?? []), ...extra],
   });
   switch (a.kind) {
+    case "screen": {
+      const owner = s.orders[a.index]!.owner;
+      const gate = await screenGateAccounts(ctx.rpc, s.asset_mint, owner);
+      if (a.side === "Sell") {
+        return auction.ix(
+          "screen_ask",
+          {
+            session: sessionAddr,
+            gate_config: gate.gate_config,
+            block_entry: gate.block_entry,
+            seller_lots: gate.lots,
+          },
+          { order_index: a.index },
+        );
+      }
+      return auction.ix(
+        "screen_bid",
+        {
+          session: sessionAddr,
+          gate_config: gate.gate_config,
+          gate_policy: gate.gate_policy,
+          block_entry: gate.block_entry,
+          holder_link: gate.holder_link,
+          investor: gate.investor,
+          buyer_lots: gate.lots,
+          identity_attestation: gate.identity,
+          accreditation_attestation: gate.accreditation,
+          mint: s.asset_mint,
+          gate_program: gate.gate_program,
+        },
+        { order_index: a.index },
+      );
+    }
     case "allocate":
       return auction.ix("allocate", { session: sessionAddr }, { max_fills: 8 });
     case "close_rofr":
@@ -220,7 +268,7 @@ export async function runPhases(
       out.push({ target: "phase", result: "already-done", detail: `waiting in ${s.phase}` });
       break;
     }
-    const target = a.kind === "settle" ? `settle #${a.index}` : a.kind;
+    const target = a.kind === "settle" || a.kind === "screen" ? `${a.kind} #${a.index}` : a.kind;
     let instruction;
     try {
       instruction = await buildStep(ctx, session, s, a, payer);

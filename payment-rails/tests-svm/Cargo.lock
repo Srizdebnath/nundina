@@ -600,6 +600,7 @@ name = "auction-engine"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "credit-gate",
  "credit-math",
  "mark-engine",
  "payment-rails",

@@ -14,7 +14,7 @@ name = "auction_engine"
 default = []
 no-entrypoint = []
 cpi = ["no-entrypoint"]
-idl-build = ["anchor-lang/idl-build", "payment-rails/idl-build", "mark-engine/idl-build"]
+idl-build = ["anchor-lang/idl-build", "payment-rails/idl-build", "mark-engine/idl-build", "credit-gate/idl-build"]
 
 [dependencies]
 # Exact pin: SRS locks anchor 1.1.x (see credit-gate/Cargo.toml).
@@ -24,6 +24,10 @@ credit-math = { path = "../credit-math" }
 payment-rails = { path = "../../payment-rails/programs/payment-rails", features = ["cpi"] }
 # Reserve floor and reference mark (AE-P5); the print (AE-P9).
 mark-engine = { path = "../mark-engine", features = ["cpi"] }
+# AE-P6 screen: the gate's own admission, governor and lot-ledger reads, and
+# its `project_and_check` CPI (built from its instruction and account types:
+# the `cpi` feature's generated helpers fail clippy in the gate crate).
+credit-gate = { path = "../credit-gate", features = ["no-entrypoint"] }
 # Commitment preimage hash (same crate and pin as credit-gate).
 solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }
 

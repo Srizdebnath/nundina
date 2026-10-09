@@ -68,9 +68,10 @@
       "name": "clear",
       "docs": [
         "AE-P5 + AE-P6 (margin): compute the uniform clearing price and each",
-        "order's allocation. Permissionless once reveals close. A session",
-        "with too few reveals, no cross at or above the reserve floor, or a",
-        "suspended mark fails (rails `fail_session`; all escrow refundable).",
+        "order's allocation over the eligible orders. Permissionless once",
+        "reveals close and every revealed order is screened. A session with",
+        "too few eligible reveals, no cross at or above the reserve floor, or",
+        "a suspended mark fails (rails `fail_session`; all escrow refundable).",
         "Remaining accounts: rails session, operator."
       ],
       "discriminator": [
@@ -1060,6 +1061,332 @@
       ]
     },
     {
+      "name": "screen_ask",
+      "docs": [
+        "AE-P6 gate check, sell side: screen revealed ask `order_index` —",
+        "block-list, and seasoned lots covering the revealed quantity (the",
+        "lots only season further before settlement). Permissionless once",
+        "reveals close. A failing ask is excluded, not an error."
+      ],
+      "discriminator": [
+        130,
+        212,
+        255,
+        69,
+        243,
+        117,
+        128,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "gate_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.asset_mint",
+                "account": "Session"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                73,
+                239,
+                117,
+                94,
+                146,
+                97,
+                214,
+                163,
+                190,
+                5,
+                163,
+                240,
+                191,
+                58,
+                127,
+                73,
+                192,
+                20,
+                12,
+                28,
+                150,
+                217,
+                25,
+                167,
+                95,
+                77,
+                211,
+                134,
+                163,
+                242,
+                151,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "block_entry"
+        },
+        {
+          "name": "seller_lots"
+        }
+      ],
+      "args": [
+        {
+          "name": "order_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "screen_bid",
+      "docs": [
+        "AE-P6 gate check, buy side: screen revealed bid `order_index`",
+        "against credit-gate (admission, block-list, SAS attestations through",
+        "the settlement horizon, lot-ledger room, `project_and_check`).",
+        "Permissionless once reveals close; the first screen moves the",
+        "session to Clearing. A failing bid is excluded, not an error."
+      ],
+      "discriminator": [
+        253,
+        16,
+        209,
+        207,
+        83,
+        229,
+        39,
+        252
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "gate_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.asset_mint",
+                "account": "Session"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                73,
+                239,
+                117,
+                94,
+                146,
+                97,
+                214,
+                163,
+                190,
+                5,
+                163,
+                240,
+                191,
+                58,
+                127,
+                73,
+                192,
+                20,
+                12,
+                28,
+                150,
+                217,
+                25,
+                167,
+                95,
+                77,
+                211,
+                134,
+                163,
+                242,
+                151,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "gate_policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.asset_mint",
+                "account": "Session"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                73,
+                239,
+                117,
+                94,
+                146,
+                97,
+                214,
+                163,
+                190,
+                5,
+                163,
+                240,
+                191,
+                58,
+                127,
+                73,
+                192,
+                20,
+                12,
+                28,
+                150,
+                217,
+                25,
+                167,
+                95,
+                77,
+                211,
+                134,
+                163,
+                242,
+                151,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "block_entry"
+        },
+        {
+          "name": "holder_link"
+        },
+        {
+          "name": "investor"
+        },
+        {
+          "name": "buyer_lots"
+        },
+        {
+          "name": "identity_attestation"
+        },
+        {
+          "name": "accreditation_attestation"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_program",
+          "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+        }
+      ],
+      "args": [
+        {
+          "name": "order_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "set_forced_sale_opener",
       "docs": [
         "Re-point the forced-sale opener (venue authority)."
@@ -1331,6 +1658,19 @@
       ]
     },
     {
+      "name": "OrderScreened",
+      "discriminator": [
+        64,
+        93,
+        123,
+        39,
+        244,
+        131,
+        242,
+        115
+      ]
+    },
+    {
       "name": "PhaseChanged",
       "discriminator": [
         178,
@@ -1516,6 +1856,31 @@
       "code": 6023,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority may do this"
+    },
+    {
+      "code": 6024,
+      "name": "ScreeningPending",
+      "msg": "revealed orders still need the gate check (screen_bid / screen_ask)"
+    },
+    {
+      "code": 6025,
+      "name": "GateAccounts",
+      "msg": "credit-gate accounts do not match the order"
+    },
+    {
+      "code": 6026,
+      "name": "WrongSide",
+      "msg": "order is on the other side"
+    },
+    {
+      "code": 6027,
+      "name": "NotRevealed",
+      "msg": "order was not revealed"
+    },
+    {
+      "code": 6028,
+      "name": "AlreadyScreened",
+      "msg": "order already screened"
     }
   ],
   "types": [
@@ -1587,6 +1952,36 @@
                 "name": "PrintPolicy"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Exclusion",
+      "docs": [
+        "Why `screen_bid` / `screen_ask` excluded an order (AE-P6). Wire-stable;",
+        "append only."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Blocklisted"
+          },
+          {
+            "name": "NotAdmitted"
+          },
+          {
+            "name": "AttestationRejected"
+          },
+          {
+            "name": "InvestorIdChanged"
+          },
+          {
+            "name": "LotLedgerFull"
+          },
+          {
+            "name": "NotSeasoned"
           }
         ]
       }
@@ -1942,6 +2337,204 @@
       }
     },
     {
+      "name": "MarketConfig",
+      "docs": [
+        "One immutable-per-market policy configuration (CG-P2).",
+        "",
+        "Seeded per-mint. Every consumer (auction-engine sessions, facility",
+        "underwriting) snapshots the fields it depends on — the gate never",
+        "mutates config mid-session (L5 snapshot discipline). Updates are",
+        "governed by `gate_config_authority` and always evented (CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint this config governs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "gate_config_authority",
+            "docs": [
+              "Sole authority for this PDA. Starts as the gate root authority that",
+              "initialized it (#93; a single bootstrap key on devnet today, see",
+              "DEPLOYMENTS.md). Moves to the Squads 2-of-2 vault (SRS 08 §8) only",
+              "through `propose_gate_authority` + `accept_gate_authority`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "policy_class",
+            "docs": [
+              "Policy class (pilot: `PILOT_506C_TEST`) — stable u32 for consumers."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "identity_schema",
+            "docs": [
+              "Accepted SAS identity schema (`nundina.identity.v1`, CG-P4/P6).",
+              "`eligibility::evaluate` (called by `validate`, `settle_check` and",
+              "`settle_check_rofr`) accepts an identity attestation only if it is a",
+              "SAS-owned account at its canonical PDA `[\"attestation\", credential,",
+              "schema, holder]`, under `MarketPolicy::credential`, with this schema."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "accreditation_schema",
+            "docs": [
+              "Accepted SAS accreditation schema (`nundina.accreditation.v1`,",
+              "CG-P6). Checked the same way as `identity_schema`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attesters",
+            "docs": [
+              "Attester authorities accepted for these schemas. An attestation whose",
+              "SAS `signer` is not in `attesters[..attester_count]` is rejected",
+              "(`AttestationInvalid`); one expiring before now +",
+              "`settlement_horizon_seconds` is rejected (`AttestationExpiry`, H4)."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "attester_count",
+            "docs": [
+              "Active count into `attesters`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "holder_cap",
+            "docs": [
+              "Distinct investor_id cap (pilot: 8, CG-P4)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "seasoning_seconds",
+            "docs": [
+              "Seasoning seconds (pilot: 7 days — compressed Rule-144 analog, CG-1)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "settlement_horizon_seconds",
+            "docs": [
+              "Attestation must remain valid at least this long after validation (H4)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "blocklist",
+            "docs": [
+              "Block-list header (CG-P5, [`BlockList`]). `None` = no list",
+              "configured: the screen passes. Set by `initialize_blocklist`;",
+              "re-pointable but never clearable. Pointing it anywhere but this",
+              "program's header for the mint makes every screen fail closed."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketPolicy",
+      "docs": [
+        "Per-market eligibility policy and the holder governor's count."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "credential",
+            "docs": [
+              "The SAS credential this market accepts attestations under."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "jurisdictions",
+            "docs": [
+              "ISO 3166-1 alpha-2 codes allowed to hold; `[..jurisdiction_count]`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    2
+                  ]
+                },
+                16
+              ]
+            }
+          },
+          {
+            "name": "jurisdiction_count",
+            "docs": [
+              "Live entries in `jurisdictions`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "min_kyc_level",
+            "docs": [
+              "Minimum `kyc_level` in the identity attestation."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "require_accreditation",
+            "docs": [
+              "`accredited == true` required (Rule 506(c) policy classes)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "distinct_investors",
+            "docs": [
+              "Distinct `investor_id`s currently admitted (CG-P4)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "Order",
       "type": {
         "kind": "struct",
@@ -1999,6 +2592,20 @@
               "Allocation not yet paired into a fill (AE-P6 cursor)."
             ],
             "type": "u64"
+          },
+          {
+            "name": "screened",
+            "docs": [
+              "AE-P6: the gate check ran on this order."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "eligible",
+            "docs": [
+              "AE-P6: it passed; only eligible orders clear."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -2073,6 +2680,43 @@
       }
     },
     {
+      "name": "OrderScreened",
+      "docs": [
+        "AE-P6: one order's gate check. `exclusion` is `None` when it passed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "exclusion",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Exclusion"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "Phase",
       "docs": [
         "AE-P2 phases (06 §2)."
@@ -2100,6 +2744,9 @@
           },
           {
             "name": "Failed"
+          },
+          {
+            "name": "Clearing"
           }
         ]
       }
