@@ -2,7 +2,8 @@
 
 A Node 24 / TypeScript package (`@solana/kit`). Decoding uses the programs'
 own IDLs: one copy lives in `app/idl/`, and `src/codec.ts` is the app's decoder
-verbatim (a test enforces it). The cranks, the crank-runner and the
+verbatim (a test enforces it; after changing `app/lib/borsh.ts`, run
+`npm run sync-codec`). The cranks, the crank-runner and the
 session evidence exporter live with the rails crank, in
 [`payment-rails/crank/`](../payment-rails/crank/README.md).
 
