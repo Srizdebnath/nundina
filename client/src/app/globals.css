@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/* ── Design tokens (ported from the frontend/index.html Tailwind config) ── */
+@theme {
+  --color-obsidian-950: #050507;
+  --color-obsidian-900: #08080a;
+  --color-obsidian-850: #0e0f13;
+  --color-obsidian-800: #14161b;
+  --color-obsidian-700: #1b1e25;
+  --color-obsidian-600: #252932;
+
+  /* Gold sampled from public/logo.jpeg (#feecbe highlight → #c59759 shadow) */
+  --color-gold-100: #fff8e8;
+  --color-gold-200: #fdeecb;
+  --color-gold-300: #f7e2b5;
+  --color-gold-400: #efd29c;
+  --color-gold-500: #dcc093;
+  --color-gold-600: #a98d64;
+  --color-gold-700: #8a6f48;
+  --color-gold-800: #6b5536;
+  --color-gold-900: #4a3a24;
+
+  --tracking-widest2: 0.22em;
+  --tracking-widest3: 0.35em;
+  --tracking-widest4: 0.45em;
+}
+
+/* Font families come from next/font CSS variables set on <html>. */
+@theme inline {
+  --font-sans: var(--ff-jakarta), system-ui, sans-serif;
+  --font-serif: var(--ff-cormorant), Georgia, serif;
+  --font-mono: var(--ff-space-mono), monospace;
+  --font-cinzel: var(--ff-cinzel), serif;
+  --font-cormorant: var(--ff-cormorant), Georgia, serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-obsidian-900);
+  color: var(--color-gold-300);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--color-gold-400);
+  color: var(--color-obsidian-950);
+}
+
+/* ── Copperplate / steel-engraving effects ── */
+@utility gold-gradient-text {
+  background: linear-gradient(135deg, #fff3d6 0%, #feecbe 30%, #f0cd8d 65%, #c59759 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@utility gold-btn-gradient {
+  background: linear-gradient(135deg, #fff1cf 0%, #f0cd8d 50%, #d3a96d 100%);
+  box-shadow:
+    0 4px 20px -2px rgba(254,236,190,0.25),
+    inset 0 1px 1px rgba(255, 246, 224, 0.9);
+  &:hover {
+    background: linear-gradient(135deg, #fff6e0 0%, #feecbe 45%, #eac183 100%);
+    box-shadow:
+      0 6px 26px 0 rgba(254,236,190,0.4),
+      inset 0 1px 2px #fff6e0;
+  }
+}
+
+/* Etched border & banknote guilloche accents */
+@utility etched-card {
+  border: 1px solid rgba(234,193,131,0.16);
+  background: linear-gradient(180deg, rgba(20, 22, 27, 0.72) 0%, rgba(10, 11, 14, 0.88) 100%);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  &:hover {
+    border-color: rgba(234,193,131,0.4);
+    box-shadow:
+      0 12px 35px -8px rgba(0, 0, 0, 0.8),
+      inset 0 0 0 1px rgba(254,236,190,0.08);
+  }
+}
+
+@utility hairline-gold {
+  background: linear-gradient(90deg, transparent 0%, rgba(234,193,131,0.3) 50%, transparent 100%);
+}
+
+@utility etched-double-border {
+  border: 1px solid rgba(234,193,131,0.28);
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid rgba(234,193,131,0.12);
+    pointer-events: none;
+  }
+}
+
+@utility engraved-arch-glow {
+  background: radial-gradient(circle at 50% 40%, rgba(240,205,141,0.08) 0%, transparent 70%);
+}
+
+@utility arch-vignette {
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(5, 5, 7, 0.5) 55%, #050507 100%);
+}
+
+/* Banknote fine stippling pattern emulation */
+@utility stipple-overlay {
+  background-image: radial-gradient(rgba(254,236,190,0.08) 1px, transparent 0);
+  background-size: 8px 8px;
+}
+
