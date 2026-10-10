@@ -591,8 +591,10 @@
     {
       "name": "finish",
       "docs": [
-        "AE-P9: every fill settled → rails `finish_session` (unfilled escrow",
-        "refundable at once), then the clearing print into mark-engine.",
+        "AE-P9: every fill settled (or skipped) → rails `finish_session`",
+        "(unfilled escrow refundable at once), then the clearing print into",
+        "mark-engine — unless a fill was skipped (partial settlement): that",
+        "print is not mark-eligible and is only evented, flagged `partial`.",
         "Permissionless; the caller pays the print record's rent.",
         "Remaining accounts: rails session, operator."
       ],
@@ -1066,7 +1068,9 @@
         "AE-P6 gate check, sell side: screen revealed ask `order_index` —",
         "block-list, and seasoned lots covering the revealed quantity (the",
         "lots only season further before settlement). Permissionless once",
-        "reveals close. A failing ask is excluded, not an error."
+        "reveals close. A failing ask is excluded, not an error. The seller's",
+        "`HolderLink` (pinned by address; may not exist, e.g. a PDA seller)",
+        "names its `investor_id` for the investor checks and the print."
       ],
       "discriminator": [
         130,
@@ -1174,6 +1178,12 @@
         },
         {
           "name": "seller_lots"
+        },
+        {
+          "name": "holder_link",
+          "docs": [
+            "handler); may not exist. Appended (#202): names the investor."
+          ]
         }
       ],
       "args": [
@@ -1548,6 +1558,210 @@
           "type": "u32"
         }
       ]
+    },
+    {
+      "name": "skip_fill",
+      "docs": [
+        "AE-P2 partial settlement: retire fill `fill_index` because it fails",
+        "credit-gate's `settle_check` now — the same checks, in the same order,",
+        "over the same gate accounts (block-list both sides; buyer admission",
+        "and SAS attestations through the horizon; the seller's seasoned",
+        "lots; room in the buyer's lot ledger). A fill that would pass is",
+        "refused (`FillSettleable`), so a crank cannot drop a good fill. The",
+        "fill counts as done for `finish`, nothing moves for it, and both",
+        "escrows behind it are refundable once the session finishes; the",
+        "print is flagged `partial` and not offered to mark-engine.",
+        "Permissionless, Settling only."
+      ],
+      "discriminator": [
+        234,
+        103,
+        118,
+        14,
+        12,
+        50,
+        116,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.venue",
+                "account": "Session"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_id",
+                "account": "Session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "gate_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.asset_mint",
+                "account": "Session"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                73,
+                239,
+                117,
+                94,
+                146,
+                97,
+                214,
+                163,
+                190,
+                5,
+                163,
+                240,
+                191,
+                58,
+                127,
+                73,
+                192,
+                20,
+                12,
+                28,
+                150,
+                217,
+                25,
+                167,
+                95,
+                77,
+                211,
+                134,
+                163,
+                242,
+                151,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "gate_policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.asset_mint",
+                "account": "Session"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                73,
+                239,
+                117,
+                94,
+                146,
+                97,
+                214,
+                163,
+                190,
+                5,
+                163,
+                240,
+                191,
+                58,
+                127,
+                73,
+                192,
+                20,
+                12,
+                28,
+                150,
+                217,
+                25,
+                167,
+                95,
+                77,
+                211,
+                134,
+                163,
+                242,
+                151,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "seller_block"
+        },
+        {
+          "name": "buyer_block"
+        },
+        {
+          "name": "buyer_link"
+        },
+        {
+          "name": "identity_attestation"
+        },
+        {
+          "name": "accreditation_attestation"
+        },
+        {
+          "name": "seller_lots"
+        },
+        {
+          "name": "buyer_lots"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_index",
+          "type": "u32"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1629,6 +1843,19 @@
         71,
         20,
         119
+      ]
+    },
+    {
+      "name": "FillSkipped",
+      "discriminator": [
+        220,
+        225,
+        102,
+        162,
+        10,
+        199,
+        147,
+        61
       ]
     },
     {
@@ -1881,6 +2108,11 @@
       "code": 6028,
       "name": "AlreadyScreened",
       "msg": "order already screened"
+    },
+    {
+      "code": 6029,
+      "name": "FillSettleable",
+      "msg": "fill passes the gate's settle_check; settle it instead"
     }
   ],
   "types": [
@@ -1915,8 +2147,26 @@
     {
       "name": "ClearingPrint",
       "docs": [
-        "AE-P9: the session's aggregate print (mark-engine stores its own copy,",
-        "disclosed per the market's print policy)."
+        "AE-P9: the session's aggregate print (mark-engine stores its own copy).",
+        "",
+        "C9 / ME-P6: redacted per the market's print policy like mark-engine's",
+        "`PrintRecorded`. Public: exact price and volume; Banded: the band",
+        "floor; AggregateOnly: volume, price withheld; DataRoom: both withheld.",
+        "A withheld value is `0`: the layout stays the pre-#202 one so every",
+        "decoder of the event keeps working, and the two fields after",
+        "`print_policy_class` are appended. `price_commitment` binds the exact",
+        "price and volume for a data-room reader to check what it was given.",
+        "",
+        "Limits, stated plainly: this redacts the venue's *print*, the headline a",
+        "front-end or indexer would publish; it does not make the price secret.",
+        "Solana state and logs are public, and the clearing price can be",
+        "recomputed from: the session account (`clear_price`), the `Cleared`,",
+        "`FillSettled` and `RofrExercised` events, the payment-rails fill",
+        "receipts and transfer events, the token transfers themselves (gross ÷",
+        "quantity), and mark-engine's `PrintRecord` account. The commitment is",
+        "not hiding either (a u64 price near NAV is brute-forced at once). A",
+        "506(b) market's confidentiality rests on the front-end and indexer",
+        "honouring the print policy, not on chain secrecy."
       ],
       "type": {
         "kind": "struct",
@@ -1931,14 +2181,23 @@
           },
           {
             "name": "price",
+            "docs": [
+              "Per policy: exact (Public), band floor (Banded), 0 = withheld."
+            ],
             "type": "u64"
           },
           {
             "name": "volume",
+            "docs": [
+              "Volume that settled; 0 = withheld (DataRoom)."
+            ],
             "type": "u64"
           },
           {
             "name": "n_investor_ids",
+            "docs": [
+              "Distinct gate `investor_id`s across the settled fills (G2)."
+            ],
             "type": "u16"
           },
           {
@@ -1952,6 +2211,27 @@
                 "name": "PrintPolicy"
               }
             }
+          },
+          {
+            "name": "price_commitment",
+            "docs": [
+              "[`print_commitment`] of the exact price and settled volume",
+              "(appended, #202)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "partial",
+            "docs": [
+              "AE-P2: a fill was skipped at settlement; this print was not offered",
+              "to mark-engine (not mark-eligible)."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -1982,6 +2262,12 @@
           },
           {
             "name": "NotSeasoned"
+          },
+          {
+            "name": "SelfTrade"
+          },
+          {
+            "name": "InvestorCapExceeded"
           }
         ]
       }
@@ -2309,6 +2595,46 @@
           {
             "name": "price",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillSkipped",
+      "docs": [
+        "AE-P2: fill `fill_index` failed the gate at settlement and was retired",
+        "(`reason` is the first failing check, in `settle_check`'s order)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_index",
+            "type": "u32"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": {
+              "defined": {
+                "name": "Exclusion"
+              }
+            }
           }
         ]
       }
@@ -2958,6 +3284,32 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "investor_ids",
+            "docs": [
+              "AE-P6 / AE-P9 (appended, #202): the gate `investor_id` behind each",
+              "order, parallel to `orders` from the first screen that finds one;",
+              "[`NO_INVESTOR`] where none is known. Appending these two fields",
+              "grows `Session`: a session opened by an older build would not decode",
+              "(none exists: devnet has never opened a session)."
+            ],
+            "type": {
+              "vec": {
+                "array": [
+                  "u8",
+                  16
+                ]
+              }
+            }
+          },
+          {
+            "name": "skipped_fills",
+            "docs": [
+              "AE-P2 (appended, #202): bit `i` set ⇔ fill `i` was retired by",
+              "`skip_fill` (it failed the gate at settlement). `MAX_FILLS` ≤ 32."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -3022,7 +3374,8 @@
           {
             "name": "max_cash",
             "docs": [
-              "Per-investor cash cap (micro-USDC)."
+              "Per-investor cash cap (micro-USDC): the rails cap each wallet's",
+              "escrow at commit; `screen_bid` caps the investor across wallets."
             ],
             "type": "u64"
           },

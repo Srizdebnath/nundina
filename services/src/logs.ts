@@ -54,7 +54,7 @@ export function eventsFromLogs(logs: readonly string[]): DecodedEvent[] {
     const ev = (prog.codec.idl.events ?? []).find((e) => prefixed(bytes, e.discriminator));
     if (!ev) continue;
     try {
-      out.push({ index: at, program: prog.name, programId: top!, name: ev.name, data: prog.codec.decodeType(ev.name, bytes.subarray(8)) });
+      out.push({ index: at, program: prog.name, programId: top!, name: ev.name, data: prog.codec.decodeEvent(ev.name, bytes.subarray(8)) });
     } catch {
       out.push({ index: at, program: prog.name, programId: top!, name: ev.name, data: {}, undecoded: line.slice("Program data: ".length) });
     }

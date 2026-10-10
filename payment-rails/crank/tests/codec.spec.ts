@@ -108,3 +108,31 @@ test("engine IDL types: u128 and option round-trip (mark-engine Feed has u128 NA
   const p = { warn_after: 1n, stale_after: 2n, warned_haircut_bps: 3n, stale_haircut_bps: 4n, print_policy: "Banded", band_bps: 5n, min_print_volume: 6n, min_print_investors: 7, outlier_band_bps: 8n, drills_enabled: false };
   assert.deepEqual(mark.decodeAt({ defined: { name: "FeedParams" } }, mark.encode({ defined: { name: "FeedParams" } }, p), 0)[0], { ...p, print_policy: "Banded" });
 });
+
+test("events are append-only: one logged by an older build decodes without the fields appended since", () => {
+  const auction = makeCodec(loadIdl("auction_engine"));
+  const ev = auction.idl.events.find((e) => e.name === "ClearingPrint")!;
+  const cat = (...parts: Uint8Array[]) => Uint8Array.from(parts.flatMap((p) => [...p]));
+  // The pre-#202 ClearingPrint: session, mint, price, volume, investors,
+  // forced_sale, print policy (Public = 0).
+  const old = cat(
+    Uint8Array.from(ev.discriminator),
+    auction.encode("pubkey", A),
+    auction.encode("pubkey", B),
+    auction.encode("u64", 945_000n),
+    auction.encode("u64", 10_000_000n),
+    auction.encode("u16", 3),
+    auction.encode("bool", false),
+    Uint8Array.of(0),
+  );
+  const d = auction.decodeEvent(old)!.data;
+  assert.equal(d.price, 945_000n);
+  assert.equal(d.n_investor_ids, 3);
+  assert.ok(!("price_commitment" in d) && !("partial" in d), "appended fields absent");
+  const full = cat(old, new Uint8Array(32).fill(7), auction.encode("bool", true));
+  const e = auction.decodeEvent(full)!.data;
+  assert.equal(e.partial, true);
+  assert.equal((e.price_commitment as Uint8Array)[0], 7);
+  // A payload cut inside a field is still an error, not a short event.
+  assert.throws(() => auction.decodeEvent(old.subarray(0, old.length - 3)));
+});

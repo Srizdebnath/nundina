@@ -26,7 +26,15 @@ import {
 import { CrankLookupTable } from "./alt.ts";
 import { clockNow, ownerTokenAccount, rawAccount, tokenProgramOf } from "./chain.ts";
 import type { Outcome } from "./crank.ts";
-import { fillGateAccounts, screenGateAccounts } from "./gate.ts";
+import {
+  blockEntryPda,
+  fillGateAccounts,
+  gateConfigPda,
+  gatePolicyPda,
+  holderLinkPda,
+  holderLotsPda,
+  screenGateAccounts,
+} from "./gate.ts";
 import { decodeAccount, ix as railsIx, loadIdl, makeCodec, PROGRAM_ID as RAILS, type Struct } from "./idl.ts";
 import { assetVaultPda, configPda, escrowPda, receiptPda, vaultPda } from "./pda.ts";
 import { send, type Ctx } from "./send.ts";
@@ -58,6 +66,10 @@ export interface AuctionSession extends Struct {
   clear_price: bigint;
   orders: Order[];
   fills: Fill[];
+  /** AE-P6 / AE-P9 (#202): the gate investor behind each order. */
+  investor_ids: Uint8Array[];
+  /** AE-P2 (#202): bit i = fill i retired by `skip_fill`. */
+  skipped_fills: number;
 }
 
 export type PhaseAction =
@@ -66,6 +78,7 @@ export type PhaseAction =
   | { kind: "allocate" }
   | { kind: "close_rofr" }
   | { kind: "settle"; index: number }
+  | { kind: "skip"; index: number }
   | { kind: "finish" }
   | { kind: "expire" };
 
@@ -148,6 +161,7 @@ async function buildStep(ctx: Ctx, sessionAddr: Address, s: AuctionSession, a: P
             gate_config: gate.gate_config,
             block_entry: gate.block_entry,
             seller_lots: gate.lots,
+            holder_link: gate.holder_link,
           },
           { order_index: a.index },
         );
@@ -174,6 +188,30 @@ async function buildStep(ctx: Ctx, sessionAddr: Address, s: AuctionSession, a: P
       return auction.ix("allocate", { session: sessionAddr }, { max_fills: 8 });
     case "close_rofr":
       return auction.ix("close_rofr", { session: sessionAddr, caller: payer });
+    case "skip": {
+      const f = s.fills[a.index]!;
+      const gate = await fillGateAccounts(ctx.rpc, s.asset_mint, f.seller, f.buyer);
+      // No holder link: the buyer's link address stands in for it and its
+      // attestations (the program sees no link → NotAdmitted).
+      const g = "reason" in gate ? null : gate.accounts;
+      const link = g?.buyer_link ?? (await holderLinkPda(s.asset_mint, f.buyer));
+      return auction.ix(
+        "skip_fill",
+        {
+          session: sessionAddr,
+          gate_config: await gateConfigPda(s.asset_mint),
+          gate_policy: await gatePolicyPda(s.asset_mint),
+          seller_block: await blockEntryPda(s.asset_mint, f.seller),
+          buyer_block: await blockEntryPda(s.asset_mint, f.buyer),
+          buyer_link: link,
+          identity_attestation: g?.buyer_identity ?? link,
+          accreditation_attestation: g?.buyer_accreditation ?? link,
+          seller_lots: await holderLotsPda(s.asset_mint, f.seller),
+          buyer_lots: await holderLotsPda(s.asset_mint, f.buyer),
+        },
+        { fill_index: a.index },
+      );
+    }
     case "clear":
     case "expire":
       return withRails(auction.ix(a.kind, { ...base, feed: s.feed }), railsSessionAccounts(s, operator));
@@ -287,6 +325,19 @@ export async function runPhases(
     }
     const r = await send(ctx, `auction ${target}`, [instruction], { cuLimit: 600_000, lookupTables });
     if (r.status !== "sent") {
+      // AE-P2: a fill that fails the gate's settle_check is retired with
+      // `skip_fill` (which re-runs the same checks and refuses a fill that
+      // would pass), so the session can still finish. Anything else stops.
+      if (a.kind === "settle") {
+        const skip: PhaseAction = { kind: "skip", index: a.index };
+        const k = await send(ctx, `auction skip #${a.index}`, [await buildStep(ctx, session, s, skip, payer)], {
+          cuLimit: 400_000,
+        });
+        if (k.status === "sent") {
+          out.push({ target: `skip #${a.index}`, result: "sent", signature: k.signature, detail: r.name ?? r.message });
+          continue;
+        }
+      }
       out.push({ target, result: "failed", detail: r.name ?? r.message });
       break;
     }
