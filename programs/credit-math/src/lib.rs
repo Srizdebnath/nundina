@@ -13,14 +13,15 @@
 //!    allocated; waterfall lines sum exactly to cash received. Residue is
 //!    re-attached by rule, never dropped.
 //!
-//! **Who calls what (2026-09, #48).** The only program consumer is
-//! `payment-rails`: [`ceil_div`], [`mul_div`], [`accrue_interest`],
-//! [`distribute_cash`] and [`MathError`]. Everything else (clearing,
-//! pro-rata, NAV, haircut, PV, loss waterfall, prudential floor) is pure and
-//! tested but **has no program consumer yet**. The planned consumers
-//! (auction-engine, tranche-engine, liquidity-facility, queue-claim) are not
-//! built. Passing tests prove these functions correct in isolation, not
-//! correctly wired into a program.
+//! **Who calls what (2026-10, #202).** Every program routes its money math
+//! here: `payment-rails` ([`ceil_div`], [`mul_div`], [`accrue_interest`],
+//! [`distribute_cash`]); `auction-engine` (uniform clearing price, pro-rata
+//! allocation, `checked_ceil_div`); `mark-engine` (the NAV publish
+//! arithmetic and [`nav::haircut_bps`]); `queue-claim` (`pv_of_claim`);
+//! `tranche-engine` (`apply_loss`, `distribute_cash`); and
+//! `liquidity-facility` (the H1 advance-rate ceiling and `mul_div`). The
+//! unit and property suites prove the functions; each program's LiteSVM
+//! suite proves the wiring.
 //!
 //! Units convention (doc 09 §3): amounts are integers in their smallest unit.
 //! NPCS base units and USDC micros are 1e6-scaled; NAV is **pico-NAV**

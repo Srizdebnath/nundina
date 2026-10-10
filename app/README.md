@@ -49,6 +49,14 @@ over another wallet's challenge is refused, holder H is admitted through
 credit-gate and its cookie opens `/admin` and `/data-room`, a forged cookie
 does not.
 
+**Access log (#202).** Every challenge, sign-in, refusal (with the gate's
+reason), sign-out, and every view or refusal of `/data-room` and `/admin`
+is one JSON line (`lib/access-log.ts`): appended to `NUNDINA_ACCESS_LOG`
+when set, otherwise printed to stdout as `[nundina-access] {...}`. No
+signature, cookie or nonce is ever logged. A production build in `open`
+mode prints a warning at the first gated render: set
+`NUNDINA_ACCESS=allowlist` and `NUNDINA_ACCESS_SECRET` for any deployment.
+
 ## Run against devnet
 
 ```bash

@@ -1,5 +1,7 @@
 # Feasibility & Compliance — Why This Is Only Possible on Solana
 
+> **⛔ Superseded (see `00-README.md`).** Kept as the original why-Solana case. As built, compliance is **not** a Token-2022 Transfer Hook: NPCS is default-frozen and thaws only through Token ACL (sRFC37) → `credit-gate`'s `validate`, which reads SAS attestations at account activation, and every fill is re-checked by `credit-gate` `settle_check` inside payment-rails' `settle_fill` (`06` §3, `DEPLOYMENTS.md`). The Transfer Hook diagrams below describe the design that was rejected.
+
 The "why Solana," "why now," and "why this design" case — plus the compliance enforcement detail that makes a permissioned secondary market *natively expressible* instead of bolted-on.
 
 ---

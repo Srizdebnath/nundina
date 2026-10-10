@@ -27,6 +27,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </Link>
             <Link href="/sessions">Sessions</Link>
             <Link href="/portfolio">Portfolio</Link>
+            <Link href="/queue">Queue</Link>
+            <Link href="/facility">Facility</Link>
+            <Link href="/tranches">Tranches</Link>
+            <Link href="/treasury">Treasury</Link>
             <Link href="/gate">Gate check</Link>
             <Link href="/data-room">Data room</Link>
             <Link href="/admin">Admin</Link>

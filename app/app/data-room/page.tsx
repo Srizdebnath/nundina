@@ -104,7 +104,7 @@ async function DataRoom() {
 
 export default function DataRoomPage() {
   return (
-    <AccessGuard always what="The data room">
+    <AccessGuard always what="The data room" path="/data-room">
       <DataRoom />
     </AccessGuard>
   );

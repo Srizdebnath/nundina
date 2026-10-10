@@ -7,16 +7,15 @@
 //!
 //! | Item | Plan of record | Status in this crate |
 //! |---|---|---|
-//! | H1 max advance rate | 50% (SRS 08 LF-P1, doc 07 LF-3) | [`MAX_ADVANCE_RATE_BPS`] + [`check_advance_rate`], **enforced** by `payment-rails` `advance_funds` (#94): rate ≤ 50% and amount ≤ the curator-stated collateral mark × rate. The mark itself is unverified (no mark engine) |
-//! | H2 min subordination floor | no value set | **not enforced**: no tranche program exists |
-//! | H3 max discount / reserve-price bound | no value set | **not enforced** beyond the structural `≤ 100%` in [`crate::nav::haircut_bps`], whose ceiling is caller-supplied: `ceiling_bps = 0` binds nothing |
-//! | H4 no liquidation on a stale mark | rule, not a number | **not enforced**: no mark engine, no liquidation instruction |
+//! | H1 max advance rate | 50% (SRS 08 LF-P1, doc 07 LF-3) | [`MAX_ADVANCE_RATE_BPS`] + [`check_advance_rate`], **enforced** by `payment-rails` `advance_funds` (#94) and by `liquidity-facility`, which values collateral at mark-engine's `MARK_PROTECTIVE` on-chain |
+//! | H2 min subordination floor | interim 5%, awaiting sign-off (#202 §7) | **enforced** by `tranche-engine` (`MIN_ATTACHMENT_BPS = 500`, checked at `create_pool`) |
+//! | H3 max discount / reserve-price bound | interim 50%, awaiting sign-off (#202 §7) | **enforced** by `auction-engine` (`MAX_DISCOUNT_BPS = 5_000`, checked at `open_session`) |
+//! | H4 no liquidation on a stale mark | rule, not a number | **enforced**: `liquidity-facility` refuses every liquidation step unless mark-engine's `Feed::allows_liquidation` (Fresh or Warned) |
 //! | H5 timeout refund path | rule, not a number | enforced by `payment-rails` refunds (see its PHASES.md for the ask-vault caveat) |
 //!
-//! **Grade (#123): 1 of 5 HARD items enforced on-chain (H5), H1 partial,
-//! H2/H3/H4 roadmap.** H2 and H3 wait on a dated value decision; H4 lands
-//! with `mark-engine` and a facility liquidate instruction, neither of which
-//! has code (#124). SRS 08 §1.1 carries the same grade.
+//! **Grade (#202): all 5 HARD items enforced on-chain.** H2 and H3 carry
+//! interim values that still need a plan-of-record sign-off (#202 §7); the
+//! constants live in the programs that check them, not here, until then.
 //!
 //! Do not add a constant for H2/H3 with a guessed value. The number has to
 //! come from the plan first.
