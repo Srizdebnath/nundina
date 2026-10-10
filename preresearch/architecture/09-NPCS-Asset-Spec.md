@@ -55,7 +55,7 @@ The pilot replicates the *shape* of real permissioned credit tokens (OnRe ONyc, 
 
 **Authority model — target** (matches `08` §8): mint authority, permanent delegate, and freeze-all = **Squads 2-of-2 (founder + ops)**. Minting only against a confirmed treasury deposit. Token ACL `MintConfig` PDA delegates thaw decisions to **`credit-gate`**.
 
-> **As built (2026-09, #92):** none of the authority model above is in place. One bootstrap key (`2xhjfAdr…6sRXMh`) holds mint, freeze, permanent-delegate and metadata authority; the mint has no Token ACL extension and no `MintConfig`; `credit-gate` has no `validate` entrypoint; supply is 0. Statements in §2–§4 written in the present tense describe the **target**, not the live mint. This section should not go to counsel as a description of live controls before P1 (#5) lands; `08` §3's as-built block and `token/TOKENOMICS.md` §0 are the current-state record.
+> **As built (2026-10, #170/#171):** the devnet mint `6vt1…VKL4` has its freeze authority at Token ACL's `MintConfig` (`3AccB1gi…`), routed to `credit-gate` `5ycY…`, whose `validate` reads SAS attestations; mint, permanent-delegate and metadata authority sit with the Squads vault. Supply is 1.000000 backed by 1 USDC deposited by hand: `npcs-treasury` (mint-on-deposit) is deployed but not yet the mint authority, so I1 is still process, not code. `token/TOKENOMICS.md` §0 and `DEPLOYMENTS.md` are the current-state record; this section should not go to counsel as a description of live controls until the treasury hand-over executes. (Superseded record, 2026-09 #92: one bootstrap key held every authority and the mint had no Token ACL.)
 
 ### 2.1 Provenance & the honeypot collision (OAK 2026-03 finding)
 
@@ -281,7 +281,7 @@ NPCS is **not a program** — it is a mint plus scripts plus config. All *behavi
 
 ## 12 · Acceptance hooks
 
-This doc is satisfied when: **AC-1** passes E2E on devnet (attestation → thaw through gate; ineligible wallet rejected with typed reason), **AC-6/AC-7** pass (lot seasoning + governor on NPCS), `token/scripts/verify.ts` asserts the §2 extension manifest **and** the §2.1 provenance check on a live mint (today the §2.1 check is printed as *informational*, because the freeze authority is still the bootstrap wallet; it becomes REQUIRED at ACL wiring), and every §6 function is property-tested. NAV math (I2) is covered by `credit-math` from P0.
+This doc is satisfied when: **AC-1** passes E2E on devnet (attestation → thaw through gate; ineligible wallet rejected with typed reason), **AC-6/AC-7** pass (lot seasoning + governor on NPCS), `token/scripts/verify.ts` asserts the §2 extension manifest **and** the §2.1 provenance check on a live mint (a hard assertion since the ACL wiring, #170), and every §6 function is property-tested. NAV math (I2) is covered by `credit-math` from P0.
 
 ---
 

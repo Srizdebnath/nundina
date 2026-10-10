@@ -113,7 +113,7 @@ nundina/
 ├── app/                      ← Next.js 16 UI (pilot dashboards, session views)
 ├── ops/gate/                 ← credit-gate onboarding: SAS credential/schemas/attestations, Token ACL wiring (#122)
 ├── ops/squads/               ← Squads v4 2-of-2 authority migration + record (#126)
-├── services/                 ← off-chain services: deferral record only (none built, #58)
+├── services/                 ← off-chain services: indexer, API, NAV publisher, treasury agent, crank-runner (#141; not hosted)
 ├── preresearch/              ← the research corpus that justifies every design decision
 │   ├── architecture/         ← 00 index · 05 problem register · 06 solution · 07 legal · 08 SRS · 09 asset spec
 │   └── research/             ← 12 · dated market evidence (2026 reality check)
