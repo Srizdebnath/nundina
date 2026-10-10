@@ -13,7 +13,7 @@ to match.
 
 | Program | Cluster | Program ID | Slot | Deploy signature | Build SHA-256 | Upgrade authority |
 |---|---|---|---|---|---|---|
-| payment-rails v0.1.0 (cash layer, R5) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 504436527 | `3aWLZJ9WegXPJXkTrQHY2hpmTTm8PQc3Ztmd1EENAXxSc3AgHAfZL6yMqspA1QRpkEmi2XeD27c3sHtRwU5ioR3w` | `35ace429088050215fdb682ac9dcabc7834e93d50af73d41cbc7a30f4bcb7f38` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
+| payment-rails (cash layer, R5; upgrade #3 = `main` `74effa7`: `GrantEngine`, no per-trade fee) | devnet | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | 509621918 | `2MrwkqUcwT1VzNNS2fNonTdwkLZd7DrvhcErZh5Gwfxic3HeS7JDQCLkNPbg51tMZFNr7LNUindg2YCfpBLdaYBW` | `7c84150aa93781e406fa0f1ffca5e86b7363362214d86d2fab6cefd02b5b2787` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2 multisig `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7`, 48h timelock (#126; was `9WH1…2uDZ`) |
 | credit-gate v0.2.0 (CG-P1..P7: SAS read, validate, governor, block-list, lot ledger, Token ACL hooks, settle_check; #170) | devnet | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | 507271972 | `wBS5W8CZ3qmyPv9rduw2wEtpaGAHUGqC2HdqLB58xQzrhaSzYr2A6CrMKoRK8okNwvc2BxriY8bxbY4gvbf4nNQ` | `7668a862b60f4d1602aa0dbf8a8c29a6da56658c82a7a9caf6dd27266dfe2270` | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV`: Squads v4 vault, 2-of-2, 48h timelock (#171; was `9WH1…2uDZ`) |
 | mark-engine v0.1.0 (ME-P1..P7: feed, NAV publication, prints, staleness haircuts; #137) | devnet | `79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH` | 508551724 | `RomDYUFy5KT6EAiqtdVqhuzPt3JT2ZRo1Ttmsct5FBf6hbhAYLzoeCm1hbvPef1aWU9DaQhF8oehiLzWNMkPABf` | `23dbbd22ea2937960bfccbe8ef2a68bba629e72d31127448f3f031f4299a0c0a` | `9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ` (deployer; Squads hand-over pending, as for credit-gate) |
 | auction-engine v0.1.0 (AE-P1..P11: sealed-bid sessions, uniform clear, ROFR; #136) | devnet | `Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7` | 508552044 | `USqwBa1X4NJoc549FvdcrjemsTZ3G6jaXMoqnrGQTEmYnxkAydg2RFgT23YW1Gbaca9UtkDnpqBRjt3Kk6vZSnh` | `8957e87deb0dfe6390ffd481ad6605060f683b70a5f2e8a398e2c2b74ca283cc` | `9WH1…2uDZ` (as above) |
@@ -53,14 +53,13 @@ authority `9WH1…2uDZ`. Run it with `--status` to read the state back.
 The inputs document is in `ops/engines/nav/`; anyone can recompute it.
 Published by `services` `npm run svc -- nav` (#141), weekly from here on.
 
-**Not live yet.** Auction sessions need payment-rails `grant_engine` for
-the auction operator PDA. The live rails build (Squads upgrade #2,
-executed 2026-10-07) predates `GrantEngine` (#181), so upgrade #3 to
-main is proposed and approved; its 48 h timelock opens 2026-10-09 20:43
-UTC (row 6 of the Squads table below). npcs-treasury and tranche-engine
-were deployed on 2026-10-08 (rows above). Not deployed yet:
-liquidity-facility (~3.5 SOL; it goes up once #3 refunds its buffer rent,
-and `open_facility` needs a rails `ROLE_FACILITY` grant anyway).
+**Rails upgrade #3 executed (2026-10-10, `2MrwkqUc…`).** The live rails
+build now has `GrantEngine`; `auction-session.ts` grants the auction
+operator PDA `ROLE_SESSIONS` as its step 0. `--preflight` on 2026-10-10
+reports one blocker only: H's lot seasoning (sellable from
+2026-10-11 07:53 UTC). Not deployed yet: liquidity-facility (~4.4 SOL);
+on `main` it moves gate lots through credit-gate's custody module
+(LF-P5), so it goes up after the credit-gate upgrade that carries it.
 
 **First live session: runbook.** `payment-rails/crank/scripts/devnet/auction-session.ts`
 runs one sealed-bid auction-engine session over the live NPCS mint end to end
