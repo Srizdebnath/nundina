@@ -1446,6 +1446,90 @@
       ]
     },
     {
+      "name": "deregister_affiliate",
+      "docs": [
+        "L6: `wallet` is no longer an affiliate (its record closes; rent to",
+        "the authority). Gate-config authority."
+      ],
+      "discriminator": [
+        217,
+        176,
+        190,
+        118,
+        178,
+        186,
+        66,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  102,
+                  102,
+                  105,
+                  108,
+                  105,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "record.wallet",
+                "account": "AffiliateRecord"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "deregister_custodian",
       "docs": [
         "Revoke a custodian (its ledgers stay; it can no longer move lots)."
@@ -2124,6 +2208,70 @@
       "args": []
     },
     {
+      "name": "migrate_config",
+      "docs": [
+        "#202: give a market created before #202 its compliance tail",
+        "([`Compliance`], behind the unchanged `MarketConfig` struct), at the",
+        "defaults that keep its behaviour exactly: issuer flags set, no",
+        "ticket floor, `PolicyOnly`, no affiliate limit. Permissionless (the",
+        "payer funds the extra rent). Until it runs the market reads those",
+        "same defaults and `update_compliance` refuses; every program built",
+        "against the old layout keeps decoding the config either way.",
+        "Evented as `ConfigUpdated` with `field_group_ext = MIGRATED`."
+      ],
+      "discriminator": [
+        92,
+        131,
+        58,
+        105,
+        210,
+        154,
+        224,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Anyone; funds the extra rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "open_holder_lots",
       "docs": [
         "CG-P3: open the lot ledger for `holder` (anyone may pay). The holder",
@@ -2510,6 +2658,177 @@
       ]
     },
     {
+      "name": "record_seizure",
+      "docs": [
+        "D14 / doc 09 Path 7: the audit-trail hook for a permanent-delegate",
+        "seizure. The transfer itself is Token-2022's (the mint's permanent",
+        "delegate moves the units); this instruction, signed by the",
+        "gate-config authority in the same transaction, emits",
+        "[`SeizureRecorded`] (mint, from, to, amount, reason hash) so every",
+        "use of the delegate is indexed next to the gate's other decisions."
+      ],
+      "discriminator": [
+        58,
+        20,
+        166,
+        242,
+        159,
+        118,
+        178,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "from",
+          "type": "pubkey"
+        },
+        {
+          "name": "to",
+          "type": "pubkey"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "reason_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "register_affiliate",
+      "docs": [
+        "L6: mark `wallet` an affiliate of the issuer on this market. Its",
+        "sales are then counted against `affiliate_volume_limit` per window",
+        "(`settle_check`). Gate-config authority."
+      ],
+      "discriminator": [
+        87,
+        121,
+        99,
+        184,
+        126,
+        63,
+        103,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  102,
+                  102,
+                  105,
+                  108,
+                  105,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "register_custodian",
       "docs": [
         "LF-P5 (CG-P3 custody): let `custodian` hold lots for others on this",
@@ -2604,9 +2923,19 @@
     {
       "name": "release_holder",
       "docs": [
-        "CG-P4 decrement: the gate-config authority confirms `owner` exited",
-        "to zero; its link closes, and its investor leaves the count with its",
-        "last wallet."
+        "CG-P4 decrement: the gate-config authority releases `owner`; its",
+        "link closes, and its investor leaves the count with its last wallet.",
+        "",
+        "Not on the authority's word alone (#202): the instruction must see",
+        "the exit to zero. The owner's lot ledger holds nothing, its",
+        "Token-2022 associated account for the mint is absent or empty, and",
+        "every further token account passed as a remaining account (each a",
+        "Token-2022 account of this mint and owner) is empty too",
+        "([`eligibility::require_exited`]). Completeness of that list is the",
+        "authority's (it finds them with `getTokenAccountsByOwner`); the",
+        "chain cannot enumerate a wallet's accounts, which is why release",
+        "stays authority-signed rather than permissionless: a caller hiding",
+        "a funded non-ATA account could otherwise undercount the governor."
       ],
       "discriminator": [
         84,
@@ -2730,6 +3059,39 @@
           "signer": true,
           "relations": [
             "config"
+          ]
+        },
+        {
+          "name": "lots",
+          "docs": [
+            "absent."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_account",
+          "docs": [
+            "(address checked in `require_exited`); must be empty or absent."
           ]
         }
       ],
@@ -3332,6 +3694,77 @@
       ]
     },
     {
+      "name": "update_compliance",
+      "docs": [
+        "CG-3 / CG-4 / CG-6 / L6 governed updates of the compliance tail",
+        "(#202), one `Option` per field like `update_config`, and evented the",
+        "same way (`ConfigUpdated`, bits in `field_group_ext`). Separate from",
+        "`update_config` so that instruction's wire format and every caller",
+        "built against it stay as they are."
+      ],
+      "discriminator": [
+        219,
+        3,
+        160,
+        220,
+        171,
+        41,
+        244,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "Per-mint policy PDA; only its governing authority may update."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "docs": [
+            "Current gate-config authority (checked by `has_one`)."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "update",
+          "type": {
+            "defined": {
+              "name": "ComplianceUpdate"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "update_config",
       "docs": [
         "CG-P2: governed field updates. Every call emits `ConfigUpdated`.",
@@ -3718,6 +4151,19 @@
   ],
   "accounts": [
     {
+      "name": "AffiliateRecord",
+      "discriminator": [
+        157,
+        224,
+        132,
+        6,
+        191,
+        100,
+        69,
+        108
+      ]
+    },
+    {
       "name": "BlockEntry",
       "discriminator": [
         160,
@@ -3850,6 +4296,19 @@
   ],
   "events": [
     {
+      "name": "AffiliateSet",
+      "discriminator": [
+        242,
+        39,
+        33,
+        12,
+        23,
+        49,
+        183,
+        155
+      ]
+    },
+    {
       "name": "BlocklistUpdated",
       "discriminator": [
         220,
@@ -3964,6 +4423,19 @@
         236,
         245,
         161
+      ]
+    },
+    {
+      "name": "SeizureRecorded",
+      "discriminator": [
+        224,
+        11,
+        59,
+        96,
+        190,
+        37,
+        240,
+        195
       ]
     },
     {
@@ -4182,7 +4654,7 @@
     {
       "code": 6037,
       "name": "SelfTrade",
-      "msg": "Buyer and seller are the same wallet"
+      "msg": "Buyer and seller are the same wallet or investor"
     },
     {
       "code": 6038,
@@ -4203,9 +4675,148 @@
       "code": 6041,
       "name": "BuyerNotAdmitted",
       "msg": "Custody-sale buyer is not admitted"
+    },
+    {
+      "code": 6042,
+      "name": "ConfigAlreadyMigrated",
+      "msg": "Config is already migrated"
+    },
+    {
+      "code": 6043,
+      "name": "ConfigNotMigrated",
+      "msg": "Config has no compliance tail: run migrate_config"
+    },
+    {
+      "code": 6044,
+      "name": "EmptyComplianceUpdate",
+      "msg": "Compliance update writes nothing"
+    },
+    {
+      "code": 6045,
+      "name": "IssuerReportingStale",
+      "msg": "Issuer reporting is not current: market disabled"
+    },
+    {
+      "code": 6046,
+      "name": "BadActorUnscreened",
+      "msg": "Bad-actor screen not current: market disabled"
+    },
+    {
+      "code": 6047,
+      "name": "BelowMinTicket",
+      "msg": "Fill is below the market minimum ticket"
+    },
+    {
+      "code": 6048,
+      "name": "DistributionCompliance",
+      "msg": "Lot is inside its distribution-compliance period"
+    },
+    {
+      "code": 6049,
+      "name": "ExemptionClassClosed",
+      "msg": "Exemption class is closed on this venue"
+    },
+    {
+      "code": 6050,
+      "name": "AffiliateVolumeExceeded",
+      "msg": "Affiliate volume limit for this window exceeded"
+    },
+    {
+      "code": 6051,
+      "name": "AffiliateRecordRequired",
+      "msg": "Seller's affiliate record is required"
+    },
+    {
+      "code": 6052,
+      "name": "RemainingAccountMismatch",
+      "msg": "Remaining account is not the expected gate PDA"
+    },
+    {
+      "code": 6053,
+      "name": "HolderNotExited",
+      "msg": "Holder still holds units of this mint"
+    },
+    {
+      "code": 6054,
+      "name": "EmptySeizure",
+      "msg": "Seizure amount is zero"
     }
   ],
   "types": [
+    {
+      "name": "AffiliateRecord",
+      "docs": [
+        "One registered issuer affiliate on one market, and its sale volume in",
+        "the current window (L6)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "docs": [
+              "The affiliate's wallet (a seller)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "window_start",
+            "docs": [
+              "When the current window opened (0 = no sale yet)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "window_qty",
+            "docs": [
+              "Base units sold in the current window."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AffiliateSet",
+      "docs": [
+        "Emitted by `register_affiliate` / `deregister_affiliate` (CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "registered",
+            "type": "bool"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
     {
       "name": "AttestationRef",
       "docs": [
@@ -4391,6 +5002,64 @@
       }
     },
     {
+      "name": "ComplianceUpdate",
+      "docs": [
+        "`update_compliance` arguments: one `Option` per layout-v2 field, `None`",
+        "= leave as is (like `update_config`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "issuer_reporting_current",
+            "type": {
+              "option": "bool"
+            }
+          },
+          {
+            "name": "bad_actor_screened",
+            "type": {
+              "option": "bool"
+            }
+          },
+          {
+            "name": "min_ticket",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "exemption_class",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "ExemptionClass"
+                }
+              }
+            }
+          },
+          {
+            "name": "distribution_compliance_seconds",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "affiliate_volume_limit",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "affiliate_window_seconds",
+            "type": {
+              "option": "i64"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "ConfigUpdated",
       "docs": [
         "CG-P7: every state change emits exactly one event from these families."
@@ -4411,7 +5080,8 @@
             "docs": [
               "Bitmask of the fields this instruction wrote ([`field_group`]).",
               "`INIT` plus every field set on creation; on update, one bit per",
-              "supplied argument. Never 0: an update that writes nothing is rejected."
+              "supplied argument. `field_group` and `field_group_ext` are never",
+              "both 0: an update that writes nothing is rejected."
             ],
             "type": "u8"
           },
@@ -4431,9 +5101,18 @@
           {
             "name": "authority",
             "docs": [
-              "Authority that performed the update."
+              "Authority that performed the update (the payer on `migrate_config`,",
+              "which writes only defaults)."
             ],
             "type": "pubkey"
+          },
+          {
+            "name": "field_group_ext",
+            "docs": [
+              "Bitmask of the compliance-tail fields written ([`field_group_ext`], #202).",
+              "Appended: decoders of the v1 event read the prefix unchanged."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -4484,6 +5163,34 @@
           {
             "name": "authority",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExemptionClass",
+      "docs": [
+        "The market's exemption / jurisdiction class (CG-3, doc 07 L3, L14, L26,",
+        "L27). Wire-stable (borsh index); append only. It narrows what",
+        "[`MarketPolicy`] already allows; it never widens it."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PolicyOnly"
+          },
+          {
+            "name": "Us506c"
+          },
+          {
+            "name": "Us506bDataRoom"
+          },
+          {
+            "name": "RegSNonUs"
+          },
+          {
+            "name": "EuMtfOnly"
           }
         ]
       }
@@ -4580,6 +5287,9 @@
           },
           {
             "name": "InvestorIdChanged"
+          },
+          {
+            "name": "ExemptionClassClosed"
           }
         ]
       }
@@ -4917,8 +5627,11 @@
           {
             "name": "affiliate",
             "docs": [
-              "Acquired by an affiliate of the issuer (doc 07: affiliate resale",
-              "rules differ)."
+              "Acquired by an affiliate of the issuer (doc 07 L6: affiliate resale",
+              "rules differ). Enforced through the seller's [`crate::AffiliateRecord`]",
+              "(#202): while a market's affiliate limit is on, a seller holding a",
+              "lot flagged here cannot sell until it is registered, and a",
+              "registered affiliate's sales count against the window."
             ],
             "type": "bool"
           },
@@ -5373,6 +6086,73 @@
           {
             "name": "authority",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SeizureRecorded",
+      "docs": [
+        "Emitted by `record_seizure` (D14, doc 09 Path 7): one per",
+        "permanent-delegate transfer, so delegate use is indexed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "The gated mint whose permanent delegate moved the units."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "docs": [
+              "The wallet the units were taken from."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "to",
+            "docs": [
+              "The wallet (or account owner) they went to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Base units moved."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reason_hash",
+            "docs": [
+              "Hash of the off-chain basis (court order, sanctions action, …).",
+              "Never the reason itself: no PII on-chain."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "The gate-config authority that recorded it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "recorded_at",
+            "docs": [
+              "When it was recorded."
+            ],
+            "type": "i64"
           }
         ]
       }

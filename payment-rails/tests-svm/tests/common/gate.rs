@@ -474,6 +474,22 @@ impl Env {
         self.send(&[ix], &[&auth]).expect("update_config");
     }
 
+    /// `update_compliance` by the gate authority (#202 compliance tail).
+    pub fn update_compliance(&mut self, update: credit_gate::ComplianceUpdate) -> super::Res {
+        let auth = self.authority.insecure_clone();
+        let ix = Instruction {
+            program_id: GATE_ID,
+            accounts: gacc::UpdateConfig {
+                config: self.gate_config(),
+                mint: self.asset_mint,
+                gate_config_authority: auth.pubkey(),
+            }
+            .to_account_metas(None),
+            data: gix::UpdateCompliance { update }.data(),
+        };
+        self.send(&[ix], &[&auth])
+    }
+
     /// Put `wallet` on the market block-list (CG-P5).
     pub fn block(&mut self, wallet: &Pubkey) {
         let auth = self.authority.insecure_clone();

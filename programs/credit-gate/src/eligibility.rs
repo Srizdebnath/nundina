@@ -24,14 +24,15 @@
 //! one investor's several wallets count once. A new `investor_id` is
 //! admitted only while `distinct_investors < holder_cap`; the count drops
 //! when the investor's last wallet is released (`release_holder`, signed by
-//! the gate-config authority, which confirms the exit to zero).
+//! the gate-config authority, and only on on-chain proof of the exit to
+//! zero: empty lot ledger and empty token accounts, [`require_exited`]).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::system_program;
 
 use crate::blocklist::{screen, BlockEntry};
-use crate::{GateError, GateReject, MarketConfig, MAX_ATTESTERS};
+use crate::{Compliance, GateError, GateReject, MarketConfig, MAX_ATTESTERS};
 
 /// The Solana Attestation Service program (same id on devnet and mainnet).
 pub const SAS_PROGRAM_ID: Pubkey = pubkey!("22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG");
@@ -450,6 +451,7 @@ pub fn reject_error(r: GateReject) -> Error {
         GateReject::NotAccredited => error!(GateError::NotAccredited),
         GateReject::KycLevelTooLow => error!(GateError::KycLevelTooLow),
         GateReject::InvestorIdChanged => error!(GateError::InvestorIdChanged),
+        GateReject::ExemptionClassClosed => error!(GateError::ExemptionClassClosed),
     }
 }
 
@@ -521,6 +523,15 @@ pub fn process_validate(ctx: Context<Validate>, owner: Pubkey) -> Result<()> {
         &a.accreditation_attestation,
         now,
     )?;
+    // CG-3 (#202): the market's exemption class narrows the policy.
+    let compliance = Compliance::load(&a.config.to_account_info())?;
+    let decided =
+        decided.and_then(
+            |e| match compliance.class_reject(&e.identity, &e.accreditation) {
+                Some(r) => Err(r),
+                None => Ok(e),
+            },
+        );
     let (outcome, hash, refs) = match decided {
         Err(r) => (Err(r), [0; 32], Default::default()),
         Ok(e) => (
@@ -782,6 +793,73 @@ pub struct ReleaseHolder<'info> {
     pub mint: UncheckedAccount<'info>,
     #[account(mut)]
     pub gate_config_authority: Signer<'info>,
+    // ── #202 (appended): the exit-to-zero proof, see `require_exited`. ──
+    /// CHECK: the owner's lot ledger, pinned by seeds; must be empty or
+    /// absent.
+    #[account(seeds = [crate::HolderLots::SEED, mint.key().as_ref(), owner.as_ref()], bump)]
+    pub lots: UncheckedAccount<'info>,
+    /// CHECK: the owner's Token-2022 associated token account for the mint
+    /// (address checked in `require_exited`); must be empty or absent.
+    pub token_account: UncheckedAccount<'info>,
+}
+
+/// The SPL associated-token-account program.
+pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
+    pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+/// `owner`'s Token-2022 associated token account for `mint`.
+pub fn associated_token_2022(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[owner.as_ref(), crate::TOKEN_2022_ID.as_ref(), mint.as_ref()],
+        &ASSOCIATED_TOKEN_PROGRAM_ID,
+    )
+    .0
+}
+
+/// Base-layout `amount` of a Token-2022 account of `mint` owned by
+/// `owner`; `None` if `ai` is anything else. An absent account (no data,
+/// not Token-2022-owned and holding no data) is `Some(0)`.
+fn token_amount(ai: &AccountInfo, mint: &Pubkey, owner: &Pubkey) -> Option<u64> {
+    if ai.data_is_empty() && ai.owner != &crate::TOKEN_2022_ID {
+        return Some(0);
+    }
+    let d = ai.try_borrow_data().ok()?;
+    let ok = ai.owner == &crate::TOKEN_2022_ID
+        && d.len() >= 72
+        && d[..32] == mint.to_bytes()
+        && d[32..64] == owner.to_bytes();
+    ok.then(|| u64::from_le_bytes(d[64..72].try_into().unwrap_or_default()))
+}
+
+/// CG-P4 exit proof for `release_holder` (#202): `owner` holds nothing of
+/// `mint` that the instruction can see. The lot ledger (`lots`, pinned by
+/// seeds) is absent or totals zero; `ata` is the owner's Token-2022
+/// associated account and is absent or empty; every account in `extra` is
+/// a Token-2022 account of this mint and owner, and empty. Any other
+/// account in `extra`, or a non-zero balance anywhere, fails
+/// [`GateError::HolderNotExited`].
+pub fn require_exited<'info>(
+    mint: &Pubkey,
+    owner: &Pubkey,
+    lots: &AccountInfo<'info>,
+    ata: &AccountInfo<'info>,
+    extra: &[AccountInfo<'info>],
+) -> Result<()> {
+    if let Some(l) = load::<crate::HolderLots>(lots)? {
+        require!(l.total()? == 0, GateError::HolderNotExited);
+    }
+    require_keys_eq!(
+        *ata.key,
+        associated_token_2022(owner, mint),
+        GateError::TokenAccountMismatch
+    );
+    for ai in core::iter::once(ata).chain(extra) {
+        require!(
+            token_amount(ai, mint, owner) == Some(0),
+            GateError::HolderNotExited
+        );
+    }
+    Ok(())
 }
 
 #[derive(Accounts)]

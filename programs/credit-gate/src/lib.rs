@@ -24,6 +24,7 @@
 use anchor_lang::prelude::*;
 
 pub mod blocklist;
+pub mod compliance;
 pub mod custody;
 pub mod eligibility;
 pub mod lots;
@@ -31,6 +32,7 @@ pub mod settle;
 pub mod token_acl;
 
 pub use blocklist::*;
+pub use compliance::*;
 pub use custody::*;
 pub use eligibility::*;
 pub use lots::*;
@@ -57,12 +59,38 @@ pub const MAX_HOLDER_CAP: u32 = 1_999;
 /// control rather than a compressed one. Pilot value: 7 days.
 pub const MIN_SEASONING_SECONDS: i64 = 86_400;
 
-/// Floor on `settlement_horizon_seconds` (#95): one day. **Placeholder.**
-/// H4 (doc 06 §7) requires attestation validity to span the whole
-/// commit→settle window, so the true floor is the market session length,
-/// which has no plan-of-record value until auction-engine lands. One day
-/// is the pilot value; raise this to the session length then.
+/// Floor on `settlement_horizon_seconds` (#95, #202): one day.
+///
+/// H4 (doc 06 §7, doc 07 CG-5) asks that attestation validity span the
+/// whole commit→settle window. That window is a *session* parameter
+/// (auction-engine `SessionParams`, `settle_deadline − open`), so the
+/// per-market bound on it is `MarketConfig::settlement_horizon_seconds`
+/// itself: governance sets it to the market's cadence (doc 06 §2: weekly
+/// for the pilot ⇒ 7 days; monthly/quarterly fund markets longer), and a
+/// session that does not fit is refused by [`MarketConfig::covers_session`].
+///
+/// The floor only rules out horizons too short to be a session at all: a
+/// session runs commit → reveal → ROFR → settle as four separate windows
+/// with `unix_timestamp` grace periods (doc 06 §2, D7), and one day is the
+/// shortest span the venue design schedules them in (ad-hoc forced-sale
+/// and wind-down sessions). It is not the safety bound: `settle_check`
+/// re-reads every attestation inside the fill (AE-P8), so a lapse inside
+/// the window fails that fill closed whatever the horizon. The horizon
+/// buys liveness (an order admitted at commit does not lapse before its
+/// fill), and the floor keeps it from being configured to buy nothing.
 pub const MIN_SETTLEMENT_HORIZON_SECONDS: i64 = 86_400;
+
+/// Floor on a Reg S market's `distribution_compliance_seconds` (CG-3,
+/// doc 07 L27): 40 days, the shortest distribution-compliance period
+/// Regulation S sets (Rule 903(b)(2)/(3), debt and Category 2). Category 3
+/// equity runs six months or a year; counsel picks the market's value
+/// (Q17), the gate only refuses anything shorter than the statute's least.
+pub const REG_S_MIN_DISTRIBUTION_COMPLIANCE_SECONDS: i64 = 40 * 86_400;
+
+/// Floor on `affiliate_window_seconds` while an affiliate limit is on (L6):
+/// one day, so `window_qty` cannot be reset every slot. Rule 144(e) itself
+/// uses three months; governance sets that (counsel to confirm, Q4).
+pub const MIN_AFFILIATE_WINDOW_SECONDS: i64 = 86_400;
 
 /// Hard ceiling on `seasoning_seconds` and `settlement_horizon_seconds`:
 /// 5 years. This is a sanity bound against typos and against
@@ -88,6 +116,49 @@ pub mod field_group {
     pub const SCHEMAS: u8 = 1 << 6;
     /// The config was created by this instruction (`initialize_config`).
     pub const INIT: u8 = 1 << 7;
+}
+
+/// Bits of [`ConfigUpdated::field_group_ext`] (#202): the fields of the
+/// compliance tail ([`Compliance`]), which `field_group` (8 bits, all
+/// taken) cannot name. Wire-stable; append only.
+pub mod field_group_ext {
+    /// `issuer_reporting_current` / `bad_actor_screened` (CG-6).
+    pub const ISSUER_FLAGS: u8 = 1 << 0;
+    /// `min_ticket` (CG-4).
+    pub const MIN_TICKET: u8 = 1 << 1;
+    /// `exemption_class` / `distribution_compliance_seconds` (CG-3).
+    pub const EXEMPTION_CLASS: u8 = 1 << 2;
+    /// `affiliate_volume_limit` / `affiliate_window_seconds` (L6).
+    pub const AFFILIATE_LIMIT: u8 = 1 << 3;
+    /// `migrate_config` gave a config its tail (defaults only).
+    pub const MIGRATED: u8 = 1 << 4;
+}
+
+/// The market's exemption / jurisdiction class (CG-3, doc 07 L3, L14, L26,
+/// L27). Wire-stable (borsh index); append only. It narrows what
+/// [`MarketPolicy`] already allows; it never widens it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, AnchorSerialize, AnchorDeserialize, InitSpace,
+)]
+pub enum ExemptionClass {
+    /// Pre-#202 behaviour: the market policy alone decides. The default,
+    /// and what `migrate_config` writes for an existing market.
+    #[default]
+    PolicyOnly,
+    /// `US_506c`: every holder is accredited, whatever the policy's
+    /// `require_accreditation` says (Rule 506(c) verified accreditation).
+    Us506c,
+    /// `US_506b_data_room`: the on-chain checks are the policy's; the
+    /// no-general-solicitation half (aggregate prints into the data room,
+    /// L14) is mark-engine's print policy and the front end.
+    Us506bDataRoom,
+    /// `RegS_NonUS`: no holder with a `US` identity jurisdiction, and a lot
+    /// cannot be resold until `distribution_compliance_seconds` after its
+    /// acquisition (per-lot clock, L27). Separate market, separate book.
+    RegSNonUs,
+    /// `EU_MTF_only`: routed out in v1–v2 (L26). Nobody is admitted and no
+    /// fill settles on this gate.
+    EuMtfOnly,
 }
 
 /// One immutable-per-market policy configuration (CG-P2).
@@ -142,6 +213,16 @@ pub struct MarketConfig {
 impl MarketConfig {
     /// PDA seed prefix.
     pub const SEED: &'static [u8] = b"config";
+
+    /// H4: does a session whose commit window opens at `open` and whose
+    /// settlement closes at `settle_deadline` fit inside this market's
+    /// settlement horizon? auction-engine's `open_session` is the caller
+    /// this exists for (the gate never sees a session).
+    pub fn covers_session(&self, open: i64, settle_deadline: i64) -> bool {
+        settle_deadline
+            .checked_sub(open)
+            .is_some_and(|span| (0..=self.settlement_horizon_seconds).contains(&span))
+    }
 
     /// Bounds every config must satisfy after any write (#53). Checked on
     /// init and on every update, so governance cannot move a config out of
@@ -229,13 +310,18 @@ pub struct ConfigUpdated {
     pub mint: Pubkey,
     /// Bitmask of the fields this instruction wrote ([`field_group`]).
     /// `INIT` plus every field set on creation; on update, one bit per
-    /// supplied argument. Never 0: an update that writes nothing is rejected.
+    /// supplied argument. `field_group` and `field_group_ext` are never
+    /// both 0: an update that writes nothing is rejected.
     pub field_group: u8,
     /// SHA-256 of the post-update config (`MarketConfig::fingerprint`):
     /// every governed field, domain-separated. No PII.
     pub new_config_hash: [u8; 32],
-    /// Authority that performed the update.
+    /// Authority that performed the update (the payer on `migrate_config`,
+    /// which writes only defaults).
     pub authority: Pubkey,
+    /// Bitmask of the compliance-tail fields written ([`field_group_ext`], #202).
+    /// Appended: decoders of the v1 event read the prefix unchanged.
+    pub field_group_ext: u8,
 }
 
 /// Emitted by the gate-root instructions (#93). Exactly one per
@@ -300,6 +386,9 @@ pub enum GateReject {
     /// The wallet is admitted under one `investor_id` and now presents an
     /// identity attestation with another (CG-P4: no silent re-mapping).
     InvestorIdChanged,
+    /// The market's [`ExemptionClass`] admits nobody on this gate
+    /// (`EuMtfOnly`, routed out in v1–v2). Appended (#202).
+    ExemptionClassClosed,
 }
 
 /// Error set for the gate program.
@@ -420,8 +509,9 @@ pub enum GateError {
     /// `settle_check*` not signed by payment-rails' settlement PDA.
     #[msg("Signer is not the payment-rails settlement authority")]
     NotSettlementAuthority,
-    /// A fill whose buyer is its seller.
-    #[msg("Buyer and seller are the same wallet")]
+    /// A fill whose buyer is its seller: the same wallet, or (#202) two
+    /// wallets admitted under the same `investor_id`.
+    #[msg("Buyer and seller are the same wallet or investor")]
     SelfTrade,
     /// A custody move wants more than the ledger holds (LF-P5).
     #[msg("Ledger holds less than the quantity to move")]
@@ -436,6 +526,47 @@ pub enum GateError {
     /// A custody sale's buyer is not admitted by the gate (LF-P5).
     #[msg("Custody-sale buyer is not admitted")]
     BuyerNotAdmitted,
+    // ── #202 (appended; codes above are wire-stable) ──
+    /// `migrate_config` on a config that already has its tail.
+    #[msg("Config is already migrated")]
+    ConfigAlreadyMigrated,
+    /// `update_compliance` on a config without its tail: run `migrate_config`.
+    #[msg("Config has no compliance tail: run migrate_config")]
+    ConfigNotMigrated,
+    /// `update_compliance` with every field `None`.
+    #[msg("Compliance update writes nothing")]
+    EmptyComplianceUpdate,
+    /// The market's `issuer_reporting_current` flag is cleared (L15, CG-6).
+    #[msg("Issuer reporting is not current: market disabled")]
+    IssuerReportingStale,
+    /// The market's `bad_actor_screened` flag is cleared (L16, CG-6).
+    #[msg("Bad-actor screen not current: market disabled")]
+    BadActorUnscreened,
+    /// A fill below the market's `min_ticket` (CG-4).
+    #[msg("Fill is below the market minimum ticket")]
+    BelowMinTicket,
+    /// A Reg S lot resold inside its distribution-compliance period (L27).
+    #[msg("Lot is inside its distribution-compliance period")]
+    DistributionCompliance,
+    /// The market's exemption class settles nothing on this gate (CG-3).
+    #[msg("Exemption class is closed on this venue")]
+    ExemptionClassClosed,
+    /// An affiliate sale would exceed the window's volume limit (L6).
+    #[msg("Affiliate volume limit for this window exceeded")]
+    AffiliateVolumeExceeded,
+    /// An affiliate limit is on and the seller's affiliate record was not
+    /// passed, or the seller holds affiliate lots and is not registered.
+    #[msg("Seller's affiliate record is required")]
+    AffiliateRecordRequired,
+    /// A `settle_check` remaining account is not the PDA it must be.
+    #[msg("Remaining account is not the expected gate PDA")]
+    RemainingAccountMismatch,
+    /// `release_holder` without proof the holder exited to zero (CG-P4).
+    #[msg("Holder still holds units of this mint")]
+    HolderNotExited,
+    /// `record_seizure` of nothing.
+    #[msg("Seizure amount is zero")]
+    EmptySeizure,
 }
 
 #[program]
@@ -557,6 +688,8 @@ pub mod credit_gate {
             bump,
         });
         cfg.check_bounds(&cfg.key())?;
+        // #202: a new market carries the compliance tail from birth.
+        Compliance::default().store(&cfg.to_account_info())?;
         emit!(ConfigUpdated {
             mint: mint_key,
             field_group: field_group::INIT
@@ -568,6 +701,11 @@ pub mod credit_gate {
                 | field_group::SCHEMAS,
             new_config_hash: cfg.fingerprint(),
             authority: authority_key,
+            // The tail starts at its defaults (`Compliance::default`).
+            field_group_ext: field_group_ext::ISSUER_FLAGS
+                | field_group_ext::MIN_TICKET
+                | field_group_ext::EXEMPTION_CLASS
+                | field_group_ext::AFFILIATE_LIMIT,
         });
         Ok(())
     }
@@ -637,11 +775,14 @@ pub mod credit_gate {
             cfg.blocklist = Some(bl);
         }
         cfg.check_bounds(&cfg.key())?;
+        // The tail's bounds lean on `seasoning_seconds` (#202).
+        Compliance::load(&cfg.to_account_info())?.check_bounds(cfg)?;
         emit!(ConfigUpdated {
             mint: cfg.mint,
             field_group: mask,
             new_config_hash: cfg.fingerprint(),
             authority: authority_key,
+            field_group_ext: 0,
         });
         Ok(())
     }
@@ -724,6 +865,7 @@ pub mod credit_gate {
             field_group: field_group::BLOCKLIST,
             new_config_hash: cfg.fingerprint(),
             authority: ctx.accounts.gate_config_authority.key(),
+            field_group_ext: 0,
         });
         Ok(())
     }
@@ -918,10 +1060,30 @@ pub mod credit_gate {
         eligibility::process_validate(ctx, owner)
     }
 
-    /// CG-P4 decrement: the gate-config authority confirms `owner` exited
-    /// to zero; its link closes, and its investor leaves the count with its
-    /// last wallet.
-    pub fn release_holder(ctx: Context<ReleaseHolder>, owner: Pubkey) -> Result<()> {
+    /// CG-P4 decrement: the gate-config authority releases `owner`; its
+    /// link closes, and its investor leaves the count with its last wallet.
+    ///
+    /// Not on the authority's word alone (#202): the instruction must see
+    /// the exit to zero. The owner's lot ledger holds nothing, its
+    /// Token-2022 associated account for the mint is absent or empty, and
+    /// every further token account passed as a remaining account (each a
+    /// Token-2022 account of this mint and owner) is empty too
+    /// ([`eligibility::require_exited`]). Completeness of that list is the
+    /// authority's (it finds them with `getTokenAccountsByOwner`); the
+    /// chain cannot enumerate a wallet's accounts, which is why release
+    /// stays authority-signed rather than permissionless: a caller hiding
+    /// a funded non-ATA account could otherwise undercount the governor.
+    pub fn release_holder<'info>(
+        ctx: Context<'info, ReleaseHolder<'info>>,
+        owner: Pubkey,
+    ) -> Result<()> {
+        eligibility::require_exited(
+            &ctx.accounts.mint.key(),
+            &owner,
+            &ctx.accounts.lots,
+            &ctx.accounts.token_account,
+            ctx.remaining_accounts,
+        )?;
         let investor = &mut ctx.accounts.investor;
         investor.wallets = investor.wallets.saturating_sub(1);
         let exited = investor.wallets == 0;
@@ -1082,6 +1244,56 @@ pub mod credit_gate {
         custody::process_sale(ctx, pledge_ref, buyer, qty)
     }
 
+    /// #202: give a market created before #202 its compliance tail
+    /// ([`Compliance`], behind the unchanged `MarketConfig` struct), at the
+    /// defaults that keep its behaviour exactly: issuer flags set, no
+    /// ticket floor, `PolicyOnly`, no affiliate limit. Permissionless (the
+    /// payer funds the extra rent). Until it runs the market reads those
+    /// same defaults and `update_compliance` refuses; every program built
+    /// against the old layout keeps decoding the config either way.
+    /// Evented as `ConfigUpdated` with `field_group_ext = MIGRATED`.
+    pub fn migrate_config(ctx: Context<MigrateConfig>) -> Result<()> {
+        compliance::process_migrate_config(ctx)
+    }
+
+    /// CG-3 / CG-4 / CG-6 / L6 governed updates of the compliance tail
+    /// (#202), one `Option` per field like `update_config`, and evented the
+    /// same way (`ConfigUpdated`, bits in `field_group_ext`). Separate from
+    /// `update_config` so that instruction's wire format and every caller
+    /// built against it stay as they are.
+    pub fn update_compliance(ctx: Context<UpdateConfig>, update: ComplianceUpdate) -> Result<()> {
+        compliance::process_update_compliance(ctx, update)
+    }
+
+    /// L6: mark `wallet` an affiliate of the issuer on this market. Its
+    /// sales are then counted against `affiliate_volume_limit` per window
+    /// (`settle_check`). Gate-config authority.
+    pub fn register_affiliate(ctx: Context<RegisterAffiliate>, wallet: Pubkey) -> Result<()> {
+        compliance::process_register_affiliate(ctx, wallet)
+    }
+
+    /// L6: `wallet` is no longer an affiliate (its record closes; rent to
+    /// the authority). Gate-config authority.
+    pub fn deregister_affiliate(ctx: Context<DeregisterAffiliate>) -> Result<()> {
+        compliance::process_deregister_affiliate(ctx)
+    }
+
+    /// D14 / doc 09 Path 7: the audit-trail hook for a permanent-delegate
+    /// seizure. The transfer itself is Token-2022's (the mint's permanent
+    /// delegate moves the units); this instruction, signed by the
+    /// gate-config authority in the same transaction, emits
+    /// [`SeizureRecorded`] (mint, from, to, amount, reason hash) so every
+    /// use of the delegate is indexed next to the gate's other decisions.
+    pub fn record_seizure(
+        ctx: Context<RecordSeizure>,
+        from: Pubkey,
+        to: Pubkey,
+        amount: u64,
+        reason_hash: [u8; 32],
+    ) -> Result<()> {
+        compliance::process_record_seizure(ctx, from, to, amount, reason_hash)
+    }
+
     /// CG-P3 `merge_expired`: permissionless. Folds every seasoned lot into
     /// the holder's FREE bucket. Fails [`GateError::NothingExpired`] when
     /// there is nothing to fold, so every success is a state change.
@@ -1137,6 +1349,7 @@ impl MarketConfig {
     /// accreditation_schema, all `MAX_ATTESTERS` attester slots,
     /// attester_count, holder_cap, seasoning_seconds,
     /// settlement_horizon_seconds and blocklist (a 0/1 tag, then the key).
+    /// The #202 compliance tail has its own hash ([`Compliance::fingerprint`]).
     /// Not covered: `bump`. It is PDA derivation metadata, not governed
     /// state, which matches `payment-rails`' `RailsConfig::fingerprint`.
     /// Any change to a governed field changes the hash (#49).
@@ -1232,7 +1445,7 @@ pub struct InitializeConfig<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + MarketConfig::INIT_SPACE,
+        space = Compliance::CONFIG_SPACE,
         seeds = [MarketConfig::SEED, mint.key().as_ref()],
         bump
     )]

@@ -7,14 +7,45 @@
 //!
 //! **Order** (the first failure is the reason; CG-P5 precedence):
 //! 1. block-list: seller, then buyer. A block beats every allow-side fact;
-//! 2. buyer admission (fill path only): the buyer holds a [`HolderLink`]
+//! 2. market checklist (fill path only, #202, CG-4/CG-6): the issuer flags
+//!    (`issuer_reporting_current`, `bad_actor_screened`) are set, and the
+//!    fill is at least `min_ticket`;
+//! 3. buyer admission (fill path only): the buyer holds a [`HolderLink`]
 //!    from `validate`, and its SAS identity and accreditation attestations
 //!    still pass [`evaluate`] now (open, signed by a market attester, in
-//!    date for the settlement horizon, inside policy) and still name the
-//!    same `investor_id`;
-//! 3. seasoning (C2, Rule-144 analog): the seller's seasoned quantity
-//!    covers the fill, and it is debited ([`HolderLots::debit`]);
-//! 4. the buyer's new lot is appended, seasoning from now (fill path only).
+//!    date for the settlement horizon, inside policy and exemption class)
+//!    and still name the same `investor_id`;
+//! 4. self-trade by investor (fill path, #202): the seller's own
+//!    [`HolderLink`], when passed, names another `investor_id`;
+//! 5. affiliate volume (fill path, L6, #202): with a limit on, a registered
+//!    affiliate seller stays inside its window's volume;
+//! 6. seasoning (C2, Rule-144 analog): the seller's seasoned quantity
+//!    covers the fill, and it is debited ([`HolderLots::debit`]); in a
+//!    Reg S market every lot drawn is past its distribution-compliance
+//!    period (CG-3, L27);
+//! 7. the buyer's new lot is appended, seasoning from now (fill path only).
+//!
+//! **Remaining accounts of `settle_check`** (#202; appended, optional, so
+//! a caller built against the v1 account list keeps working). A slot
+//! holding this program's id is "not passed":
+//! - `[0]` the seller's [`HolderLink`] `["holder", mint, seller]` (may be
+//!   empty). Passed, the self-trade check compares investors, not just
+//!   wallets. Not passed, only wallets are compared (v1 behaviour).
+//! - `[1]` the seller's [`AffiliateRecord`] `["affiliate", mint, seller]`,
+//!   writable (may be empty). **Required** while the market's
+//!   `affiliate_volume_limit` is on: without it the fill fails closed
+//!   ([`GateError::AffiliateRecordRequired`]), so a caller cannot dodge the
+//!   limit by leaving it out.
+//!
+//! **Today's caller passes neither.** payment-rails' `gate::check` builds
+//! the `settle_check` account list itself and forwards no remaining
+//! accounts, so on every fill through the rails both slots read as "not
+//! passed": the self-trade check compares wallets (investor-level wash
+//! trades are excluded earlier, at auction-engine's AE-P6 screen), and an
+//! affiliate limit, if governance turns one on, fails every resale closed
+//! until the rails forward the record. Wiring that is a rails change
+//! (behind the Squads timelock); until then keep `affiliate_volume_limit`
+//! at 0.
 //!
 //! **Exemption basis** returned for the transfer record (doc 07 L3–L5):
 //! an accredited buyer → §4(a)(7); an admitted buyer the policy lets in
@@ -24,8 +55,9 @@
 use anchor_lang::prelude::*;
 
 use crate::blocklist::{screen, BlockEntry};
-use crate::eligibility::{evaluate, reject_error, HolderLink, MarketPolicy};
-use crate::lots::{HolderLots, LotDraw, LotEvent, LotSource};
+use crate::compliance::{AffiliateRecord, Compliance};
+use crate::eligibility::{evaluate, load, reject_error, store, HolderLink, MarketPolicy};
+use crate::lots::{HolderLots, LotDraw, LotEvent, LotSource, FREE_LOT_ID};
 use crate::{GateError, GateReject, MarketConfig};
 
 /// The payment-rails program (GdWm…Pocn), the only caller of `settle_check*`.
@@ -105,6 +137,74 @@ fn finish(
     Ok(outcome)
 }
 
+/// Remaining account `i`, or `None` if it was not passed (absent, or this
+/// program's id as the placeholder). When passed it must be `expected`.
+fn optional_slot<'a, 'info>(
+    remaining: &'a [AccountInfo<'info>],
+    i: usize,
+    expected: &Pubkey,
+) -> Result<Option<&'a AccountInfo<'info>>> {
+    match remaining.get(i) {
+        None => Ok(None),
+        Some(ai) if *ai.key == crate::ID => Ok(None),
+        Some(ai) => {
+            require_keys_eq!(*ai.key, *expected, GateError::RemainingAccountMismatch);
+            Ok(Some(ai))
+        }
+    }
+}
+
+/// CG-3 / L27: every lot a sale drew from is past the Reg S
+/// distribution-compliance period. FREE draws carry no date; they are
+/// covered by `seasoning_seconds ≥ distribution_compliance_seconds`
+/// (`MarketConfig::check_bounds`): FREE only ever holds lots merged once
+/// seasoned.
+pub fn require_distribution_compliance(
+    config: &Compliance,
+    draws: &[LotDraw],
+    now: i64,
+) -> Result<()> {
+    for d in draws.iter().filter(|d| d.lot_id != FREE_LOT_ID) {
+        require!(
+            config.distribution_compliance_met(d.acquired_ts, now),
+            GateError::DistributionCompliance
+        );
+    }
+    Ok(())
+}
+
+/// L6: count a sale of `qty` against the seller's affiliate window. `rec`
+/// is the seller's [`AffiliateRecord`] slot (`None` = not passed);
+/// `holds_affiliate_lots` whether the seller's ledger carries a lot
+/// flagged `affiliate`. With the limit off this changes nothing.
+fn charge_affiliate(
+    config: &Compliance,
+    rec: Option<&AccountInfo>,
+    holds_affiliate_lots: bool,
+    qty: u64,
+    now: i64,
+) -> Result<()> {
+    if config.affiliate_volume_limit == 0 {
+        return Ok(());
+    }
+    // Fail closed: the record slot is what makes the limit unskippable.
+    let ai = rec.ok_or(GateError::AffiliateRecordRequired)?;
+    let Some(mut r) = load::<AffiliateRecord>(ai)? else {
+        // Not a registered affiliate. Lots flagged `affiliate` (append_lot)
+        // say otherwise: the authority must register the seller first.
+        require!(!holds_affiliate_lots, GateError::AffiliateRecordRequired);
+        return Ok(());
+    };
+    require!(ai.is_writable, GateError::AffiliateRecordRequired);
+    r.charge(
+        qty,
+        now,
+        config.affiliate_volume_limit,
+        config.affiliate_window_seconds,
+    )?;
+    store(ai, &r)
+}
+
 /// `settle_check` body (see the instruction doc in `lib.rs`).
 pub fn process_settle_check(
     ctx: Context<SettleCheck>,
@@ -114,9 +214,26 @@ pub fn process_settle_check(
 ) -> Result<SettleOutcome> {
     require_keys_neq!(seller, buyer, GateError::SelfTrade);
     let a = ctx.accounts;
+    let mint = a.config.mint;
     let now = Clock::get()?.unix_timestamp;
     require_unblocked(&a.config, &a.seller_block)?;
     require_unblocked(&a.config, &a.buyer_block)?;
+    let compliance = Compliance::load(&a.config.to_account_info())?;
+    compliance.check_resale(Some(qty))?;
+    let seller_link = optional_slot(
+        ctx.remaining_accounts,
+        0,
+        &Pubkey::find_program_address(
+            &[HolderLink::SEED, mint.as_ref(), seller.as_ref()],
+            &crate::ID,
+        )
+        .0,
+    )?;
+    let affiliate = optional_slot(
+        ctx.remaining_accounts,
+        1,
+        &AffiliateRecord::address(&mint, &seller),
+    )?;
     let eligible = match evaluate(
         &a.config,
         &a.policy,
@@ -132,7 +249,21 @@ pub fn process_settle_check(
         }
         Ok(e) => e,
     };
+    // CG-3 (#202): the exemption class narrows the policy at settle too.
+    if let Some(r) = compliance.class_reject(&eligible.identity, &eligible.accreditation) {
+        return Err(reject_error(r));
+    }
+    // Two wallets of one investor are one party (#202): no wash fill.
+    if let Some(link) = seller_link.map(load::<HolderLink>).transpose()?.flatten() {
+        require!(
+            link.investor_id != a.buyer_link.investor_id,
+            GateError::SelfTrade
+        );
+    }
+    let holds_affiliate_lots = a.seller_lots.live().iter().any(|l| l.affiliate);
+    charge_affiliate(&compliance, affiliate, holds_affiliate_lots, qty, now)?;
     let draws = a.seller_lots.debit(qty, now)?;
+    require_distribution_compliance(&compliance, &draws, now)?;
     let exemption_path = if eligible.accreditation.accredited {
         exemption::SECTION_4A7
     } else {
@@ -146,7 +277,6 @@ pub fn process_settle_check(
         false,
         exemption_path,
     )?;
-    let mint = a.config.mint;
     emit!(LotEvent {
         kind: 0,
         mint,
