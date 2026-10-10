@@ -40,6 +40,8 @@ pub enum LotSource {
     PrimaryMint,
     /// Bought in an auction session (auction-engine settle).
     AuctionSettle,
+    /// Bought out of custody: a liquidity-facility ladder sale (LF-P5).
+    CustodySale,
 }
 
 /// One seasoning lot. A split keeps every field but `lot_id` and `qty`.
@@ -269,6 +271,52 @@ impl HolderLots {
         }
         self.drop_empty();
         Ok(draws)
+    }
+
+    /// CG-P3 custody (LF-P5): take `qty` off this ledger *with* its
+    /// seasoning, for another ledger to [`deposit`](Self::deposit). FREE
+    /// goes first, then lots by acquisition (oldest first); a lot only
+    /// partly taken stays with its remainder. Unlike [`debit`](Self::debit)
+    /// this moves unseasoned quantity too: nothing is sold, the units keep
+    /// their acquisition dates (a pledge, its release, a workout). Returns
+    /// the FREE quantity and the lots taken (`lot_id`s are reassigned by
+    /// the receiving ledger).
+    pub fn withdraw(&mut self, qty: u64) -> Result<(u64, Vec<Lot>)> {
+        require!(qty > 0, GateError::InvalidLotQty);
+        require!(self.total()? >= qty, GateError::InsufficientLots);
+        let free = qty.min(self.free_qty);
+        self.free_qty -= free;
+        let mut left = qty - free;
+        let mut order: Vec<usize> = (0..usize::from(self.lot_count)).collect();
+        order.sort_by_key(|&i| (self.lots[i].acquired_ts, self.lots[i].lot_id));
+        let mut taken = Vec::new();
+        for i in order {
+            if left == 0 {
+                break;
+            }
+            let lot = self.lots[i];
+            let take = left.min(lot.qty);
+            self.lots[i].qty -= take;
+            left -= take;
+            taken.push(Lot { qty: take, ..lot });
+        }
+        // `total() ≥ qty` above: the lots covered the rest.
+        self.drop_empty();
+        Ok((free, taken))
+    }
+
+    /// Receive what [`withdraw`](Self::withdraw) took from another ledger:
+    /// FREE into FREE, each lot with its own acquisition date and expiry.
+    pub fn deposit(&mut self, free: u64, lots: &[Lot], now: i64) -> Result<()> {
+        self.free_qty = self
+            .free_qty
+            .checked_add(free)
+            .ok_or(GateError::MathOverflow)?;
+        for lot in lots {
+            self.push(*lot, now)?;
+        }
+        self.total()?;
+        Ok(())
     }
 
     /// Remove zero-quantity lots, keeping the order of the rest.
@@ -597,5 +645,57 @@ mod tests {
         // A live lot can still be split into the freed slot.
         let (rest, new) = h.split(5, 1, DAY).unwrap();
         assert_eq!((rest.qty, new.qty, new.restriction_expiry), (1, 1, 5 + DAY));
+    }
+
+    /// LF-P5: a pledge moves FREE first, then the oldest lots, keeping each
+    /// lot's dates; a lot only partly taken keeps its remainder.
+    #[test]
+    fn withdraw_moves_free_then_oldest_lots_with_their_dates() {
+        let mut h = ledger();
+        h.free_qty = 3;
+        h.append(5, 10 * DAY, 7 * DAY, LotSource::AuctionSettle, false, 1)
+            .unwrap(); // newer
+        h.append(4, 2 * DAY, 7 * DAY, LotSource::PrimaryMint, true, 3)
+            .unwrap(); // older
+        let (free, lots) = h.withdraw(9).unwrap();
+        assert_eq!(free, 3);
+        assert_eq!(lots.len(), 2);
+        assert_eq!(
+            (lots[0].qty, lots[0].acquired_ts, lots[0].restriction_expiry),
+            (4, 2 * DAY, 9 * DAY),
+            "oldest first, dates kept"
+        );
+        assert!(lots[0].affiliate && lots[0].exemption_path == 3);
+        assert_eq!(
+            (lots[1].qty, lots[1].acquired_ts, lots[1].source),
+            (2, 10 * DAY, LotSource::AuctionSettle),
+            "split: 2 of the newer lot's 5"
+        );
+        assert_eq!((h.free_qty, h.lot_count, h.total().unwrap()), (0, 1, 3));
+        assert_eq!(h.live()[0].qty, 3, "remainder keeps its lot");
+        assert!(h.withdraw(4).is_err(), "only 3 left");
+        assert!(h.withdraw(0).is_err());
+    }
+
+    /// The receiver gets the same seasoning: unseasoned stays unseasoned,
+    /// FREE stays sellable (pledge tacking, both directions).
+    #[test]
+    fn deposit_keeps_the_seasoning_it_receives() {
+        let mut from = ledger();
+        from.free_qty = 2;
+        from.append(6, 20 * DAY, 7 * DAY, LotSource::PrimaryMint, false, 0)
+            .unwrap();
+        let mut to = ledger();
+        let (free, lots) = from.withdraw(8).unwrap();
+        to.deposit(free, &lots, 21 * DAY).unwrap();
+        assert_eq!(to.total().unwrap(), 8);
+        assert_eq!(to.sellable(21 * DAY).unwrap(), 2, "the lot still seasons");
+        assert_eq!(to.sellable(27 * DAY).unwrap(), 8, "from its original date");
+        assert_eq!(from.total().unwrap(), 0);
+        // And back again, unchanged.
+        let (free, lots) = to.withdraw(8).unwrap();
+        from.deposit(free, &lots, 22 * DAY).unwrap();
+        assert_eq!(from.sellable(26 * DAY).unwrap(), 2);
+        assert_eq!(from.sellable(27 * DAY).unwrap(), 8);
     }
 }

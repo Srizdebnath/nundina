@@ -944,6 +944,591 @@
       ]
     },
     {
+      "name": "custody_pledge",
+      "docs": [
+        "LF-P5: `qty` of the pledgor's lots, with their dates, to the ledger",
+        "of pledge `pledge_ref` ([`pledge_holder`]). Custodian and pledgor",
+        "sign (the custodian's program moves the units in the same",
+        "instruction)."
+      ],
+      "discriminator": [
+        235,
+        4,
+        42,
+        80,
+        25,
+        153,
+        171,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "record",
+          "docs": [
+            "The custodian's registration on this market."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  105,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "custodian"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custodian",
+          "signer": true
+        },
+        {
+          "name": "pledgor",
+          "docs": [
+            "The holder pledging; signs, as it signs the token transfer."
+          ],
+          "signer": true
+        },
+        {
+          "name": "pledgor_lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "pledgor"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pledge_lots",
+          "docs": [
+            "The pledge's ledger (`open_holder_lots(pledge_holder(..))` first)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "pledge_lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "pledge_ref",
+          "type": "pubkey"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "custody_release",
+      "docs": [
+        "LF-P5: `qty` of lots, with their dates, out of the custodian's own",
+        "ledger (`pledge_ref` = default) or pledge `pledge_ref`'s, to another",
+        "holder's ledger. Custodian signs."
+      ],
+      "discriminator": [
+        160,
+        81,
+        39,
+        223,
+        160,
+        173,
+        182,
+        187
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  105,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "custodian"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custodian",
+          "signer": true
+        },
+        {
+          "name": "from_lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "from_lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "to_lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "to_lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "to_block",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "to_lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "pledge_ref",
+          "type": "pubkey"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "custody_sale",
+      "docs": [
+        "LF-P5: a sale out of custody — seasoned quantity debited (C2); an",
+        "admitted buyer gets a new lot, the issuer none. Custodian signs."
+      ],
+      "discriminator": [
+        137,
+        96,
+        24,
+        97,
+        135,
+        102,
+        82,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  105,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "custodian"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custodian",
+          "signer": true
+        },
+        {
+          "name": "from_lots",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "from_lots.holder",
+                "account": "HolderLots"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_block",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  108,
+                  111,
+                  99,
+                  107,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_lots",
+          "docs": [
+            "The buyer's ledger; omitted (with the link) for the issuer."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_link",
+          "docs": [
+            "The buyer's admission; omitted (with the ledger) for the issuer."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "pledge_ref",
+          "type": "pubkey"
+        },
+        {
+          "name": "buyer",
+          "type": "pubkey"
+        },
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deregister_custodian",
+      "docs": [
+        "Revoke a custodian (its ledgers stay; it can no longer move lots)."
+      ],
+      "discriminator": [
+        7,
+        219,
+        41,
+        64,
+        208,
+        30,
+        246,
+        184
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  105,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "record.custodian",
+                "account": "Custodian"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize_blocklist",
       "docs": [
         "CG-P5: create the market's block-list header and point the config",
@@ -1920,6 +2505,98 @@
       "args": [
         {
           "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "register_custodian",
+      "docs": [
+        "LF-P5 (CG-P3 custody): let `custodian` hold lots for others on this",
+        "market (liquidity-facility's signer PDA). Gate-config authority."
+      ],
+      "discriminator": [
+        182,
+        236,
+        219,
+        44,
+        221,
+        85,
+        47,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  105,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "custodian"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "gate_config_authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "custodian",
           "type": "pubkey"
         }
       ]
@@ -3067,6 +3744,19 @@
       ]
     },
     {
+      "name": "Custodian",
+      "discriminator": [
+        132,
+        228,
+        139,
+        184,
+        112,
+        228,
+        108,
+        240
+      ]
+    },
+    {
       "name": "GateRoot",
       "discriminator": [
         26,
@@ -3186,6 +3876,19 @@
       ]
     },
     {
+      "name": "CustodianSet",
+      "discriminator": [
+        99,
+        144,
+        223,
+        16,
+        56,
+        8,
+        122,
+        118
+      ]
+    },
+    {
       "name": "GateAuthorityTransfer",
       "discriminator": [
         227,
@@ -3235,6 +3938,19 @@
         137,
         240,
         147
+      ]
+    },
+    {
+      "name": "LotsMoved",
+      "discriminator": [
+        184,
+        46,
+        124,
+        89,
+        24,
+        239,
+        15,
+        136
       ]
     },
     {
@@ -3467,6 +4183,26 @@
       "code": 6037,
       "name": "SelfTrade",
       "msg": "Buyer and seller are the same wallet"
+    },
+    {
+      "code": 6038,
+      "name": "InsufficientLots",
+      "msg": "Ledger holds less than the quantity to move"
+    },
+    {
+      "code": 6039,
+      "name": "NotCustodian",
+      "msg": "Signer is not a registered custodian of this market"
+    },
+    {
+      "code": 6040,
+      "name": "NotCustodyLedger",
+      "msg": "Ledger is not held by this custodian"
+    },
+    {
+      "code": 6041,
+      "name": "BuyerNotAdmitted",
+      "msg": "Custody-sale buyer is not admitted"
     }
   ],
   "types": [
@@ -3697,6 +4433,56 @@
             "docs": [
               "Authority that performed the update."
             ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Custodian",
+      "docs": [
+        "A wallet allowed to hold lots for others on one market (LF-P5)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "custodian",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CustodianSet",
+      "docs": [
+        "Emitted by `register_custodian` / `deregister_custodian`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "custodian",
+            "type": "pubkey"
+          },
+          {
+            "name": "registered",
+            "type": "bool"
+          },
+          {
+            "name": "authority",
             "type": "pubkey"
           }
         ]
@@ -4249,6 +5035,64 @@
           },
           {
             "name": "AuctionSettle"
+          },
+          {
+            "name": "CustodySale"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotsMoved",
+      "docs": [
+        "Emitted by every custody move (CG-P7)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "custodian",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "[`move_kind`]."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "from_holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "to_holder",
+            "docs": [
+              "The receiving holder; the issuer's key on an issuer custody sale."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "type": "u64"
+          },
+          {
+            "name": "free_qty",
+            "docs": [
+              "Of `qty`, how much moved as FREE (already seasoned and merged)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lots",
+            "docs": [
+              "Lots moved with their own dates (0 on a sale)."
+            ],
+            "type": "u8"
           }
         ]
       }

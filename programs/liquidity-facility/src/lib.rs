@@ -30,6 +30,18 @@
 //!   shortfall is booked and evented (non-recourse).
 //! - LF-P6 interest accrues per second in the rails (`credit_math::
 //!   accrue_interest` at each touch); `repay` is the rails' own.
+//!
+//! LF-P5 custody (#202): the gate's lot ledgers follow the units. The signer
+//! PDA is a credit-gate custodian of the market (`register_custodian`).
+//! A pledge (and a top-up) moves the borrower's lots, with their dates, to
+//! the position's own pledge ledger (`custody_pledge`), so the borrower no
+//! longer holds seasoned quantity for units it pledged and lots never mix
+//! across positions. Release returns them (`custody_release`); a ladder
+//! sale debits seasoned lots and gives an admitted buyer a new lot, the
+//! issuer none (`custody_sale`); a forced sale lists only the seasoned
+//! quantity, moved onto the signer's own ledger (its seller), which
+//! `settle_check` then debits fill by fill; the workout hands the lender
+//! the unsold lots with their dates.
 
 #![deny(unsafe_code)]
 #![allow(missing_docs)]
@@ -38,9 +50,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
+use anchor_lang::ToAccountMetas;
 use anchor_lang::{system_program, InstructionData};
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 use auction_engine::{Phase as AuctionPhase, Session as AuctionSession, Side};
+use credit_gate::{pledge_holder, HolderLots};
 use credit_math::{mul_div, MAX_ADVANCE_RATE_BPS};
 use mark_engine::Feed;
 
@@ -176,6 +190,32 @@ pub mod liquidity_facility {
             ctx.accounts.asset_mint.decimals,
         )?;
         let position_key = ctx.accounts.position.key();
+        // LF-P5: the lots follow the units into custody (gated mints only;
+        // a queue-claim token has no gate market, QC-P5).
+        let pledge_ref = position_key;
+        let g = &ctx.accounts.gate;
+        let gated = is_gated(g, &cfg.asset_mint)?;
+        if gated && g.pledge_lots.data_is_empty() {
+            open_lots(
+                g,
+                &g.pledge_lots,
+                pledge_holder(&cfg.asset_mint, &signer, &pledge_ref),
+                &ctx.accounts.asset_mint.to_account_info(),
+                &ctx.accounts.borrower.to_account_info(),
+                &ctx.accounts.system_program.to_account_info(),
+            )?;
+        }
+        if gated {
+            custody_pledge(
+                g,
+                &ctx.accounts.signer.to_account_info(),
+                &ctx.accounts.borrower.to_account_info(),
+                &ctx.accounts.asset_mint.to_account_info(),
+                pledge_ref,
+                qty,
+                cfg.signer_bump,
+            )?;
+        }
         forward(
             &ctx.accounts.rails_program,
             &payment_rails::ID,
@@ -231,6 +271,17 @@ pub mod liquidity_facility {
             qty,
             ctx.accounts.asset_mint.decimals,
         )?;
+        if is_gated(&ctx.accounts.gate, &ctx.accounts.config.asset_mint)? {
+            custody_pledge(
+                &ctx.accounts.gate,
+                &ctx.accounts.signer.to_account_info(),
+                &ctx.accounts.borrower.to_account_info(),
+                &ctx.accounts.asset_mint.to_account_info(),
+                p.key(),
+                qty,
+                ctx.accounts.config.signer_bump,
+            )?;
+        }
         p.qty = p.qty.checked_add(qty).ok_or(LfError::MathOverflow)?;
         emit!(CollateralAdded {
             position: p.key(),
@@ -361,6 +412,40 @@ pub mod liquidity_facility {
             qty,
             ctx.accounts.asset_mint.decimals,
         )?;
+        // LF-P5: a sale out of custody — seasoned lots debited; the
+        // backstop (an investor) gets a new lot, the issuer none.
+        let g = &ctx.accounts.gate;
+        let issuer = state == PositionState::IssuerRofr;
+        if is_gated(g, &cfg.asset_mint)? {
+            let data = credit_gate::instruction::CustodySale {
+                pledge_ref: p.key(),
+                buyer,
+                qty,
+            }
+            .data();
+            let metas = credit_gate::accounts::CustodySale {
+                config: g.gate_config.key(),
+                record: g.custodian_record.key(),
+                custodian: ctx.accounts.signer.key(),
+                from_lots: g.pledge_lots.key(),
+                buyer_block: g.block_entry.key(),
+                buyer_lots: (!issuer).then(|| g.other_lots.key()),
+                buyer_link: (!issuer).then(|| ctx.accounts.buyer_link.key()),
+                mint: ctx.accounts.asset_mint.key(),
+            }
+            .to_account_metas(None);
+            gate_call(
+                g,
+                metas,
+                vec![
+                    ctx.accounts.signer.to_account_info(),
+                    ctx.accounts.buyer_link.to_account_info(),
+                    ctx.accounts.asset_mint.to_account_info(),
+                ],
+                data,
+                Some(cfg.signer_bump),
+            )?;
+        }
         let accts = Proceeds {
             rails_program: &ctx.accounts.rails_program,
             signer: &ctx.accounts.signer,
@@ -474,10 +559,45 @@ pub mod liquidity_facility {
     /// ask bond. Remaining accounts: rails `OpenAssetVault` (8), then the
     /// auction-engine `Commit` list (3) and its rails `DepositAsk` list (13).
     pub fn list_forced_sale<'info>(ctx: Context<'info, ListForcedSale<'info>>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
         let cfg = &ctx.accounts.config;
         let p = &ctx.accounts.position;
         require!(p.state == PositionState::ForcedSale, LfError::WrongState);
+        require!(p.listed == 0, LfError::WrongState);
         let signer = ctx.accounts.signer.key();
+        // LF-P5: only seasoned collateral can be sold (C2). It moves onto
+        // the signer's own ledger — the ask's owner, whose lots
+        // `settle_check` debits; the unseasoned rest stays on the pledge
+        // ledger for the workout.
+        let g = &ctx.accounts.gate;
+        let gated = is_gated(g, &cfg.asset_mint)?;
+        let listed = if gated {
+            p.qty.min(read_lots(&g.pledge_lots)?.sellable(now)?)
+        } else {
+            p.qty
+        };
+        require!(listed > 0, LfError::NothingSeasoned);
+        if gated && g.other_lots.data_is_empty() {
+            open_lots(
+                g,
+                &g.other_lots,
+                signer,
+                &ctx.accounts.asset_mint.to_account_info(),
+                &ctx.accounts.caller.to_account_info(),
+                &ctx.accounts.system_program.to_account_info(),
+            )?;
+        }
+        if gated {
+            custody_release(
+                g,
+                &ctx.accounts.signer.to_account_info(),
+                &ctx.accounts.asset_mint.to_account_info(),
+                &g.pledge_lots,
+                p.key(),
+                listed,
+                cfg.signer_bump,
+            )?;
+        }
         let accts = ctx.remaining_accounts;
         require!(accts.len() == 24, LfError::RailsAccounts);
         require_keys_eq!(accts[8].key(), p.auction_session, LfError::RailsAccounts);
@@ -507,19 +627,20 @@ pub mod liquidity_facility {
             cfg.signer_bump,
         )?;
         let nonce = p.key().to_bytes();
-        let commitment = auction_engine::commitment(Side::Sell, 1, p.qty, &nonce, &signer);
+        let commitment = auction_engine::commitment(Side::Sell, 1, listed, &nonce, &signer);
         forward(
             &ctx.accounts.auction_program,
             &auction_engine::ID,
             &accts[8..],
             auction_engine::instruction::CommitAsk {
                 commitment_hash: commitment,
-                qty: p.qty,
+                qty: listed,
             }
             .data(),
             &signer,
             cfg.signer_bump,
         )?;
+        ctx.accounts.position.listed = listed;
         Ok(())
     }
 
@@ -541,7 +662,7 @@ pub mod liquidity_facility {
             accts,
             auction_engine::instruction::Reveal {
                 limit: 1,
-                qty: p.qty,
+                qty: p.listed,
                 nonce: p.key().to_bytes(),
             }
             .data(),
@@ -602,6 +723,40 @@ pub mod liquidity_facility {
                 unsold,
                 ctx.accounts.asset_mint.decimals,
             )?;
+            // LF-P5: the lender takes the unsold units' lots with their
+            // dates — the listed, unsold part from the signer's own
+            // ledger, the never-listed (unseasoned) rest from the pledge's.
+            let p = &ctx.accounts.position;
+            let g = &ctx.accounts.gate;
+            let gated = is_gated(g, &cfg.asset_mint)?;
+            if gated && g.other_lots.data_is_empty() {
+                open_lots(
+                    g,
+                    &g.other_lots,
+                    cfg.params.lender_workout,
+                    &ctx.accounts.asset_mint.to_account_info(),
+                    &ctx.accounts.payer.to_account_info(),
+                    &ctx.accounts.system_program.to_account_info(),
+                )?;
+            }
+            let listed_unsold = p.listed.saturating_sub(sold);
+            let never_listed = p.qty.saturating_sub(p.listed);
+            for (from, pledge_ref, qty) in [
+                (&ctx.accounts.signer_lots, Pubkey::default(), listed_unsold),
+                (&g.pledge_lots, p.key(), never_listed),
+            ] {
+                if gated && qty > 0 {
+                    custody_release(
+                        g,
+                        &ctx.accounts.signer.to_account_info(),
+                        &ctx.accounts.asset_mint.to_account_info(),
+                        from,
+                        pledge_ref,
+                        qty,
+                        cfg.signer_bump,
+                    )?;
+                }
+            }
         }
         let p = &mut ctx.accounts.position;
         p.qty = 0;
@@ -651,6 +806,18 @@ pub mod liquidity_facility {
             qty,
             ctx.accounts.asset_mint.decimals,
         )?;
+        // LF-P5: the lots go back with the units, dates unchanged.
+        if is_gated(&ctx.accounts.gate, &cfg.asset_mint)? {
+            custody_release(
+                &ctx.accounts.gate,
+                &ctx.accounts.signer.to_account_info(),
+                &ctx.accounts.asset_mint.to_account_info(),
+                &ctx.accounts.gate.pledge_lots,
+                p.key(),
+                qty,
+                cfg.signer_bump,
+            )?;
+        }
         let p = &mut ctx.accounts.position;
         p.qty = 0;
         emit!(Released {
@@ -730,6 +897,151 @@ fn fund_signer<'info>(
         ),
         lamports,
     )
+}
+
+/// One credit-gate instruction (LF-P5 custody), the signer PDA signing as
+/// the market's registered custodian when `bump` is given. `infos` are the
+/// accounts outside `g` that the metas name.
+fn gate_call<'info>(
+    g: &GateCustody<'info>,
+    metas: Vec<AccountMeta>,
+    infos: Vec<AccountInfo<'info>>,
+    data: Vec<u8>,
+    bump: Option<u8>,
+) -> Result<()> {
+    let mut all = infos;
+    all.extend([
+        g.gate_config.to_account_info(),
+        g.custodian_record.to_account_info(),
+        g.pledge_lots.to_account_info(),
+        g.other_lots.to_account_info(),
+        g.block_entry.to_account_info(),
+        g.gate_program.to_account_info(),
+    ]);
+    let ix = Instruction {
+        program_id: credit_gate::ID,
+        accounts: metas,
+        data,
+    };
+    match bump {
+        Some(b) => invoke_signed(&ix, &all, &[&[SIGNER_SEED, &[b]]]),
+        None => anchor_lang::solana_program::program::invoke(&ix, &all),
+    }
+    .map_err(Into::into)
+}
+
+/// Open `lots`, the gate `HolderLots` of `holder` (`payer` pays). The gate
+/// derives and screens `g.block_entry` as `holder`'s block entry.
+fn open_lots<'info>(
+    g: &GateCustody<'info>,
+    lots: &UncheckedAccount<'info>,
+    holder: Pubkey,
+    mint: &AccountInfo<'info>,
+    payer: &AccountInfo<'info>,
+    system: &AccountInfo<'info>,
+) -> Result<()> {
+    let metas = credit_gate::accounts::OpenHolderLots {
+        config: g.gate_config.key(),
+        lots: lots.key(),
+        block_entry: g.block_entry.key(),
+        mint: mint.key(),
+        payer: payer.key(),
+        system_program: system.key(),
+    }
+    .to_account_metas(None);
+    let data = credit_gate::instruction::OpenHolderLots { holder }.data();
+    gate_call(
+        g,
+        metas,
+        vec![
+            mint.clone(),
+            payer.clone(),
+            system.clone(),
+            lots.to_account_info(),
+        ],
+        data,
+        None,
+    )
+}
+
+/// LF-P5: `qty` of `pledgor`'s lots to the pledge ledger of `pledge_ref`.
+fn custody_pledge<'info>(
+    g: &GateCustody<'info>,
+    signer: &AccountInfo<'info>,
+    pledgor: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    pledge_ref: Pubkey,
+    qty: u64,
+    bump: u8,
+) -> Result<()> {
+    let metas = credit_gate::accounts::CustodyPledge {
+        record: g.custodian_record.key(),
+        custodian: signer.key(),
+        pledgor: pledgor.key(),
+        pledgor_lots: g.other_lots.key(),
+        pledge_lots: g.pledge_lots.key(),
+        mint: mint.key(),
+    }
+    .to_account_metas(None);
+    let data = credit_gate::instruction::CustodyPledge { pledge_ref, qty }.data();
+    gate_call(
+        g,
+        metas,
+        vec![signer.clone(), pledgor.clone(), mint.clone()],
+        data,
+        Some(bump),
+    )
+}
+
+/// LF-P5: `qty` of lots out of `from` (the pledge ledger of `pledge_ref`,
+/// or the signer's own with `pledge_ref` = default) into `g.other_lots`,
+/// whose holder's block entry is `g.block_entry`.
+fn custody_release<'info>(
+    g: &GateCustody<'info>,
+    signer: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    from: &UncheckedAccount<'info>,
+    pledge_ref: Pubkey,
+    qty: u64,
+    bump: u8,
+) -> Result<()> {
+    let metas = credit_gate::accounts::CustodyRelease {
+        config: g.gate_config.key(),
+        record: g.custodian_record.key(),
+        custodian: signer.key(),
+        from_lots: from.key(),
+        to_lots: g.other_lots.key(),
+        to_block: g.block_entry.key(),
+        mint: mint.key(),
+    }
+    .to_account_metas(None);
+    let data = credit_gate::instruction::CustodyRelease { pledge_ref, qty }.data();
+    gate_call(
+        g,
+        metas,
+        vec![signer.clone(), mint.clone(), from.to_account_info()],
+        data,
+        Some(bump),
+    )
+}
+
+/// Whether `mint` is gated: its credit-gate `MarketConfig` exists. The
+/// address is pinned, so a caller cannot hide or fake a market. Checked at
+/// every custody step, not fixed at `open_facility`.
+fn is_gated(g: &GateCustody, mint: &Pubkey) -> Result<bool> {
+    let config = Pubkey::find_program_address(
+        &[credit_gate::MarketConfig::SEED, mint.as_ref()],
+        &credit_gate::ID,
+    )
+    .0;
+    require_keys_eq!(g.gate_config.key(), config, LfError::GateAccounts);
+    Ok(*g.gate_config.owner == credit_gate::ID && !g.gate_config.data_is_empty())
+}
+
+/// A gate `HolderLots` (owner-checked).
+fn read_lots(ai: &UncheckedAccount) -> Result<HolderLots> {
+    require_keys_eq!(*ai.owner, credit_gate::ID, LfError::GateAccounts);
+    HolderLots::try_deserialize(&mut &ai.try_borrow_data()?[..])
 }
 
 /// Forward `accts` to `program_id` with `data`, the signer PDA signing.
@@ -947,7 +1259,33 @@ pub struct Position {
     pub auction_session: Pubkey,
     /// Debt left after the ladder (non-recourse).
     pub shortfall: u64,
+    /// LF-P5: quantity listed in the forced sale (its seasoned part).
+    pub listed: u64,
     pub bump: u8,
+}
+
+/// credit-gate accounts of the LF-P5 custody moves. The gate re-derives and
+/// checks every one; the facility pins only the program.
+#[derive(Accounts)]
+pub struct GateCustody<'info> {
+    /// CHECK: credit-gate, address-pinned.
+    #[account(address = credit_gate::ID @ LfError::GateAccounts)]
+    pub gate_program: UncheckedAccount<'info>,
+    /// CHECK: the market's gate `MarketConfig`.
+    pub gate_config: UncheckedAccount<'info>,
+    /// CHECK: the signer PDA's custodian registration on the market.
+    pub custodian_record: UncheckedAccount<'info>,
+    /// CHECK: the position's pledge ledger (`HolderLots` of
+    /// `pledge_holder(mint, signer, position)`).
+    #[account(mut)]
+    pub pledge_lots: UncheckedAccount<'info>,
+    /// CHECK: the other ledger of the move: the borrower's (pledge,
+    /// release), the buyer's (ladder sale), the signer's own (forced-sale
+    /// listing) or the lender's workout (settle).
+    #[account(mut)]
+    pub other_lots: UncheckedAccount<'info>,
+    /// CHECK: the gate block entry of `other_lots`' holder.
+    pub block_entry: UncheckedAccount<'info>,
 }
 
 // ── accounts ────────────────────────────────────────────────────────────
@@ -1030,24 +1368,31 @@ pub struct PledgeAndAdvance<'info> {
     /// CHECK: payment-rails (address-checked in `forward`).
     pub rails_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    pub gate: GateCustody<'info>,
 }
 
 #[derive(Accounts)]
 pub struct AddCollateral<'info> {
+    pub config: Box<Account<'info, FacilityConfig>>,
     #[account(
         mut,
+        has_one = config @ LfError::RailsAccounts,
         has_one = borrower @ LfError::NotBorrower,
         has_one = collateral_vault @ LfError::RailsAccounts
     )]
     pub position: Box<Account<'info, Position>>,
+    /// CHECK: the signer PDA (the gate custodian).
+    #[account(seeds = [SIGNER_SEED], bump = config.signer_bump)]
+    pub signer: UncheckedAccount<'info>,
     #[account(mut)]
     pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub borrower: Signer<'info>,
     #[account(mut, token::authority = borrower)]
     pub borrower_asset: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = collateral_vault.mint @ LfError::FeedMismatch)]
+    #[account(address = config.asset_mint @ LfError::FeedMismatch)]
     pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
     pub asset_token_program: Interface<'info, TokenInterface>,
+    pub gate: GateCustody<'info>,
 }
 
 #[derive(Accounts)]
@@ -1100,6 +1445,9 @@ pub struct LadderBuy<'info> {
     pub asset_token_program: Interface<'info, TokenInterface>,
     /// CHECK: payment-rails (address-checked in `forward`).
     pub rails_program: UncheckedAccount<'info>,
+    /// CHECK: the backstop's gate `HolderLink` (unused for the issuer).
+    pub buyer_link: UncheckedAccount<'info>,
+    pub gate: GateCustody<'info>,
 }
 
 #[derive(Accounts)]
@@ -1130,11 +1478,12 @@ pub struct ForcedSale<'info> {
 #[derive(Accounts)]
 pub struct ListForcedSale<'info> {
     pub config: Box<Account<'info, FacilityConfig>>,
-    #[account(has_one = config @ LfError::RailsAccounts, has_one = proceeds @ LfError::RailsAccounts)]
+    #[account(mut, has_one = config @ LfError::RailsAccounts, has_one = proceeds @ LfError::RailsAccounts)]
     pub position: Box<Account<'info, Position>>,
     /// CHECK: the signer PDA (the ask's owner).
     #[account(mut, seeds = [SIGNER_SEED], bump = config.signer_bump)]
     pub signer: UncheckedAccount<'info>,
+    #[account(mut)]
     pub caller: Signer<'info>,
     #[account(mut)]
     pub caller_usdc: Box<InterfaceAccount<'info, TokenAccount>>,
@@ -1147,6 +1496,10 @@ pub struct ListForcedSale<'info> {
     pub rails_program: UncheckedAccount<'info>,
     /// CHECK: auction-engine (address-checked in `forward`).
     pub auction_program: UncheckedAccount<'info>,
+    #[account(address = config.asset_mint @ LfError::FeedMismatch)]
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub system_program: Program<'info, System>,
+    pub gate: GateCustody<'info>,
 }
 
 #[derive(Accounts)]
@@ -1200,6 +1553,14 @@ pub struct SettleForcedSale<'info> {
     pub asset_token_program: Interface<'info, TokenInterface>,
     /// CHECK: payment-rails (address-checked in `forward`).
     pub rails_program: UncheckedAccount<'info>,
+    /// CHECK: the signer PDA's own gate ledger (the forced-sale seller's).
+    #[account(mut)]
+    pub signer_lots: UncheckedAccount<'info>,
+    /// Pays the workout ledger's rent if it has none yet.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    pub gate: GateCustody<'info>,
 }
 
 #[derive(Accounts)]
@@ -1229,6 +1590,7 @@ pub struct Release<'info> {
     #[account(address = config.asset_mint @ LfError::FeedMismatch)]
     pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
     pub asset_token_program: Interface<'info, TokenInterface>,
+    pub gate: GateCustody<'info>,
 }
 
 // ── events ──────────────────────────────────────────────────────────────
@@ -1356,6 +1718,10 @@ pub enum LfError {
     MathOverflow,
     #[msg("Only the program's upgrade authority may do this")]
     NotUpgradeAuthority,
+    #[msg("credit-gate accounts do not match")]
+    GateAccounts,
+    #[msg("no seasoned collateral to list in the forced sale")]
+    NothingSeasoned,
 }
 
 #[cfg(test)]

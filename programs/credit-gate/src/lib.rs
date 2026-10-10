@@ -24,12 +24,14 @@
 use anchor_lang::prelude::*;
 
 pub mod blocklist;
+pub mod custody;
 pub mod eligibility;
 pub mod lots;
 pub mod settle;
 pub mod token_acl;
 
 pub use blocklist::*;
+pub use custody::*;
 pub use eligibility::*;
 pub use lots::*;
 pub use settle::*;
@@ -421,6 +423,19 @@ pub enum GateError {
     /// A fill whose buyer is its seller.
     #[msg("Buyer and seller are the same wallet")]
     SelfTrade,
+    /// A custody move wants more than the ledger holds (LF-P5).
+    #[msg("Ledger holds less than the quantity to move")]
+    InsufficientLots,
+    /// Signer is not a custodian registered for this market (LF-P5).
+    #[msg("Signer is not a registered custodian of this market")]
+    NotCustodian,
+    /// A custody ledger that is neither the custodian's own nor one of its
+    /// pledge ledgers (LF-P5).
+    #[msg("Ledger is not held by this custodian")]
+    NotCustodyLedger,
+    /// A custody sale's buyer is not admitted by the gate (LF-P5).
+    #[msg("Custody-sale buyer is not admitted")]
+    BuyerNotAdmitted,
 }
 
 #[program]
@@ -1008,6 +1023,63 @@ pub mod credit_gate {
         qty: u64,
     ) -> Result<SettleOutcome> {
         settle::process_settle_check_rofr(ctx, seller, issuer, qty)
+    }
+
+    /// LF-P5 (CG-P3 custody): let `custodian` hold lots for others on this
+    /// market (liquidity-facility's signer PDA). Gate-config authority.
+    pub fn register_custodian(ctx: Context<RegisterCustodian>, custodian: Pubkey) -> Result<()> {
+        let r = &mut ctx.accounts.record;
+        r.mint = ctx.accounts.mint.key();
+        r.custodian = custodian;
+        r.bump = ctx.bumps.record;
+        emit!(CustodianSet {
+            mint: r.mint,
+            custodian,
+            registered: true,
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// Revoke a custodian (its ledgers stay; it can no longer move lots).
+    pub fn deregister_custodian(ctx: Context<DeregisterCustodian>) -> Result<()> {
+        emit!(CustodianSet {
+            mint: ctx.accounts.record.mint,
+            custodian: ctx.accounts.record.custodian,
+            registered: false,
+            authority: ctx.accounts.gate_config_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// LF-P5: `qty` of the pledgor's lots, with their dates, to the ledger
+    /// of pledge `pledge_ref` ([`pledge_holder`]). Custodian and pledgor
+    /// sign (the custodian's program moves the units in the same
+    /// instruction).
+    pub fn custody_pledge(ctx: Context<CustodyPledge>, pledge_ref: Pubkey, qty: u64) -> Result<()> {
+        custody::process_pledge(ctx, pledge_ref, qty)
+    }
+
+    /// LF-P5: `qty` of lots, with their dates, out of the custodian's own
+    /// ledger (`pledge_ref` = default) or pledge `pledge_ref`'s, to another
+    /// holder's ledger. Custodian signs.
+    pub fn custody_release(
+        ctx: Context<CustodyRelease>,
+        pledge_ref: Pubkey,
+        qty: u64,
+    ) -> Result<()> {
+        custody::process_release(ctx, pledge_ref, qty)
+    }
+
+    /// LF-P5: a sale out of custody — seasoned quantity debited (C2); an
+    /// admitted buyer gets a new lot, the issuer none. Custodian signs.
+    pub fn custody_sale(
+        ctx: Context<CustodySale>,
+        pledge_ref: Pubkey,
+        buyer: Pubkey,
+        qty: u64,
+    ) -> Result<()> {
+        custody::process_sale(ctx, pledge_ref, buyer, qty)
     }
 
     /// CG-P3 `merge_expired`: permissionless. Folds every seasoned lot into

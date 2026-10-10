@@ -24,8 +24,35 @@
       ],
       "accounts": [
         {
+          "name": "config",
+          "relations": [
+            "position"
+          ]
+        },
+        {
           "name": "position",
           "writable": true
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  102,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "collateral_vault",
@@ -50,6 +77,39 @@
         },
         {
           "name": "asset_token_program"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "custodian_record"
+            },
+            {
+              "name": "pledge_lots",
+              "docs": [
+                "`pledge_holder(mint, signer, position)`)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "other_lots",
+              "docs": [
+                "release), the buyer's (ladder sale), the signer's own (forced-sale",
+                "listing) or the lender's workout (settle)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "block_entry"
+            }
+          ]
         }
       ],
       "args": [
@@ -197,6 +257,42 @@
         },
         {
           "name": "rails_program"
+        },
+        {
+          "name": "buyer_link"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "custodian_record"
+            },
+            {
+              "name": "pledge_lots",
+              "docs": [
+                "`pledge_holder(mint, signer, position)`)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "other_lots",
+              "docs": [
+                "release), the buyer's (ladder sale), the signer's own (forced-sale",
+                "listing) or the lender's workout (settle)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "block_entry"
+            }
+          ]
         }
       ],
       "args": []
@@ -227,7 +323,8 @@
           ]
         },
         {
-          "name": "position"
+          "name": "position",
+          "writable": true
         },
         {
           "name": "signer",
@@ -253,6 +350,7 @@
         },
         {
           "name": "caller",
+          "writable": true,
           "signer": true
         },
         {
@@ -277,6 +375,46 @@
         },
         {
           "name": "auction_program"
+        },
+        {
+          "name": "asset_mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "custodian_record"
+            },
+            {
+              "name": "pledge_lots",
+              "docs": [
+                "`pledge_holder(mint, signer, position)`)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "other_lots",
+              "docs": [
+                "release), the buyer's (ladder sale), the signer's own (forced-sale",
+                "listing) or the lender's workout (settle)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "block_entry"
+            }
+          ]
         }
       ],
       "args": []
@@ -686,6 +824,39 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "custodian_record"
+            },
+            {
+              "name": "pledge_lots",
+              "docs": [
+                "`pledge_holder(mint, signer, position)`)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "other_lots",
+              "docs": [
+                "release), the buyer's (ladder sale), the signer's own (forced-sale",
+                "listing) or the lender's workout (settle)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "block_entry"
+            }
+          ]
         }
       ],
       "args": [
@@ -766,6 +937,39 @@
         },
         {
           "name": "asset_token_program"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "custodian_record"
+            },
+            {
+              "name": "pledge_lots",
+              "docs": [
+                "`pledge_holder(mint, signer, position)`)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "other_lots",
+              "docs": [
+                "release), the buyer's (ladder sale), the signer's own (forced-sale",
+                "listing) or the lender's workout (settle)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "block_entry"
+            }
+          ]
         }
       ],
       "args": []
@@ -918,6 +1122,55 @@
         },
         {
           "name": "rails_program"
+        },
+        {
+          "name": "signer_lots",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the workout ledger's rent if it has none yet."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "gate",
+          "accounts": [
+            {
+              "name": "gate_program",
+              "address": "5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX"
+            },
+            {
+              "name": "gate_config"
+            },
+            {
+              "name": "custodian_record"
+            },
+            {
+              "name": "pledge_lots",
+              "docs": [
+                "`pledge_holder(mint, signer, position)`)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "other_lots",
+              "docs": [
+                "release), the buyer's (ladder sale), the signer's own (forced-sale",
+                "listing) or the lender's workout (settle)."
+              ],
+              "writable": true
+            },
+            {
+              "name": "block_entry"
+            }
+          ]
         }
       ],
       "args": []
@@ -1204,6 +1457,16 @@
       "code": 6018,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority may do this"
+    },
+    {
+      "code": 6019,
+      "name": "GateAccounts",
+      "msg": "credit-gate accounts do not match"
+    },
+    {
+      "code": 6020,
+      "name": "NothingSeasoned",
+      "msg": "no seasoned collateral to list in the forced sale"
     }
   ],
   "types": [
@@ -2226,6 +2489,13 @@
             "name": "shortfall",
             "docs": [
               "Debt left after the ladder (non-recourse)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "listed",
+            "docs": [
+              "LF-P5: quantity listed in the forced sale (its seasoned part)."
             ],
             "type": "u64"
           },

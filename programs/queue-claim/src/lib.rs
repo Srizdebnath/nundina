@@ -238,7 +238,9 @@ pub mod queue_claim {
         );
         let holder = ctx.accounts.holder.key();
         let accts = ctx.remaining_accounts;
-        require!(accts.len() == 25, QcError::FacilityAccounts);
+        // 20 facility accounts (6 of them its LF-P5 gate custody group,
+        // unused for an ungated claim mint) + 11 rails `AdvanceFunds`.
+        require!(accts.len() == 31, QcError::FacilityAccounts);
         // PledgeAndAdvance: config0 … borrower6, borrower_asset7, asset_mint8.
         require_keys_eq!(accts[6].key(), holder, QcError::FacilityAccounts);
         require_keys_eq!(accts[8].key(), r.claim_mint, QcError::FacilityAccounts);

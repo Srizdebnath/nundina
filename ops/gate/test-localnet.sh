@@ -81,6 +81,17 @@ solana account -u "$URL" "$LOTS" --output json | node -e '
 npx tsx wire.ts append-lot "$ALICE" --authority "$TMP/stranger.json" --mint "$MINT" --qty 1 >/dev/null 2>&1 \
   && fail "append-lot accepted a non-authority"
 
+# LF-P5: the gate authority registers a custodian (the facility signer
+# PDA on devnet; any key here); nobody else can.
+CUST=$(solana-keygen new --no-bip39-passphrase --silent --outfile "$TMP/cust.json" >/dev/null && solana-keygen pubkey "$TMP/cust.json")
+npx tsx wire.ts register-custodian "$CUST" --authority "$TMP/stranger.json" --mint "$MINT" >/dev/null 2>&1 \
+  && fail "register-custodian accepted a non-authority"
+npx tsx wire.ts register-custodian "$CUST" --authority "$TMP/gov.json" --mint "$MINT" >/dev/null
+REC=$(npx tsx -e 'import { PublicKey } from "@solana/web3.js"; import { GATE } from "./wire.ts";
+  const [m, c] = process.argv.slice(1).map((k) => new PublicKey(k));
+  console.log(PublicKey.findProgramAddressSync([Buffer.from("custodian"), m.toBuffer(), c.toBuffer()], GATE)[0].toBase58())' "$MINT" "$CUST")
+solana account -u "$URL" "$REC" >/dev/null 2>&1 || fail "custodian not registered"
+
 # The issuer's old freeze key is no longer the freeze authority.
 spl-token freeze -u "$URL" "$TA" --freeze-authority "$TMP/issuer.json" --fee-payer "$TMP/issuer.json" \
   >/dev/null 2>&1 && fail "old freeze key still freezes"

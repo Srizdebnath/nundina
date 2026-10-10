@@ -355,6 +355,14 @@ impl Env {
             .unwrap();
     }
 
+    /// The owner of a token account.
+    pub fn token_owner(&self, token_account: &Pubkey) -> Pubkey {
+        let a = self.svm.get_account(token_account).expect("token account");
+        spl_token_2022::state::Account::unpack_from_slice(&a.data[..165])
+            .unwrap()
+            .owner
+    }
+
     /// Token balance; 0 for a closed/missing account.
     pub fn bal(&self, token_account: &Pubkey) -> u64 {
         match self.svm.get_account(token_account) {

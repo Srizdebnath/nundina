@@ -907,6 +907,7 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "auction-engine",
+ "credit-gate",
  "credit-math",
  "mark-engine",
  "payment-rails",

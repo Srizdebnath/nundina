@@ -13,6 +13,8 @@ use anchor_lang::prelude::Pubkey;
 use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData};
 use base64::Engine;
 use common::*;
+use credit_gate::pledge_holder;
+use liquidity_facility::signer_pda as lf_signer;
 use liquidity_facility::{
     FacilityParams, ForcedSaleSettled, ForcedSchedule, LadderSale, LfError, PositionState,
 };
@@ -87,6 +89,9 @@ fn fx() -> Fx {
         .expect("register");
     let issuer = with_key(&mut env, issuer_key, 20 * UNIT);
     let backstop = with_key(&mut env, backstop_key, 20 * UNIT);
+    // The backstop buys gated units: the gate admits it (LF-P5). The
+    // issuer buys its own security back and is not admitted.
+    env.admit(&backstop.key.pubkey(), 0);
     let crank = env.funded();
     Fx {
         env,
@@ -146,10 +151,17 @@ fn advance_at_mark_protective_under_h1_then_repay_and_release() {
             .unwrap_err(),
         lf(LfError::AdvanceAboveRate)
     );
+    let b = borrower.key.pubkey();
+    let seasoned = env.lots(&b);
     env.pledge(ID, &borrower, 10 * UNIT, 5 * UNIT).unwrap();
     assert_eq!(env.bal(&borrower.usdc), 5 * UNIT);
     assert_eq!(env.bal(&borrower.asset), 0);
-    let b = borrower.key.pubkey();
+    // LF-P5: the lots went with the units, dates and all.
+    let position = position_pda(&cfg, &b);
+    let pledged = env.lots(&pledge_holder(&env.asset_mint, &lf_signer().0, &position));
+    assert_eq!(env.lots(&b).total().unwrap(), 0, "borrower holds no lots");
+    assert_eq!(pledged.total().unwrap(), 10 * UNIT);
+    assert_eq!(pledged.lots[0].acquired_ts, seasoned.lots[0].acquired_ts);
     let pos = env.position(&cfg, &b);
     assert_eq!((pos.qty, pos.state), (10 * UNIT, PositionState::Active));
     // Healthy: no state change.
@@ -169,6 +181,73 @@ fn advance_at_mark_protective_under_h1_then_repay_and_release() {
     env.release(ID, &borrower, &crank).unwrap();
     assert_eq!(env.bal(&borrower.asset), 10 * UNIT);
     assert_eq!(env.position(&cfg, &b).state, PositionState::Closed);
+    // ...and came back with them, seasoning unchanged.
+    let back = env.lots(&b);
+    assert_eq!(back.total().unwrap(), 10 * UNIT);
+    assert_eq!(back.sellable(env.now()).unwrap(), 10 * UNIT);
+    assert_eq!(back.lots[0].acquired_ts, seasoned.lots[0].acquired_ts);
+    assert_eq!(
+        env.lots(&pledge_holder(&env.asset_mint, &lf_signer().0, &position))
+            .total()
+            .unwrap(),
+        0
+    );
+}
+
+/// LF-P5 / #202: pledged units take their seasoning with them. Before, the
+/// borrower kept 10 seasoned lots for units sitting in the facility, and
+/// could sell 10 freshly bought (unseasoned) units at once.
+#[test]
+fn lf_p5_a_pledge_takes_the_seasoning_with_the_units() {
+    let Fx {
+        mut env,
+        borrower,
+        cfg,
+        ..
+    } = fx();
+    let b = borrower.key.pubkey();
+    env.pledge(ID, &borrower, 10 * UNIT, 5 * UNIT).unwrap();
+    // The borrower buys 10 more units now: unseasoned.
+    let now = env.now();
+    env.append_lot_at(&b, 10 * UNIT, now);
+    let mine = env.lots(&b);
+    assert_eq!(mine.total().unwrap(), 10 * UNIT);
+    assert_eq!(
+        mine.sellable(now).unwrap(),
+        0,
+        "nothing sellable for 7 days"
+    );
+    // The pledge ledger is the gate's, under a key nobody signs for: only
+    // the facility (registered custodian) moves lots out of it.
+    let position = position_pda(&cfg, &b);
+    let holder = pledge_holder(&env.asset_mint, &lf_signer().0, &position);
+    let stranger = env.funded();
+    let ix = anchor_lang::solana_program::instruction::Instruction {
+        program_id: credit_gate::ID,
+        accounts: anchor_lang::ToAccountMetas::to_account_metas(
+            &credit_gate::accounts::CustodyRelease {
+                config: env.gate_config(),
+                record: gate_pda(&[
+                    credit_gate::Custodian::SEED,
+                    env.asset_mint.as_ref(),
+                    stranger.pubkey().as_ref(),
+                ]),
+                custodian: stranger.pubkey(),
+                from_lots: env.lots_pda(&holder),
+                to_lots: env.lots_pda(&b),
+                to_block: env.block_entry(&b),
+                mint: env.asset_mint,
+            },
+            None,
+        ),
+        data: credit_gate::instruction::CustodyRelease {
+            pledge_ref: position,
+            qty: 10 * UNIT,
+        }
+        .data(),
+    };
+    assert!(env.send(&[ix], &[&stranger]).is_err(), "not a custodian");
+    assert_eq!(env.lots(&holder).total().unwrap(), 10 * UNIT);
 }
 
 #[test]
@@ -205,12 +284,15 @@ fn breach_waits_out_the_grace_and_a_top_up_cures_it() {
         program_id: liquidity_facility::ID,
         accounts: anchor_lang::ToAccountMetas::to_account_metas(
             &liquidity_facility::accounts::AddCollateral {
+                config: f.cfg,
                 position: position_pda(&f.cfg, &b),
+                signer: liquidity_facility::signer_pda().0,
                 collateral_vault: collateral_pda(&position_pda(&f.cfg, &b)),
                 borrower: b,
                 borrower_asset: f.borrower.asset,
                 asset_mint: mint,
                 asset_token_program: f.env.asset_tp.id(),
+                gate: f.env.lf_gate(&position_pda(&f.cfg, &b), &b),
             },
             None,
         ),
@@ -325,6 +407,19 @@ fn ladder_step_two_backstop_at_its_haircut_books_the_shortfall() {
         (PositionState::Closed, sale.shortfall)
     );
     assert_eq!(env.bal(&backstop.asset), 10 * UNIT);
+    // LF-P5: a purchase — the backstop's lot seasons from now; the pledge
+    // ledger's seasoned lots were debited.
+    let bought = env.lots(&backstop.key.pubkey());
+    assert_eq!(bought.total().unwrap(), 10 * UNIT);
+    assert_eq!(bought.sellable(env.now()).unwrap(), 0);
+    assert_eq!(bought.lots[0].source, credit_gate::LotSource::CustodySale);
+    let position = position_pda(&cfg, &b);
+    assert_eq!(
+        env.lots(&pledge_holder(&env.asset_mint, &lf_signer().0, &position))
+            .total()
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -350,11 +445,11 @@ fn ladder_step_three_forced_sale_then_workout_of_the_unsold_rest() {
     env.pass_step(ID, &b, &crank).unwrap();
     assert_eq!(env.position(&cfg, &b).state, PositionState::ForcedSale);
 
-    // The facility's signer sells: the gate needs its seasoned lots.
-    // (Pilot: the custody PDA is admitted as the holder of record of the
-    // pledged lots; a gate-side pledge transfer of lots is not built.)
+    // The facility's signer sells. Its lots are the borrower's, moved by
+    // the pledge (LF-P5): no gate key appends any. (It is admitted, as the
+    // holder of record of the vault, but holds no lots of its own.)
     let signer = liquidity_facility::signer_pda().0;
-    env.admit(&signer, 10 * UNIT);
+    env.admit(&signer, 0);
     let t = env.now();
     let s = ForcedSchedule {
         commit_end: t + 100,
@@ -413,4 +508,85 @@ fn ladder_step_three_forced_sale_then_workout_of_the_unsold_rest() {
     assert_eq!(env.bal(&workout), 6 * UNIT);
     assert_eq!(env.bal(&bidder.asset), 4 * UNIT);
     assert_eq!(env.position(&cfg, &b).state, PositionState::Workout);
+    // LF-P5: settle_check debited the 4 sold from the signer's ledger
+    // (moved there from the pledge at listing); the lender holds the 6
+    // unsold with their original, seasoned dates; nothing is left behind.
+    let lender_lots = env.lots(&lender.pubkey());
+    assert_eq!(lender_lots.total().unwrap(), 6 * UNIT);
+    assert_eq!(lender_lots.sellable(env.now()).unwrap(), 6 * UNIT);
+    assert_eq!(env.lots(&signer).total().unwrap(), 0);
+    let position = position_pda(&cfg, &b);
+    assert_eq!(
+        env.lots(&pledge_holder(&env.asset_mint, &signer, &position))
+            .total()
+            .unwrap(),
+        0
+    );
+}
+
+/// LF-P5: collateral still seasoning cannot be force-sold (C2). The listing
+/// refuses it, the session fails, and the lender takes the units with
+/// their dates on the workout.
+#[test]
+fn lf_p5_unseasoned_collateral_goes_to_workout_not_to_a_forced_sale() {
+    let mut f = fx();
+    // A second borrower whose 10 units were acquired just now.
+    let (k, usdc) = f.env.bidder(0);
+    let asset = f.env.asset_account(&k.pubkey(), 10 * UNIT);
+    f.env.admit(&k.pubkey(), 0);
+    let now = f.env.now();
+    f.env.append_lot_at(&k.pubkey(), 10 * UNIT, now);
+    let fresh = Party {
+        key: k,
+        usdc,
+        asset,
+    };
+    f.env.register(&fresh, T0 + 400 * 86_400).expect("register");
+    f.env.pledge(ID, &fresh, 10 * UNIT, 5 * UNIT).unwrap();
+    let b = fresh.key.pubkey();
+    let mint = f.env.asset_mint;
+    let t = f.env.now();
+    f.env.set_time(t + 60);
+    f.env.drill_nav(&mint, NAV_ONE * 6 / 10).unwrap();
+    f.env.check_health(ID, &b, &f.crank).unwrap();
+    let t = f.env.now();
+    f.env.set_time(t + GRACE);
+    f.env.start_liquidation(ID, &b, &f.crank).unwrap();
+    f.env.pass_step(ID, &b, &f.issuer.key).unwrap();
+    // The backstop cannot buy unseasoned units either.
+    assert!(f.env.ladder_buy(ID, &fresh, &f.backstop).is_err());
+    f.env.pass_step(ID, &b, &f.backstop.key).unwrap();
+    let signer = lf_signer().0;
+    f.env.admit(&signer, 0);
+    let t = f.env.now();
+    let s = ForcedSchedule {
+        commit_end: t + 100,
+        reveal_end: t + 200,
+        settle_deadline: t + 400,
+    };
+    let crank = f.crank.insecure_clone();
+    f.env.open_forced_sale(ID, &b, &crank, 9, s).unwrap();
+    let lister = f.env.party(UNIT, 0);
+    assert_eq!(
+        f.env.list_forced_sale(ID, &b, &lister, 9).unwrap_err(),
+        lf(LfError::NothingSeasoned)
+    );
+    f.env.set_time(s.reveal_end);
+    f.env.clear_auction(9, &crank).unwrap(); // no orders: fails
+    assert_eq!(f.env.auction(9).phase, auction_engine::Phase::Failed);
+    let workout = f.env.asset_account(&f.lender.pubkey(), 0);
+    let meta = f
+        .env
+        .settle_forced_sale(ID, &fresh, &crank, 9, &workout)
+        .unwrap();
+    let r = &events::<ForcedSaleSettled>(&meta.logs)[0];
+    assert_eq!((r.sold, r.to_workout), (0, 10 * UNIT));
+    let lender_lots = f.env.lots(&f.lender.pubkey());
+    assert_eq!(lender_lots.total().unwrap(), 10 * UNIT);
+    assert_eq!(lender_lots.lots[0].acquired_ts, now, "tacked: same date");
+    assert_eq!(
+        lender_lots.sellable(f.env.now()).unwrap(),
+        0,
+        "still seasoning"
+    );
 }
