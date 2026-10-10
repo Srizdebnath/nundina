@@ -16,8 +16,8 @@ mod common;
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData};
 use auction_engine::{
-    instruction as aix, AuctionError, ClearingPrint, Exclusion, FailReason, OrderScreened, Phase,
-    SessionFailed, SessionParams, Side,
+    instruction as aix, AuctionError, ClearingPrint, Exclusion, FailReason, FillSkipped,
+    OrderScreened, Phase, SessionFailed, SessionParams, Side,
 };
 use base64::Engine;
 use common::*;
@@ -689,4 +689,194 @@ fn ae_p6_an_unseasoned_ask_is_excluded_before_it_can_fail_settlement() {
     env.refund_ask(&crank, &rs, &s2).expect("refund ask");
     assert_eq!(env.bal(&s2.asset), 6 * UNIT, "S2's asset back");
     assert_eq!(env.bal(&s1.asset), 0);
+}
+
+/// AE-P6 / AE-P9 (#202): wash trading is caught by investor, not wallet. The
+/// seller's investor bids through a second admitted wallet; that bid is
+/// excluded `SelfTrade` before the clear, so it can neither take the fill
+/// nor set the price, and the print counts the investors that traded.
+#[test]
+fn ae_p6_one_investor_on_both_sides_is_excluded_as_self_trade() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let seller = env.party(BOND, 10 * UNIT);
+    let twin = env.party_of(investor_of(&seller.key.pubkey()), 10 * UNIT + BOND, 0);
+    let b1 = env.party(10 * UNIT + BOND, 0);
+    let b2 = env.party(10 * UNIT + BOND, 0);
+    let crank = env.funded();
+    env.open_auction(1, params(Pubkey::default())).unwrap();
+    let orders = [
+        sealed(Side::Sell, 900_000, 10 * UNIT, 1),
+        sealed(Side::Buy, 990_000, 6 * UNIT, 2), // the seller's own investor
+        sealed(Side::Buy, 970_000, 6 * UNIT, 3),
+        sealed(Side::Buy, 950_000, 6 * UNIT, 4),
+    ];
+    env.commit_ask(1, &seller, &orders[0], 10 * UNIT).unwrap();
+    for (p, o) in [&twin, &b1, &b2].iter().zip(&orders[1..]) {
+        env.commit_bid(1, p, o, 10 * UNIT).expect("commit");
+    }
+    env.set_time(COMMIT_END_A);
+    for (p, o) in [&seller, &twin, &b1, &b2].iter().zip(&orders) {
+        env.reveal(1, p, o).expect("reveal");
+    }
+    env.set_time(REVEAL_END_A);
+    let reasons = screen_reasons(&mut env, 1, 4, &crank);
+    assert_eq!(reasons, vec![None, Some(Exclusion::SelfTrade), None, None]);
+    let ids = env.auction(1).investor_ids;
+    assert_eq!(ids[0], ids[1], "both wallets resolve to one investor");
+
+    env.clear_only(1, &crank).expect("clear");
+    let s = env.auction(1);
+    assert_eq!(s.orders[1].alloc, 0, "the wash bid takes nothing");
+    assert!(s.clear_price < 990_000, "and does not set the price");
+    env.allocate(1, &crank, 8).unwrap();
+    for (i, f) in env.auction(1).fills.iter().enumerate() {
+        let buyer = if f.buyer == b1.key.pubkey() { &b1 } else { &b2 };
+        env.settle_auction(1, &crank, i as u32, buyer, &seller)
+            .expect("settle");
+    }
+    let meta = env.finish_auction(1, &crank).expect("finish");
+    let print = &events::<ClearingPrint>(&meta.logs)[0];
+    assert_eq!(print.n_investor_ids, 3, "seller, B1, B2");
+    assert!(!print.partial);
+    let rs = env.rails_session_of(1);
+    env.refund(&crank, &rs, &twin.key.pubkey(), &twin.usdc)
+        .expect("refund");
+    assert_eq!(env.bal(&twin.usdc), 10 * UNIT + BOND, "excluded: whole");
+}
+
+/// AE-P3 (#202): the cash cap binds the investor across its wallets (the
+/// rails cap one wallet's escrow at commit). One investor bids through
+/// three wallets of 7 each against a cap of 15: the third is excluded
+/// `InvestorCapExceeded`. AE-P9 / G2: the print counts the two wallets
+/// that filled as one investor.
+#[test]
+fn ae_p3_the_cash_cap_spans_an_investors_wallets_and_the_print_counts_investors() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let seller = env.party(BOND, 10 * UNIT);
+    let inv = [0x77; 16];
+    let w1 = env.party_of(inv, 7 * UNIT + BOND, 0);
+    let w2 = env.party_of(inv, 7 * UNIT + BOND, 0);
+    let w3 = env.party_of(inv, 7 * UNIT + BOND, 0);
+    let b = env.party(10 * UNIT + BOND, 0);
+    let crank = env.funded();
+    let mut p = params(Pubkey::default());
+    p.max_cash = 15 * UNIT;
+    env.open_auction(1, p).unwrap();
+    let orders = [
+        sealed(Side::Sell, 900_000, 10 * UNIT, 1),
+        sealed(Side::Buy, 970_000, 4 * UNIT, 2),
+        sealed(Side::Buy, 960_000, 4 * UNIT, 3),
+        sealed(Side::Buy, 990_000, 4 * UNIT, 4), // over the investor's cap
+        sealed(Side::Buy, 950_000, 4 * UNIT, 5),
+    ];
+    env.commit_ask(1, &seller, &orders[0], 10 * UNIT).unwrap();
+    let bidders = [&w1, &w2, &w3, &b];
+    let cash = [7 * UNIT, 7 * UNIT, 7 * UNIT, 10 * UNIT];
+    for ((p, o), c) in bidders.iter().zip(&orders[1..]).zip(cash) {
+        env.commit_bid(1, p, o, c).expect("commit");
+    }
+    env.set_time(COMMIT_END_A);
+    env.reveal(1, &seller, &orders[0]).unwrap();
+    for (p, o) in bidders.iter().zip(&orders[1..]) {
+        env.reveal(1, p, o).expect("reveal");
+    }
+    env.set_time(REVEAL_END_A);
+    let reasons = screen_reasons(&mut env, 1, 5, &crank);
+    assert_eq!(
+        reasons,
+        vec![None, None, None, Some(Exclusion::InvestorCapExceeded), None]
+    );
+
+    env.clear_only(1, &crank).expect("clear");
+    assert_eq!(env.auction(1).orders[3].alloc, 0);
+    env.allocate(1, &crank, 8).unwrap();
+    let fills = env.auction(1).fills;
+    let party = |k: &Pubkey| *bidders.iter().find(|p| p.key.pubkey() == *k).unwrap();
+    for (i, f) in fills.iter().enumerate() {
+        env.settle_auction(1, &crank, i as u32, party(&f.buyer), &seller)
+            .expect("settle");
+    }
+    let filled = |w: &Party| fills.iter().any(|f| f.buyer == w.key.pubkey() && f.qty > 0);
+    assert!(
+        filled(&w1) && filled(&w2),
+        "two of the investor's wallets filled"
+    );
+    let meta = env.finish_auction(1, &crank).expect("finish");
+    let print = &events::<ClearingPrint>(&meta.logs)[0];
+    let expected = 2 + u16::from(filled(&b)); // seller + the investor (+ B)
+    assert_eq!(print.n_investor_ids, expected, "investors, not wallets");
+}
+
+/// AE-P2 partial settlement (#202): a buyer block-listed after allocation
+/// makes its fill fail `settle_check`. `skip_fill` retires exactly that
+/// fill (it refuses a fill that would pass), the session still finishes,
+/// the print is flagged `partial` and kept out of the mark, and the
+/// skipped buyer and the seller's unsold units come back by refund.
+#[test]
+fn ae_p2_a_fill_failing_the_gate_is_skipped_and_the_session_still_finishes() {
+    let mut bk = book(Tp::Spl, false);
+    reveal_all(&mut bk);
+    let Book {
+        mut env,
+        seller,
+        b1,
+        b2,
+        crank,
+        ..
+    } = bk;
+    env.set_time(REVEAL_END_A);
+    env.clear_auction(1, &crank).expect("clear");
+    env.allocate(1, &crank, 8).unwrap();
+    let fills = env.auction(1).fills;
+    assert_eq!(fills.len(), 2);
+    assert_eq!(fills[1].buyer, b2.key.pubkey());
+    let (s, b1k, b2k) = (seller.key.pubkey(), b1.key.pubkey(), b2.key.pubkey());
+
+    // Skipping before any fill fails is refused: both would settle.
+    assert_eq!(
+        env.skip_fill(1, &crank, 1, &b2k, &s).unwrap_err(),
+        aerr(AuctionError::FillSettleable)
+    );
+    env.block(&b2k);
+    assert!(env.settle_auction(1, &crank, 1, &b2, &seller).is_err());
+    assert_eq!(
+        env.skip_fill(1, &crank, 0, &b1k, &s).unwrap_err(),
+        aerr(AuctionError::FillSettleable),
+        "a crank cannot drop a good fill"
+    );
+    // The gate accounts are pinned to the fill's wallets.
+    assert_eq!(
+        env.skip_fill(1, &crank, 1, &b1k, &s).unwrap_err(),
+        aerr(AuctionError::GateAccounts)
+    );
+    let meta = env.skip_fill(1, &crank, 1, &b2k, &s).expect("skip");
+    let ev = &events::<FillSkipped>(&meta.logs)[0];
+    assert_eq!((ev.fill_index, ev.reason), (1, Exclusion::Blocklisted));
+    assert_eq!(
+        env.skip_fill(1, &crank, 1, &b2k, &s).unwrap_err(),
+        aerr(AuctionError::FillSettled)
+    );
+    env.settle_auction(1, &crank, 0, &b1, &seller)
+        .expect("fill 0");
+
+    let meta = env.finish_auction(1, &crank).expect("finish");
+    let print = &events::<ClearingPrint>(&meta.logs)[0];
+    assert!(print.partial);
+    assert_eq!(print.volume, 5 * UNIT, "only what settled");
+    assert_eq!(print.n_investor_ids, 2, "seller and B1");
+    assert_eq!(env.auction(1).phase, Phase::Printed);
+    assert_eq!(
+        env.feed(&env.asset_mint).prints_accepted,
+        0,
+        "a partial print is not offered to the mark"
+    );
+    let rs = env.rails_session_of(1);
+    env.refund(&crank, &rs, &b2k, &b2.usdc).expect("refund b2");
+    assert_eq!(env.bal(&b2.usdc), 10 * UNIT + BOND, "B2 whole");
+    assert_eq!(env.bal(&b2.asset), 0);
+    env.refund_ask(&crank, &rs, &seller).expect("refund ask");
+    assert_eq!(env.bal(&seller.asset), 5 * UNIT, "unsold units back");
+    assert_eq!(env.bal(&b1.asset), 5 * UNIT);
 }

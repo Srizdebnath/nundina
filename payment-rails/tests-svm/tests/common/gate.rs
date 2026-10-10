@@ -330,6 +330,11 @@ impl Env {
 
     /// The gate's `validate` for `wallet` (anyone pays: the authority here).
     pub fn validate(&mut self, wallet: &Pubkey) -> super::Res {
+        self.validate_as(wallet, investor_of(wallet))
+    }
+
+    /// `validate` for `wallet`, whose identity attestation names `investor_id`.
+    pub fn validate_as(&mut self, wallet: &Pubkey, investor_id: [u8; 16]) -> super::Res {
         let auth = self.authority.insecure_clone();
         let mint = self.asset_mint;
         let ix = Instruction {
@@ -341,7 +346,7 @@ impl Env {
                 identity_attestation: self.identity_att(wallet),
                 accreditation_attestation: self.accreditation_att(wallet),
                 holder_link: self.link_pda(wallet),
-                investor: gate_pda(&[InvestorRecord::SEED, mint.as_ref(), &investor_of(wallet)]),
+                investor: gate_pda(&[InvestorRecord::SEED, mint.as_ref(), &investor_id]),
                 lots: self.lots_pda(wallet),
                 mint,
                 payer: auth.pubkey(),
@@ -365,20 +370,21 @@ impl Env {
 
     /// Attest `wallet` (accredited or not) and run `validate`.
     pub fn admit_as(&mut self, wallet: &Pubkey, accredited: bool) {
+        self.admit_investor(wallet, investor_of(wallet), accredited);
+    }
+
+    /// Attest and admit `wallet` as one of investor `investor_id`'s wallets
+    /// (the gate links any number of wallets to one investor).
+    pub fn admit_investor(&mut self, wallet: &Pubkey, investor_id: [u8; 16], accredited: bool) {
         let (id, acc) = (self.sas.id_schema, self.sas.acc_schema);
-        self.sas_attest(
-            id,
-            wallet,
-            identity_data(investor_of(wallet)),
-            ATTESTATION_EXPIRY,
-        );
+        self.sas_attest(id, wallet, identity_data(investor_id), ATTESTATION_EXPIRY);
         self.sas_attest(
             acc,
             wallet,
             vec![u8::from(accredited), 1],
             ATTESTATION_EXPIRY,
         );
-        self.validate(wallet).expect("validate");
+        self.validate_as(wallet, investor_id).expect("validate");
         assert!(self.exists(&self.link_pda(wallet)), "admitted");
     }
 
