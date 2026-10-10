@@ -131,8 +131,22 @@ describe("queue-claim request_redemption", () => {
       holder_asset: k(2),
       asset_mint: mint,
       asset_token_program: TOKEN_2022_PROGRAM,
+      queue_config: await idlPda(queueIdl as IdlLike, "request_redemption", "queue_config", [A(queue)]),
+      // QC-P1 (#202): no attestation = anchor's `None` (the program id).
+      attestation: PROGRAMS.queue,
     });
     expect([...ix.data!]).toEqual(data(queueIdl as IdlLike, "request_redemption", { qty: 1_500_000n, window_date: 1_793_491_200n }));
+  });
+
+  it("passes the holder's SAS redemption_request attestation when the queue requires one (QC-P1)", async () => {
+    const ix = await requestRedemptionIx(
+      { assetMint: k(0), nextId: 0n, holder: k(1), holderAsset: k(2), assetTokenProgram: TOKEN_2022_PROGRAM, attestation: k(6) },
+      1n,
+      1n,
+    );
+    const last = ix.accounts![ix.accounts!.length - 1]!;
+    expect(last.address).toBe(k(6));
+    expect(last.role).toBe(AccountRole.READONLY);
   });
 
   it("encodes a pre-epoch window date as a signed i64", async () => {
@@ -336,7 +350,7 @@ describe("npcs-treasury", () => {
     expect([...ix.data!]).toEqual(data(treasuryIdl as IdlLike, "deposit", { amount: 1_000_000n }));
   });
 
-  it("redeem: the authority burns its NPCS (asset account before USDC, as the IDL orders them)", async () => {
+  it("redeem: the authority burns its NPCS at the feed's NAV (asset account before USDC, as the IDL orders them)", async () => {
     const treasury = await pdas.treasury(t.assetMint);
     const ix = await treasuryRedeemIx(t, 1_000_000n);
     pin(ix, treasuryIdl as IdlLike, "redeem", {
@@ -350,6 +364,8 @@ describe("npcs-treasury", () => {
       authority_usdc: t.ownerUsdc,
       token_program: TOKEN_PROGRAM,
       asset_token_program: TOKEN_2022_PROGRAM,
+      // doc 09 Path 8 (#202): the redemption NAV's feed.
+      feed: await pdas.feed(t.assetMint),
     });
     expect([...ix.data!]).toEqual(data(treasuryIdl as IdlLike, "redeem", { amount: 1_000_000n }));
     expect(treasuryScale(6, 6)).toBe(1n);

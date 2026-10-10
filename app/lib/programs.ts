@@ -112,6 +112,7 @@ export const pdas = {
   // queue-claim
   queue: (mint: Address) => pda(PROGRAMS.queue, ["queue", A(mint)]),
   queueRequest: (queue: Address, id: bigint) => pda(PROGRAMS.queue, ["request", A(queue), u64le(id)]),
+  queueConfig: (queue: Address) => pda(PROGRAMS.queue, ["queue_cfg", A(queue)]),
   queueNpcsVault: (request: Address) => pda(PROGRAMS.queue, ["npcs", A(request)]),
   queueSigner: () => pda(PROGRAMS.queue, ["qc_signer"]),
   // liquidity-facility

@@ -48,12 +48,19 @@ export interface RedemptionAccounts {
   holder: Address;
   holderAsset: Address;
   assetTokenProgram: Address;
+  /**
+   * QC-P1 (#202): the holder's SAS `redemption_request` attestation, for a
+   * queue whose `QueueConfig` sets `require_sas`; omitted otherwise.
+   */
+  attestation?: Address;
 }
 
 /**
  * QC-P1 `request_redemption(qty, window_date)`: `qty` NPCS move into the
  * request's own vault and the request waits for the attester (`attest`
- * mints the frozen claim token and sets the rank and fill schedule).
+ * mints the frozen claim token and sets the rank and fill schedule). The
+ * queue's config PDA is always passed (empty = SAS off); an absent
+ * attestation is anchor's `None` (the program id in its slot).
  */
 export async function requestRedemptionIx(a: RedemptionAccounts, qty: bigint, windowDate: bigint): Promise<Instruction> {
   const queue = await pdas.queue(a.assetMint);
@@ -70,6 +77,8 @@ export async function requestRedemptionIx(a: RedemptionAccounts, qty: bigint, wi
       ro(a.assetMint),
       ro(a.assetTokenProgram),
       ro(SYSTEM_PROGRAM),
+      ro(await pdas.queueConfig(queue)),
+      ro(a.attestation ?? PROGRAMS.queue),
     ],
     data: concat(disc(codecs.queue.idl, "request_redemption"), u64le(qty), i64le(windowDate)),
   };
@@ -308,7 +317,12 @@ export async function treasuryDepositIx(a: TreasuryAccounts, amount: bigint): Pr
   };
 }
 
-/** `redeem(amount)`: the treasury **authority** burns `amount` NPCS it holds and takes the USDC out. */
+/**
+ * `redeem(amount)`: the treasury **authority** burns `amount` NPCS it holds
+ * and takes `amount × NAV_effective` USDC out (doc 09 Path 8, #202): the
+ * asset's mark-engine feed is read, and a Stale or Suspended mark redeems
+ * nothing.
+ */
 export async function treasuryRedeemIx(a: TreasuryAccounts, amount: bigint): Promise<Instruction> {
   const treasury = await pdas.treasury(a.assetMint);
   return {
@@ -324,6 +338,7 @@ export async function treasuryRedeemIx(a: TreasuryAccounts, amount: bigint): Pro
       w(a.ownerUsdc),
       ro(a.usdcTokenProgram),
       ro(a.assetTokenProgram),
+      ro(await pdas.feed(a.assetMint)),
     ],
     data: concat(disc(codecs.treasury.idl, "redeem"), u64le(amount)),
   };
