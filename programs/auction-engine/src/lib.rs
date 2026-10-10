@@ -56,6 +56,9 @@
 //!   fails the gate's `settle_check` now (same checks, same accounts), so
 //!   the session still finishes; its print is flagged `partial` and is not
 //!   offered to mark-engine. The failed fill's escrows are refundable.
+//! - CG-P2 never mid-session: `open_session` fixes the mark the session
+//!   prices against (`Session.open_mark`); a NAV published while it runs
+//!   does not move its reserve or reference.
 //! - AE-P9 `finish`: rails `finish_session`, then the `ClearingPrint` into
 //!   mark-engine `record_print` (signed by the print PDA). `n_investor_ids`
 //!   counts distinct gate `investor_id`s (ME-P4 / G2), a wallet with no
@@ -241,6 +244,8 @@ pub mod auction_engine {
             ctx.accounts.venue.operator_bump,
         )?;
 
+        // CG-P2 (#202): the mark the session prices against is fixed here.
+        let open_mark = MarkSnapshot::take(feed, now)?;
         let session = &mut ctx.accounts.session;
         session.venue = ctx.accounts.venue.key();
         session.session_id = session_id;
@@ -251,6 +256,7 @@ pub mod auction_engine {
         session.params = params;
         session.phase = Phase::Commit;
         session.bump = ctx.bumps.session;
+        session.open_mark = open_mark;
         let venue = &mut ctx.accounts.venue;
         venue.sessions = venue.sessions.saturating_add(1);
         emit!(PhaseChanged {
@@ -1460,10 +1466,20 @@ fn compute_clear(
     if eligible < usize::from(session.params.min_reveals) {
         return Ok(Err(FailReason::TooFewReveals));
     }
+    // CG-P2: price against the mark taken at open (a session opened by an
+    // older build has none and reads the live one).
+    let (nav_eff, protective) = match session.open_mark.taken {
+        true => (
+            session.open_mark.nav_effective,
+            session.open_mark.mark_protective,
+        ),
+        false if feed.nav_pico > 0 => (feed.nav_effective(now)?, feed.mark_protective(now)?),
+        false => (0, 0),
+    };
     let (reserve, reference) = if session.params.forced_sale {
         // AE-P11: reserve relaxed; reference still the protective mark.
-        let reference = if feed.nav_pico > 0 {
-            feed.pico_to_price(feed.mark_protective(now)?)?
+        let reference = if protective > 0 {
+            feed.pico_to_price(protective)?
         } else {
             0
         };
@@ -1474,9 +1490,8 @@ fn compute_clear(
         if feed.is_standstill(now) || feed.nav_pico == 0 {
             return Ok(Err(FailReason::MarkUnavailable));
         }
-        let eff = feed.nav_effective(now)?;
         let floor = mul_div(
-            eff,
+            nav_eff,
             u128::from(BPS - session.params.max_discount_bps),
             u128::from(BPS),
         )
@@ -1488,7 +1503,7 @@ fn compute_clear(
         } else {
             reserve
         };
-        (reserve, feed.pico_to_price(feed.mark_protective(now)?)?)
+        (reserve, feed.pico_to_price(protective)?)
     };
     let orders: Vec<MathOrder> = session
         .orders
@@ -1722,6 +1737,43 @@ pub struct Session {
     /// AE-P2 (appended, #202): bit `i` set ⇔ fill `i` was retired by
     /// `skip_fill` (it failed the gate at settlement). `MAX_FILLS` ≤ 32.
     pub skipped_fills: u32,
+    /// CG-P2 (appended, #202): the mark taken at `open_session`, which the
+    /// clear prices the reserve and reference against.
+    pub open_mark: MarkSnapshot,
+}
+
+/// CG-P2 "never mid-session" (#202): the mark a session prices against,
+/// fixed at `open_session`. A NAV republished, or a haircut stepping up
+/// with age, while the session runs does not move its reserve or
+/// reference. Liveness stays live: the clear still fails on a Standstill
+/// (Suspended or Frozen) or never-published mark (bidders are not held to
+/// a mark that went dark).
+#[derive(
+    AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace,
+)]
+pub struct MarkSnapshot {
+    /// The feed had a NAV at open.
+    pub taken: bool,
+    /// `NAV_effective` at open (pico).
+    pub nav_effective: u128,
+    /// `MARK_PROTECTIVE` at open (pico).
+    pub mark_protective: u128,
+    /// The feed's `computed_ts` at open (which publication it was).
+    pub nav_computed_ts: i64,
+}
+
+impl MarkSnapshot {
+    pub fn take(feed: &Feed, now: i64) -> Result<MarkSnapshot> {
+        if feed.nav_pico == 0 {
+            return Ok(MarkSnapshot::default());
+        }
+        Ok(MarkSnapshot {
+            taken: true,
+            nav_effective: feed.nav_effective(now)?,
+            mark_protective: feed.mark_protective(now)?,
+            nav_computed_ts: feed.computed_ts,
+        })
+    }
 }
 
 impl Session {

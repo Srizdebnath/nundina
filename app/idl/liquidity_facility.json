@@ -2263,6 +2263,50 @@
       }
     },
     {
+      "name": "MarkSnapshot",
+      "docs": [
+        "CG-P2 \"never mid-session\" (#202): the mark a session prices against,",
+        "fixed at `open_session`. A NAV republished, or a haircut stepping up",
+        "with age, while the session runs does not move its reserve or",
+        "reference. Liveness stays live: the clear still fails on a Standstill",
+        "(Suspended or Frozen) or never-published mark (bidders are not held to",
+        "a mark that went dark)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "taken",
+            "docs": [
+              "The feed had a NAV at open."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "nav_effective",
+            "docs": [
+              "`NAV_effective` at open (pico)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "mark_protective",
+            "docs": [
+              "`MARK_PROTECTIVE` at open (pico)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "nav_computed_ts",
+            "docs": [
+              "The feed's `computed_ts` at open (which publication it was)."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "MarkState",
       "docs": [
         "ME-P2 mark states. `Suspended` is set only by `suspend`. `Frozen`",
@@ -2703,6 +2747,18 @@
               "`skip_fill` (it failed the gate at settlement). `MAX_FILLS` ≤ 32."
             ],
             "type": "u32"
+          },
+          {
+            "name": "open_mark",
+            "docs": [
+              "CG-P2 (appended, #202): the mark taken at `open_session`, which the",
+              "clear prices the reserve and reference against."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkSnapshot"
+              }
+            }
           }
         ]
       }
