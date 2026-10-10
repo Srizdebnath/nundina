@@ -13,7 +13,7 @@ use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData, ToAccountMetas};
 use base64::Engine;
 use common::*;
-use credit_gate::{GateError, LotSource, SettleChecked, FREE_LOT_ID};
+use credit_gate::{ComplianceUpdate, GateError, LotSource, SettleChecked, FREE_LOT_ID};
 use payment_rails::{ExemptionPath, GateCheck, LotRef, RailsError, TransferInstruction};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
@@ -523,4 +523,53 @@ fn a_settle_transaction_fits_without_a_lookup_table() {
     assert!(m.account_keys.len() < 128 && m.instructions.iter().all(|i| i.data.len() < 128));
     assert!(size <= 1232, "settle tx is {size} bytes (limit 1232)");
     println!("settle_fill legacy tx: {size} bytes");
+}
+
+/// CG-6 / CG-4 (#202): the market's compliance tail gates every fill. With
+/// the issuer's reporting lapsed or the bad-actor screen not current the
+/// market is disabled for resales; a fill below the ticket floor is
+/// refused. Each refusal moves nothing; restoring the flag lets it settle.
+#[test]
+fn the_issuer_flags_and_the_ticket_floor_gate_every_fill() {
+    let mut p = pair(Tp::Spl, 2 * UNIT);
+    let f = p.env.fill(&p.s, &p.buyer, &p.seller);
+    for (update, err, label) in [
+        (
+            ComplianceUpdate {
+                issuer_reporting_current: Some(false),
+                ..Default::default()
+            },
+            GateError::IssuerReportingStale,
+            "reporting lapsed",
+        ),
+        (
+            ComplianceUpdate {
+                issuer_reporting_current: Some(true),
+                bad_actor_screened: Some(false),
+                ..Default::default()
+            },
+            GateError::BadActorUnscreened,
+            "bad-actor screen",
+        ),
+        (
+            ComplianceUpdate {
+                bad_actor_screened: Some(true),
+                min_ticket: Some(2 * UNIT),
+                ..Default::default()
+            },
+            GateError::BelowMinTicket,
+            "under the ticket floor",
+        ),
+    ] {
+        p.env.update_compliance(update).expect(label);
+        assert_eq!(
+            p.env.settle(&f, 0, UNIT, PRICE).unwrap_err(),
+            gate_err(err),
+            "{label}"
+        );
+        assert_nothing_moved(&p, 0, label);
+    }
+    // A fill at the floor settles.
+    p.env.settle(&f, 0, 2 * UNIT, PRICE).expect("at the floor");
+    assert_eq!(p.env.bal(&p.buyer.asset), 2 * UNIT);
 }

@@ -20,7 +20,8 @@
 //!   the custodian, so `settle_check` debits that ledger).
 //! - `custody_sale` (custodian signs): a ladder sale. Seasoned quantity is
 //!   debited like any sale (C2); an admitted buyer gets a new lot seasoning
-//!   from now; the issuer buying its own security back gets none (as on the
+//!   from now, on an enabled market (CG-6) and past any Reg S period (CG-3,
+//!   #202); the issuer buying its own security back gets none (as on the
 //!   ROFR path).
 //!
 //! Keeping the dates on a pledge, its release and a workout is the
@@ -178,11 +179,18 @@ pub fn process_sale(
     require_custody_ledger(&a.from_lots, &custodian, &pledge_ref)?;
     require_clear(&a.config, &a.buyer_block)?;
     // C2: only seasoned quantity can be sold out of custody.
-    a.from_lots.debit(qty, now)?;
+    let draws = a.from_lots.debit(qty, now)?;
     match (&mut a.buyer_lots, &a.buyer_link) {
         // The issuer buying its own security back: no lot (ROFR analog).
         (None, None) => {}
         (Some(lots), Some(link)) => {
+            // A resale to an investor (#202): the market must be enabled
+            // (CG-6 issuer flags) and a Reg S lot past its period (CG-3).
+            // No ticket floor: a forced sale must be able to clear a
+            // remainder smaller than the auction's minimum.
+            let compliance = crate::Compliance::load(&a.config.to_account_info())?;
+            compliance.check_resale(None)?;
+            crate::settle::require_distribution_compliance(&compliance, &draws, now)?;
             require_keys_eq!(lots.holder, buyer, GateError::BuyerNotAdmitted);
             require_keys_eq!(link.owner, buyer, GateError::BuyerNotAdmitted);
             let lot = lots.append(

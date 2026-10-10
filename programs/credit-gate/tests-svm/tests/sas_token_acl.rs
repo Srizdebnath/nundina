@@ -20,9 +20,11 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use base64::Engine;
 use common::{deploy, root_pda, seed_root, PROGRAM_ID};
 use credit_gate::{
-    accounts as acc, instruction as ix, BlockEntry, BlockList, GateError, GateReject, HolderLink,
-    HolderLots, InvestorRecord, MarketConfig, MarketPolicy, ValidateDecision, SAS_PROGRAM_ID,
-    TOKEN_2022_ID, TOKEN_ACL_ID,
+    accounts as acc, associated_token_2022, field_group_ext, instruction as ix, AffiliateRecord,
+    AffiliateSet, BlockEntry, BlockList, Compliance, ComplianceUpdate, ConfigUpdated,
+    ExemptionClass, GateError, GateReject, HolderLink, HolderLots, InvestorRecord, LotSource,
+    MarketConfig, MarketPolicy, SeizureRecorded, ValidateDecision, SAS_PROGRAM_ID, TOKEN_2022_ID,
+    TOKEN_ACL_ID,
 };
 use litesvm::LiteSVM;
 use solana_instruction_error::InstructionError;
@@ -633,6 +635,115 @@ impl Env {
         MarketPolicy::try_deserialize(&mut a.data.as_slice()).unwrap()
     }
 
+    /// `release_holder` for `owner` (investor `id`), with the exit proof:
+    /// its lot ledger, its Token-2022 ATA and `extra` token accounts.
+    fn release_ix(&self, owner: Pubkey, id: u8, extra: &[Pubkey]) -> Instruction {
+        let mint = self.mint.pubkey();
+        let mut ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::ReleaseHolder {
+                config: self.config_pda(),
+                policy: self.policy_pda(),
+                holder_link: self.link_pda(&owner),
+                investor: self.investor_pda(id),
+                mint,
+                gate_config_authority: self.gov.pubkey(),
+                lots: self.lots_pda(&owner),
+                token_account: associated_token_2022(&owner, &mint),
+            }
+            .to_account_metas(None),
+            data: ix::ReleaseHolder { owner }.data(),
+        };
+        ix.accounts
+            .extend(extra.iter().map(|k| AccountMeta::new_readonly(*k, false)));
+        ix
+    }
+
+    fn lots_pda(&self, owner: &Pubkey) -> Pubkey {
+        pda(
+            &[
+                HolderLots::SEED,
+                self.mint.pubkey().as_ref(),
+                owner.as_ref(),
+            ],
+            &PROGRAM_ID,
+        )
+    }
+
+    /// The gate authority records `qty` units for `owner` (`append_lot`).
+    fn append_lot(&mut self, owner: Pubkey, qty: u64) {
+        let mint = self.mint.pubkey();
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::AppendLot {
+                config: self.config_pda(),
+                lots: self.lots_pda(&owner),
+                block_entry: self.entry_pda(&owner),
+                mint,
+                gate_config_authority: self.gov.pubkey(),
+            }
+            .to_account_metas(None),
+            data: ix::AppendLot {
+                qty,
+                source: LotSource::PrimaryMint,
+                affiliate: false,
+                exemption_path: 0,
+            }
+            .data(),
+        };
+        let gov = self.gov.insecure_clone();
+        self.ok(&[ix], &[&gov]);
+    }
+
+    /// `update_compliance` signed by `signer` (#202 tail).
+    fn update_compliance(
+        &mut self,
+        signer: &Keypair,
+        update: ComplianceUpdate,
+    ) -> Result<Vec<String>, (u32, Vec<String>)> {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::UpdateConfig {
+                config: self.config_pda(),
+                mint: self.mint.pubkey(),
+                gate_config_authority: signer.pubkey(),
+            }
+            .to_account_metas(None),
+            data: ix::UpdateCompliance { update }.data(),
+        };
+        self.send(&[ix], &[signer])
+    }
+
+    fn compliance(&mut self, update: ComplianceUpdate) {
+        let gov = self.gov.insecure_clone();
+        self.update_compliance(&gov, update)
+            .unwrap_or_else(|(c, l)| panic!("update_compliance {c}: {l:#?}"));
+    }
+
+    fn set_seasoning(&mut self, secs: i64) {
+        let gov = self.gov.insecure_clone();
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::UpdateConfig {
+                config: self.config_pda(),
+                mint: self.mint.pubkey(),
+                gate_config_authority: gov.pubkey(),
+            }
+            .to_account_metas(None),
+            data: ix::UpdateConfig {
+                policy_class: None,
+                holder_cap: None,
+                seasoning_seconds: Some(secs),
+                settlement_horizon_seconds: None,
+                attester_add: None,
+                attester_remove: None,
+                blocklist_set: None,
+            }
+            .data(),
+        };
+        self.ok(&[ix], &[&gov]);
+    }
+
     fn block(&mut self, wallet: Pubkey) {
         let mint = self.mint.pubkey();
         let ix = Instruction {
@@ -934,20 +1045,7 @@ fn the_governor_counts_investors_not_wallets() {
 
     // Investor 2 exits to zero: its slot frees up for investor 3.
     let release = |env: &mut Env, owner: Pubkey, id: u8| {
-        let mint = env.mint.pubkey();
-        let ix = Instruction {
-            program_id: PROGRAM_ID,
-            accounts: acc::ReleaseHolder {
-                config: env.config_pda(),
-                policy: env.policy_pda(),
-                holder_link: env.link_pda(&owner),
-                investor: env.investor_pda(id),
-                mint,
-                gate_config_authority: env.gov.pubkey(),
-            }
-            .to_account_metas(None),
-            data: ix::ReleaseHolder { owner }.data(),
-        };
+        let ix = env.release_ix(owner, id, &[]);
         let gov = env.gov.insecure_clone();
         env.ok(&[ix], &[&gov]);
     };
@@ -1061,4 +1159,316 @@ fn policy_refuses_schemas_outside_the_credential() {
         env.send(&[policy], &[&gov]).map(|_| ()).map_err(|(c, _)| c),
         Err(gate(GateError::InvalidSchema))
     );
+}
+
+fn events<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Vec<T> {
+    logs.iter()
+        .filter_map(|l| l.strip_prefix("Program data: "))
+        .filter_map(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
+        .filter(|d| d.starts_with(T::DISCRIMINATOR))
+        .map(|d| T::try_from_slice(&d[T::DISCRIMINATOR.len()..]).unwrap())
+        .collect()
+}
+
+/// CG-P4 (#202): the governor's count drops only on proof of the exit to
+/// zero: a holder whose ledger still holds units, or who is shown with a
+/// token account that is not its own, is not released.
+#[test]
+fn release_needs_proof_the_holder_exited_to_zero() {
+    let mut env = Env::new(8);
+    let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+    env.attest_good(a, 1);
+    env.attest_good(b, 2);
+    assert_eq!(env.validate(a, 1).reject, None);
+    assert_eq!(env.validate(b, 2).reject, None);
+    env.append_lot(a, 5);
+    let gov = env.gov.insecure_clone();
+    let ix = env.release_ix(a, 1, &[]);
+    assert_eq!(
+        env.send(&[ix], &[&gov]).unwrap_err().0,
+        gate(GateError::HolderNotExited),
+        "units still on the ledger"
+    );
+    // Someone else's token account is not proof of anything.
+    let other = env.token_account(&Pubkey::new_unique());
+    let ix = env.release_ix(b, 2, &[other]);
+    assert_eq!(
+        env.send(&[ix], &[&gov]).unwrap_err().0,
+        gate(GateError::HolderNotExited)
+    );
+    // Its own empty account is.
+    let own = env.token_account(&b);
+    let ix = env.release_ix(b, 2, &[own]);
+    env.ok(&[ix], &[&gov]);
+    assert_eq!(env.policy().distinct_investors, 1);
+}
+
+/// #202: the compliance tail lives behind the unchanged `MarketConfig`. A
+/// new market carries it; a market created before #202 reads the defaults
+/// (its old behaviour) until anyone runs `migrate_config`, and the config
+/// decodes as a `MarketConfig` throughout.
+#[test]
+fn the_compliance_tail_migrates_in_place_behind_an_unchanged_config() {
+    let mut env = Env::new(8);
+    let cfg = env.config_pda();
+    let len = env.svm.get_account(&cfg).unwrap().data.len();
+    assert_eq!(len, Compliance::CONFIG_SPACE, "new markets have the tail");
+    // Cut the account back to the pre-#202 size.
+    let mut acct = env.svm.get_account(&cfg).unwrap();
+    acct.data.truncate(Compliance::OFFSET);
+    env.svm.set_account(cfg, acct).unwrap();
+    let before =
+        MarketConfig::try_deserialize(&mut env.svm.get_account(&cfg).unwrap().data.as_slice())
+            .unwrap();
+    let gov = env.gov.insecure_clone();
+    assert_eq!(
+        env.update_compliance(
+            &gov,
+            ComplianceUpdate {
+                min_ticket: Some(1),
+                ..Default::default()
+            }
+        )
+        .unwrap_err()
+        .0,
+        gate(GateError::ConfigNotMigrated)
+    );
+    // An old config still admits, on the defaults.
+    let w = Pubkey::new_unique();
+    env.attest_good(w, 1);
+    assert_eq!(env.validate(w, 1).reject, None);
+
+    let payer = env.funded();
+    let migrate = |env: &mut Env, payer: &Keypair| {
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: acc::MigrateConfig {
+                config: env.config_pda(),
+                mint: env.mint.pubkey(),
+                payer: payer.pubkey(),
+                system_program: SYSTEM,
+            }
+            .to_account_metas(None),
+            data: ix::MigrateConfig {}.data(),
+        };
+        env.send(&[ix], &[payer])
+    };
+    let logs = migrate(&mut env, &payer).expect("migrate");
+    let ev = &events::<ConfigUpdated>(&logs)[0];
+    assert_eq!(ev.field_group_ext, field_group_ext::MIGRATED);
+    let acct = env.svm.get_account(&cfg).unwrap();
+    assert_eq!(acct.data.len(), Compliance::CONFIG_SPACE);
+    let after = MarketConfig::try_deserialize(&mut acct.data.as_slice()).unwrap();
+    assert_eq!(
+        after.fingerprint(),
+        before.fingerprint(),
+        "config untouched"
+    );
+    assert_eq!(
+        migrate(&mut env, &payer).unwrap_err().0,
+        gate(GateError::ConfigAlreadyMigrated)
+    );
+    env.compliance(ComplianceUpdate {
+        min_ticket: Some(1),
+        ..Default::default()
+    });
+}
+
+/// CG-3 / CG-4 / CG-6 (#202): `update_compliance` is the gate authority's,
+/// writes something, and keeps the tail in bounds: a Reg S market needs a
+/// distribution-compliance period of at least 40 days and no longer than
+/// its seasoning; an affiliate limit needs a window of at least a day.
+#[test]
+fn compliance_updates_are_governed_and_bounded() {
+    let mut env = Env::new(8);
+    let stranger = env.funded();
+    assert_eq!(
+        env.update_compliance(
+            &stranger,
+            ComplianceUpdate {
+                min_ticket: Some(1),
+                ..Default::default()
+            }
+        )
+        .unwrap_err()
+        .0,
+        gate(GateError::Unauthorized)
+    );
+    let gov = env.gov.insecure_clone();
+    assert_eq!(
+        env.update_compliance(&gov, ComplianceUpdate::default())
+            .unwrap_err()
+            .0,
+        gate(GateError::EmptyComplianceUpdate)
+    );
+    let reg_s = |secs: i64| ComplianceUpdate {
+        exemption_class: Some(ExemptionClass::RegSNonUs),
+        distribution_compliance_seconds: Some(secs),
+        ..Default::default()
+    };
+    // Seasoning is 7 days: a 40-day period does not fit under it.
+    assert_eq!(
+        env.update_compliance(&gov, reg_s(40 * DAY)).unwrap_err().0,
+        gate(GateError::ConfigOutOfBounds)
+    );
+    env.set_seasoning(40 * DAY);
+    assert_eq!(
+        env.update_compliance(&gov, reg_s(39 * DAY)).unwrap_err().0,
+        gate(GateError::ConfigOutOfBounds),
+        "under Reg S's shortest period"
+    );
+    env.compliance(reg_s(40 * DAY));
+    // Seasoning cannot now drop under the period.
+    let ix = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: acc::UpdateConfig {
+            config: env.config_pda(),
+            mint: env.mint.pubkey(),
+            gate_config_authority: gov.pubkey(),
+        }
+        .to_account_metas(None),
+        data: ix::UpdateConfig {
+            policy_class: None,
+            holder_cap: None,
+            seasoning_seconds: Some(7 * DAY),
+            settlement_horizon_seconds: None,
+            attester_add: None,
+            attester_remove: None,
+            blocklist_set: None,
+        }
+        .data(),
+    };
+    assert_eq!(
+        env.send(&[ix], &[&gov]).unwrap_err().0,
+        gate(GateError::ConfigOutOfBounds)
+    );
+    assert_eq!(
+        env.update_compliance(
+            &gov,
+            ComplianceUpdate {
+                affiliate_volume_limit: Some(100),
+                affiliate_window_seconds: Some(60),
+                ..Default::default()
+            }
+        )
+        .unwrap_err()
+        .0,
+        gate(GateError::ConfigOutOfBounds)
+    );
+}
+
+/// CG-3 (#202): the exemption class narrows the policy at admission: a
+/// Reg S market admits no `US` identity, an `EU_MTF_only` market admits
+/// nobody (routed out in v1–v2). Both rejections are typed and evented.
+#[test]
+fn the_exemption_class_narrows_admission() {
+    let mut env = Env::new(8);
+    env.set_seasoning(40 * DAY);
+    env.compliance(ComplianceUpdate {
+        exemption_class: Some(ExemptionClass::RegSNonUs),
+        distribution_compliance_seconds: Some(40 * DAY),
+        ..Default::default()
+    });
+    let us = Pubkey::new_unique();
+    env.attest_good(us, 1);
+    assert_eq!(
+        env.validate(us, 1).reject,
+        Some(GateReject::JurisdictionRejected),
+        "Reg S: no US holder"
+    );
+    env.compliance(ComplianceUpdate {
+        exemption_class: Some(ExemptionClass::EuMtfOnly),
+        distribution_compliance_seconds: Some(0),
+        ..Default::default()
+    });
+    assert_eq!(
+        env.validate(us, 1).reject,
+        Some(GateReject::ExemptionClassClosed)
+    );
+    env.compliance(ComplianceUpdate {
+        exemption_class: Some(ExemptionClass::PolicyOnly),
+        ..Default::default()
+    });
+    assert_eq!(env.validate(us, 1).reject, None, "back to the policy alone");
+}
+
+/// D14 / doc 09 Path 7 and L6 (#202): a permanent-delegate seizure is
+/// recorded by the gate authority with a reason hash; affiliates are
+/// registered and deregistered per market. Both are the authority's only.
+#[test]
+fn seizures_are_recorded_and_affiliates_registered_by_the_authority() {
+    let mut env = Env::new(8);
+    let mint = env.mint.pubkey();
+    let gov = env.gov.insecure_clone();
+    let (from, to) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let seize = |env: &Env, signer: &Pubkey, amount: u64| Instruction {
+        program_id: PROGRAM_ID,
+        accounts: acc::RecordSeizure {
+            config: env.config_pda(),
+            mint,
+            gate_config_authority: *signer,
+        }
+        .to_account_metas(None),
+        data: ix::RecordSeizure {
+            from,
+            to,
+            amount,
+            reason_hash: [0x5e; 32],
+        }
+        .data(),
+    };
+    let stranger = env.funded();
+    assert_eq!(
+        env.send(&[seize(&env, &stranger.pubkey(), 7)], &[&stranger])
+            .unwrap_err()
+            .0,
+        gate(GateError::Unauthorized)
+    );
+    assert_eq!(
+        env.send(&[seize(&env, &gov.pubkey(), 0)], &[&gov])
+            .unwrap_err()
+            .0,
+        gate(GateError::EmptySeizure)
+    );
+    let logs = env.ok(&[seize(&env, &gov.pubkey(), 7)], &[&gov]);
+    let ev = &events::<SeizureRecorded>(&logs)[0];
+    assert_eq!((ev.from, ev.to, ev.amount), (from, to, 7));
+    assert_eq!(ev.reason_hash, [0x5e; 32]);
+
+    let wallet = Pubkey::new_unique();
+    let record = AffiliateRecord::address(&mint, &wallet);
+    let reg = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: acc::RegisterAffiliate {
+            config: env.config_pda(),
+            record,
+            mint,
+            gate_config_authority: gov.pubkey(),
+            system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+        data: ix::RegisterAffiliate { wallet }.data(),
+    };
+    let logs = env.ok(&[reg], &[&gov]);
+    assert!(events::<AffiliateSet>(&logs)[0].registered);
+    let a = env.svm.get_account(&record).unwrap();
+    let r = AffiliateRecord::try_deserialize(&mut a.data.as_slice()).unwrap();
+    assert_eq!((r.wallet, r.window_qty), (wallet, 0));
+    let dereg = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: acc::DeregisterAffiliate {
+            config: env.config_pda(),
+            record,
+            mint,
+            gate_config_authority: gov.pubkey(),
+        }
+        .to_account_metas(None),
+        data: ix::DeregisterAffiliate {}.data(),
+    };
+    let logs = env.ok(&[dereg], &[&gov]);
+    assert!(!events::<AffiliateSet>(&logs)[0].registered);
+    assert!(env
+        .svm
+        .get_account(&record)
+        .is_none_or(|a| a.data.is_empty()));
 }

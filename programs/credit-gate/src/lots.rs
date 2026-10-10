@@ -13,8 +13,16 @@
 //!   SRS 08 names auction-engine settle and the primary mint as the callers;
 //!   neither exists yet (#128), so the issuer's governing key stands in.
 //!   `append_lot` re-screens the holder every time;
-//! - `merge_expired`: anyone. There is no crank fee yet (SRS 08 CG-P3 asks
-//!   for one); the call only moves expired quantity into FREE.
+//! - `merge_expired`: anyone. There is no crank fee (SRS 08 CG-P3 asks for
+//!   one; #202 left it out on purpose). A ledger holds no lamports but its
+//!   rent-exempt reserve, so a fee would have to come from a new
+//!   per-market fee vault funded by someone, with its own drain and
+//!   griefing analysis (a crank paid per call is paid to call when nothing
+//!   expired; `NothingExpired` stops that, but not one-lot-at-a-time
+//!   splitting of merges). Not trivially safe, so not built. Merging is
+//!   also never needed for correctness: `append`/`debit` compact on their
+//!   own, so a ledger nobody cranks still works. The call only moves
+//!   expired quantity into FREE.
 //!
 //! - `settle_check` ([`crate::settle`]): payment-rails' settlement PDA, once
 //!   per fill (AE-P8, #133). It debits the seller's seasoned quantity
@@ -28,6 +36,15 @@ use crate::{GateError, MarketConfig};
 /// Lot slots per holder per mint (the D15 boundary). A full ledger first
 /// compacts its expired lots; only a ledger full of *unexpired* lots rejects
 /// a new one ([`GateError::LotLedgerFull`]).
+///
+/// SRS 08 CG-P3 says 128. It stays 16 (#202, CG-P3 audit item): the ring
+/// is a fixed array inside `HolderLots`, live on devnet, and the seasoning
+/// crank decodes it at fixed offsets (582-byte accounts, see the layout
+/// test below). Growing it needs a versioned `HolderLots` with a realloc
+/// migration per ledger and a crank change in the same release; until
+/// then 16 *unexpired* lots per holder (one new lot per fill, seasoning
+/// 7 days at pilot) is the boundary, and `LotLedgerFull` is the typed,
+/// fail-closed answer past it.
 pub const MAX_LOTS: usize = 16;
 
 /// Where a lot came from. Wire-stable; append only.
@@ -59,8 +76,11 @@ pub struct Lot {
     pub restriction_expiry: i64,
     /// Primary mint or auction.
     pub source: LotSource,
-    /// Acquired by an affiliate of the issuer (doc 07: affiliate resale
-    /// rules differ).
+    /// Acquired by an affiliate of the issuer (doc 07 L6: affiliate resale
+    /// rules differ). Enforced through the seller's [`crate::AffiliateRecord`]
+    /// (#202): while a market's affiliate limit is on, a seller holding a
+    /// lot flagged here cannot sell until it is registered, and a
+    /// registered affiliate's sales count against the window.
     pub affiliate: bool,
     /// Exemption the acquisition relied on (code; mapping off-chain, like
     /// `GateReject`).
