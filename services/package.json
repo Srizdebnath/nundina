@@ -6,6 +6,7 @@
   "description": "SRS 08 §6 off-chain services: indexer, read API, nav-publisher, treasury agent",
   "scripts": {
     "svc": "tsx src/cli.ts",
+    "sync-codec": "cp ../app/lib/borsh.ts src/codec.ts",
     "typecheck": "tsc",
     "test": "tsx --test test/*.spec.ts"
   },

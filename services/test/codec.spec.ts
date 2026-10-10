@@ -7,7 +7,7 @@ import { eventsFromLogs } from "../src/logs.ts";
 test("codec.ts is the app's borsh.ts byte for byte", () => {
   const ours = readFileSync(new URL("../src/codec.ts", import.meta.url), "utf8");
   const app = readFileSync(new URL("../../app/lib/borsh.ts", import.meta.url), "utf8");
-  assert.equal(ours, app, "copy app/lib/borsh.ts to services/src/codec.ts");
+  assert.equal(ours, app, "out of sync: run `npm run sync-codec` (copies app/lib/borsh.ts to services/src/codec.ts)");
 });
 
 test("invoke stack: the same bytes decode as the program on top of the stack, or not at all", () => {
