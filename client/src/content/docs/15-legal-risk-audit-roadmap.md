@@ -45,7 +45,7 @@ Seven questions gate the mainnet pilot or replace defaults already in code (`pre
 
 `Q1` (exchange/broker status of the issuer window), `Q6` (assignment of queue proceeds), `Q7` (repurchase-window discipline), `Q12` (Form D), `Q18` (print dataset), and `Q19` (entity/team) follow; `Q8`, `Q9`, `Q11`, `Q15`, `Q16`, `Q17` are v3-and-later; `Q20` is standing (`preresearch/architecture/11-Counsel-Engagement-Brief.md:50`–`54`). `Q20` tracks the SEC **TSV order 2026-90** scope — whether its conditions (auditable public contracts, permissioned access, issuer notice) foreshadow extension to private-fund venues (`preresearch/architecture/07-Legal-Topology-and-Compliance.md:236`).
 
-The document is explicit about its own confidence: every doctrinal statement is tiered `[PRIMARY]`, `[SECONDARY]`, or `[UNVERIFIED]`, and only SEC Press Release 2026-90 was read in full — **no statute text or rule release was read directly** (`preresearch/architecture/07-Legal-Topology-and-Compliance.md:257`–`259`).
+Doc 07 tiers every doctrinal statement `[PRIMARY]`, `[SECONDARY]`, or `[UNVERIFIED]`; only SEC Press Release 2026-90 was read in full — **no statute text or rule release was read directly** (`preresearch/architecture/07-Legal-Topology-and-Compliance.md:257`–`259`).
 
 ## 15.3 Risk register
 
@@ -65,7 +65,7 @@ The risks the repository documents against itself, with the pilot's mitigating m
 | **Key-control loss** | devnet Squads members on one machine; "not 2-of-2 *custody*" (`DEPLOYMENTS.md:216`–`220`) | mainnet members are two people's hardware wallets (`DEPLOYMENTS.md:219`) |
 | **Irreversible authority** | superseded credit-gate and NPCS mints have lost keys (`DEPLOYMENTS.md:24`, `:121`) | new program IDs; configs on old programs ignored (#26) |
 
-Market figures in the table are dated and attributed in the reality-check doc (e.g. Apollo's 17%-of-NAV request vs its 5% cap, CNBC Jun 2026, `preresearch/research/12-Validation-2026-Reality-Check.md:13`); they are market context, not NUNDINA metrics.
+Market figures here are dated and attributed in the reality-check doc (e.g. Apollo 17%-of-NAV vs 5% cap, CNBC Jun 2026, `preresearch/research/12-Validation-2026-Reality-Check.md:13`) — context, not NUNDINA metrics.
 
 ## 15.4 Audit scope (P7) — written, not booked
 
@@ -94,7 +94,7 @@ Beyond a line-by-line review the pack asks six system questions: cash conservati
 
 The SRS phase plan runs 24 weeks and is dominated by the audit: P0 scaffold, P1 gate + asset, P2 marks + treasury, P3 auction, P4 claims + facility, P5 tranching (programs frozen), P6 UI, **P7 audit (weeks 12–22)**, and **P8 mainnet pilot** with all twelve ACs re-run on mainnet-beta with real USDC ($1–5K budget) (`preresearch/architecture/08-SRS-Pilot-Rails.md:443`–`453`). The honest timeline to a recorded issuer demo is ~4–5 months, dominated by a 6–10 week audit window (`preresearch/architecture/08-SRS-Pilot-Rails.md:11`).
 
-Current status against that plan, per the 2026-10-09 audit snapshot: core engineering ~60–70%, credible live-devnet hackathon demo ~35–45%, strict SRS **0/12 complete**, **8/8** Anchor programs with code/tests/IDL, **7/8** deployed on devnet (`liquidity-facility` is built but not deployed), and **0/8** on mainnet (`STATUS.md:27`–`34`). The remaining-work list puts "engage counsel and schedule the external audit before mainnet launch" in P2 (`STATUS.md:231`). See [deployment](/docs/12-deployment-governance-ops) for the authority and governance map.
+Current status against that plan, per the 2026-10-09 audit snapshot: core engineering ~60–70%, credible live-devnet hackathon demo ~35–45%, strict SRS **0/12 complete**, **8/8** Anchor programs with code/tests/IDL, **7/8** deployed on devnet (`liquidity-facility` is built but not deployed), and **0/8** on mainnet (`STATUS.md:27`–`34`). Governance is a Squads v4 2-of-2 multisig behind a 48h timelock (`DEPLOYMENTS.md:16`); on devnet both member keys sit on one machine (`DEPLOYMENTS.md:216`–`220`). The remaining-work list puts "engage counsel and schedule the external audit before mainnet launch" in P2 (`STATUS.md:231`). See [deployment](/docs/12-deployment-governance-ops) for the authority and governance map.
 
 ```mermaid
 stateDiagram-v2

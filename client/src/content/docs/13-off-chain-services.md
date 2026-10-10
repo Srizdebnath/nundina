@@ -38,7 +38,7 @@ flowchart LR
   API --> APP[dApp / docs reader]
   RPC -->|one getMultipleAccounts| NAV[NAV publisher]
   NAV -->|publish_nav| CHAIN[(devnet feed)]
-  CRANK[crank-runner] -->|solution/refund/season/distribute| CHAIN
+  CRANK[crank-runner] -->|settle/refund/season/distribute| CHAIN
   CHAIN --> RPC
 ```
 
@@ -54,7 +54,10 @@ gating on `Authorization == WEBHOOK_SECRET` and rejecting bodies over
 
 `ingest` returns early on `tx.err`, so failed transactions — whose logs can carry
 events of instructions that were rolled back — are skipped
-(`services/src/indexer.ts:50-52`). Every event is written to `events` keyed by
+(`services/src/indexer.ts:50-52`). Every RPC call goes through `makeRpc`, which
+retries network/429 errors with exponential backoff (`services/src/rpc.ts:13-27`);
+`RPC_URL` defaults to `http://127.0.0.1:8899` (`services/src/rpc.ts:39`). Every
+event is written to `events` keyed by
 `(signature, event_index)` with `ON CONFLICT DO NOTHING`
 (`services/src/indexer.ts:54-68`; `services/schema.sql:10-19`), then projected
 only if it decoded (`services/src/indexer.ts:69`). Re-ingesting is therefore a
@@ -82,23 +85,20 @@ devnet payment-rails predating `EscrowEvent.unit` — are stored raw as
 ### 13.2.3 Projections and the schema
 
 `events` is the source of truth; every other table is a projection rebuilt from
-it (`services/schema.sql:5-8`). The `project` switch maps
-`program:event` to tables (`services/src/indexer.ts:73-298`): `auction-engine`
-`PhaseChanged`/`Cleared`/`ClearingPrint`/`OrderCommitted`/`OrderRevealed`/
-`FillAllocated`/`FillSettled` → `sessions`, `bids`, `fills`
-(`services/src/indexer.ts:78-137`); `payment-rails` `FillSettled` → `fills` with
-the cash split, and `PayoutMade` → `payouts` (`services/src/indexer.ts:139-161`);
-`credit-gate` `LotEvent`/`SettleChecked`/`ValidateDecision` → `lot_events`,
-`gate_decisions` (`services/src/indexer.ts:163-184`); `mark-engine`
-`NavPublished`/`MarkStateChanged`/`PrintRecorded` → `marks`, `mark_states`,
-`prints` (`services/src/indexer.ts:186-205`); `queue-claim` → `claims`,
-`liquidity-facility` → `advances`, and `tranche-engine` `PeriodDistributed` →
-`waterfall_lines` (`services/src/indexer.ts:207-293`). Amounts are stored as
-`NUMERIC` so u64/u128 values stay exact (`services/schema.sql:3-4`). The rails
-`FillSettled` is a special case: because the rails session is not the auction
-session when the engine sits in front, the row is attributed to the auction
-session by finding the engine's matching `FillSettled` in the same transaction
-(`services/src/indexer.ts:139-146`).
+it (`services/schema.sql:5-8`). The `project` switch maps `program:event` to
+tables (`services/src/indexer.ts:73-298`): `auction-engine` → `sessions`,
+`bids`, `fills` (`services/src/indexer.ts:78-137`); `payment-rails`
+`FillSettled`/`PayoutMade` → `fills`, `payouts`
+(`services/src/indexer.ts:139-161`); `credit-gate` → `lot_events`,
+`gate_decisions` (`services/src/indexer.ts:163-184`); `mark-engine` → `marks`,
+`mark_states`, `prints` (`services/src/indexer.ts:186-205`); `queue-claim` →
+`claims`, `liquidity-facility` → `advances`, and `tranche-engine`
+`PeriodDistributed` → `waterfall_lines` (`services/src/indexer.ts:207-293`).
+Amounts are `NUMERIC` so u64/u128 values stay exact (`services/schema.sql:3-4`).
+The rails `FillSettled` is a special case: because the rails session is not the
+auction session when the engine sits in front, the row is attributed to the
+auction session by finding the engine's matching `FillSettled` in the same
+transaction (`services/src/indexer.ts:139-146`).
 
 ## 13.3 The read API
 
@@ -216,7 +216,7 @@ The phase planner `planPhase` is pure and mirrors the program's guards —
 Because a plain `settle` transaction is 1,684 bytes, settle steps go through an
 address lookup table the crank creates on demand (`payment-rails/crank/src/phases.ts:214-240`;
 `payment-rails/crank/README.md:149-175`). Seasoning reads credit-gate's
-`HolderLots` bytes (582 bytes, lot `restriction_expiry` at `+20`) and sends the
+`HolderLots` bytes (582 bytes; lot `restriction_expiry` at `+20`) and sends the
 permissionless `merge_expired` for every ledger with a seasoned lot
 (`payment-rails/crank/src/seasoning.ts:17-37`, `:56-83`). Distribution derives
 every rails `DistributeCoupon` account, including the tranche signer's
@@ -235,7 +235,7 @@ refunds are never pausable (AE-P10); the file is checked once per tick
 
 The database is production Postgres through `pg`, or PGlite — real Postgres
 compiled to WASM — for local runs and tests via `pglite:<dir>`/
-`pglite:memory` (`services/src/db.ts:1-38`). The schema is applied idempotently on
+`pglite:memory` (`services/src/db.ts:1-38`); the schema is applied idempotently on
 every start (`services/src/db.ts:13`, `services/schema.sql:1-3`). Beyond the
 projection tables, `cursors` holds the per-program high-water mark for the
 backfill (`services/schema.sql:23-29`), and `lot_events`/`gate_decisions` keep
@@ -252,14 +252,14 @@ stack), `snapshot.json` (session, `CashSession`, feed NAV/`model_version`/
 ed25519-signed over a domain-separated canonical JSON
 (`EVIDENCE_DOMAIN = "nundina:payment-rails:evidence-manifest:v1\n"`,
 `payment-rails/crank/src/evidence.ts:109-139`), and its `transferProof`
-classifies fills so a bare event count cannot read as compliance evidence —
-a fill is `proven` only under AE-P8's transfer rules
+classifies fills so a bare event count cannot read as compliance evidence — a
+fill is `proven` only under AE-P8's transfer rules
 (`payment-rails/crank/src/evidence.ts:67-93`). `verify-export` re-checks both
 hashes, the event count and the signature offline and keylessly
 (`payment-rails/crank/src/evidence.ts:234-273`; `payment-rails/crank/README.md:203-209`).
 The rails-wide `export` and the reconciliation ledger (`reconcileSession`,
-`reconcileFacility`, which flags booked shortfalls as failed checks, not
-footnotes) live in `payment-rails/crank/src/evidence.ts:164-226` and
+`reconcileFacility`, which flags a booked shortfall as a failed check, not a
+footnote) live in `payment-rails/crank/src/evidence.ts:164-226` and
 `payment-rails/crank/src/ledger.ts:29-89`.
 
 ## 13.8 What is verified
