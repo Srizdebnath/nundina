@@ -222,11 +222,25 @@ function accountDiscriminator(name: string): Uint8Array {
   return Uint8Array.from(acc.discriminator);
 }
 
-/** Decode one `Program data:` payload into `{ name, data }`, or `null`. */
+/**
+ * Decode one `Program data:` payload into `{ name, data }`, or `null`.
+ * Event fields are append-only: an event logged by an older build ends
+ * before the fields appended since, which are then absent from `data`.
+ */
 function decodeEvent(payload: Uint8Array): { name: string; data: Struct } | null {
   for (const ev of idl.events) {
     if (payload.length >= 8 && eqDisc(payload, ev.discriminator)) {
-      return { name: ev.name, data: decodeAt({ defined: { name: ev.name } }, payload, 8)[0] as Struct };
+      const def = typeDefs.get(ev.name);
+      if (!def || def.type.kind !== "struct") throw new Error(`event ${ev.name} has no struct type`);
+      const data: Struct = {};
+      let o = 8;
+      for (const f of def.type.fields) {
+        if (o === payload.length) break;
+        const [v, next] = decodeAt(f.type, payload, o);
+        data[f.name] = v;
+        o = next;
+      }
+      return { name: ev.name, data };
     }
   }
   return null;

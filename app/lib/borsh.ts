@@ -148,6 +148,23 @@ export class Codec {
     return this.readDefined(new Reader(data), name) as Struct;
   }
 
+  /**
+   * Decode event `name`'s payload (no discriminator). Event fields are
+   * append-only: an event logged by an older build ends before the fields
+   * appended since, which are then absent from the result.
+   */
+  decodeEvent(name: string, data: Uint8Array): Struct {
+    const def = this.types.get(name);
+    if (!def || def.type.kind !== "struct") throw new Error(`event ${name} has no struct type`);
+    const r = new Reader(data);
+    const out: Struct = {};
+    for (const f of (def.type.fields ?? []) as IdlField[]) {
+      if (r.off === data.length) break;
+      out[f.name] = this.read(r, f.type);
+    }
+    return out;
+  }
+
   /** Which account type `data` holds, by its 8-byte discriminator. */
   accountName(data: Uint8Array): string | null {
     for (const a of this.idl.accounts ?? []) if (prefixed(data, a.discriminator)) return a.name;
@@ -170,7 +187,7 @@ export class Codec {
       const bytes = fromBase64(l.slice("Program data: ".length));
       for (const e of this.idl.events ?? []) {
         if (prefixed(bytes, e.discriminator)) {
-          out.push({ name: e.name, data: this.decodeType(e.name, bytes.subarray(8)) });
+          out.push({ name: e.name, data: this.decodeEvent(e.name, bytes.subarray(8)) });
           break;
         }
       }
