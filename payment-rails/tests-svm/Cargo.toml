@@ -41,4 +41,4 @@ solana-program-pack = "3"
 solana-instruction-error = "2"
 solana-transaction-error = "3"
 # Decoding events from logs (#133).
-base64 = "0.22"
+base64 = "0.23"
