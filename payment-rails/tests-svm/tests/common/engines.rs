@@ -167,6 +167,29 @@ impl Env {
         self.send(&[ix], &[publisher])
     }
 
+    /// `publisher` signs `publication`, with `extra` remaining accounts
+    /// (the ME-P1 NAV attestation).
+    pub fn publish_exact(
+        &mut self,
+        mint: &Pubkey,
+        publisher: &Keypair,
+        publication: NavPublication,
+        extra: &[Pubkey],
+    ) -> Res {
+        let mut ix = Instruction {
+            program_id: mark_engine::ID,
+            accounts: macc::PublishNav {
+                feed: feed_pda(mint),
+                publisher: publisher.pubkey(),
+            }
+            .to_account_metas(None),
+            data: mix::PublishNav { publication }.data(),
+        };
+        ix.accounts
+            .extend(extra.iter().map(|k| AccountMeta::new_readonly(*k, false)));
+        self.send(&[ix], &[publisher])
+    }
+
     /// AC-9 drill mark (feed authority; `drills_enabled`).
     pub fn drill_nav(&mut self, mint: &Pubkey, nav: u128) -> Res {
         let now = self.now();

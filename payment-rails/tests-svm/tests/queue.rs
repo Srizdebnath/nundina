@@ -301,6 +301,20 @@ fn admit_again(env: &mut Env, wallet: &Pubkey, qty: u64) {
 /// Claim feed: the nav-publisher publishes the `quote_pv` value (per whole
 /// claim, decimals 0) into the claim mint's own mark feed.
 fn publish_claim_mark(env: &mut Env, claim_mint: &Pubkey, publisher: &Keypair, pv: u64) {
+    // A claim's PV moves by design (every window fill pays part of it
+    // down), so a claim feed runs without mark-engine's NAV deviation
+    // bound (#202): an ops step when the claim's feed is set up.
+    env.feed_admin(
+        claim_mint,
+        mark_engine::instruction::SetGuard {
+            guard: mark_engine::tail::GuardConfig {
+                max_nav_deviation_bps: 0,
+                ..Default::default()
+            },
+        }
+        .data(),
+    )
+    .expect("claim feed: unbounded");
     let now = env.now();
     env.set_time(now + 1);
     let nav = env.feed(claim_mint).price_to_pico(pv).unwrap();

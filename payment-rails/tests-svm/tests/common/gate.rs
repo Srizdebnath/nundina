@@ -50,6 +50,10 @@ pub struct Sas {
     pub credential: Pubkey,
     pub id_schema: Pubkey,
     pub acc_schema: Pubkey,
+    /// `nundina.nav.v1` (mark-engine ME-P1 NAV attestation).
+    pub nav_schema: Pubkey,
+    /// `nundina.redemption_request.v1` (queue-claim QC-P1).
+    pub rr_schema: Pubkey,
 }
 
 impl Sas {
@@ -131,6 +135,8 @@ impl Env {
         let sas = Sas {
             id_schema: schema(b"nundina.identity.v1"),
             acc_schema: schema(b"nundina.accreditation.v1"),
+            nav_schema: schema(b"nundina.nav.v1"),
+            rr_schema: schema(b"nundina.redemption_request.v1"),
             cred_auth,
             attester,
             credential,
@@ -161,6 +167,22 @@ impl Env {
                 &b"nundina.accreditation.v1"[..],
                 &[10u8, 0][..],
                 &["accredited", "method"][..],
+            ),
+            (
+                &b"nundina.nav.v1"[..],
+                &[13u8, 4, 8, 2, 13][..],
+                &[
+                    "asset_mint",
+                    "nav_pico",
+                    "computed_ts",
+                    "model_version",
+                    "inputs_hash",
+                ][..],
+            ),
+            (
+                &b"nundina.redemption_request.v1"[..],
+                &[3u8, 3, 8][..],
+                &["request_id", "qty", "window_date"][..],
             ),
         ] {
             let mut data = vec![1u8];

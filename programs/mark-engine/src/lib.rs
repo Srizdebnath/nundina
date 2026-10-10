@@ -26,7 +26,30 @@
 //! - ME-P5 `MARK_PROTECTIVE = min(NAV_effective, NAV_implied)`.
 //! - ME-P6 print policy classes shape what the print event discloses.
 //! - ME-P7 the feed's state maps onto the system breaker hierarchy; a
-//!   Stale or Suspended mark forbids liquidation for every consumer.
+//!   Stale, Frozen or Suspended mark forbids liquidation for every consumer.
+//!
+//! #202 integrity (state in the feed *tail*, see [`tail`]; the `Feed`
+//! struct consumers decode is unchanged):
+//! - RISK: `drills_enabled` is fixed at `initialize_feed`; `set_params`
+//!   cannot turn drills on (or off) later.
+//! - ME-P1 / G5: a publication more than `max_nav_deviation_bps` from the
+//!   prior NAV needs a second publisher's co-signature (same publication)
+//!   or the authority's `approve_nav_review` of exactly that NAV.
+//! - ME-P1: optional M-of-N `quorum`: the first signature records a
+//!   pending NAV, the quorum-th identical signature writes it.
+//! - ME-P1: optional SAS attestation of the NAV (`nundina.nav.v1`) as the
+//!   first remaining account of `publish_nav`, when the feed configures a
+//!   credential + schema.
+//! - ME-P2: Frozen at 3× cadence (06 §4: Warned 1.25×, Stale 2×, Frozen
+//!   3×), i.e. `stale_after × 3/2`; breaker Standstill.
+//! - ME-P3 / M5: `NAV_implied` is the volume-weighted, time-decayed mean of
+//!   the last [`tail::IMPLIED_RING`] eligible prints.
+//! - ME-P6: `PrintRecord` stores the price / volume only as the class
+//!   discloses them. Public-chain limit: the exact clearing price is still
+//!   in the auction-engine session account, its `ClearingPrint` event and
+//!   the `record_print` instruction data, and any implied NAV derived from
+//!   a single print equals that print. Print classes are disclosure
+//!   discipline in the product, not on-chain secrecy.
 
 #![deny(unsafe_code)]
 #![allow(missing_docs)]
@@ -34,6 +57,9 @@
 
 use anchor_lang::prelude::*;
 use credit_math::{haircut_bps, mul_div};
+
+pub mod tail;
+use tail::{FeedTail, GuardConfig, NavReview, PendingNav};
 
 declare_id!("79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH");
 
@@ -79,13 +105,20 @@ pub mod mark_engine {
             authority: feed.authority,
             params,
         });
-        Ok(())
+        // #202: new feeds carry the tail from birth (default guard).
+        FeedTail::new(MarkState::Stale).store(&ctx.accounts.feed.to_account_info())
     }
 
     /// Change the feed's parameters (authority only; bounded, evented).
+    /// `drills_enabled` is fixed at `initialize_feed` (RISK: a production
+    /// feed can never be turned into a drill feed).
     pub fn set_params(ctx: Context<FeedAdmin>, params: FeedParams) -> Result<()> {
         params.validate()?;
         let feed = &mut ctx.accounts.feed;
+        require!(
+            params.drills_enabled == feed.params.drills_enabled,
+            MarkError::DrillsImmutable
+        );
         feed.params = params;
         emit!(FeedConfigured {
             feed: feed.key(),
@@ -109,8 +142,18 @@ pub mod mark_engine {
             *slot = *p;
         }
         feed.n_publishers = publishers.len() as u8;
+        // Signatures are per publisher slot: a new set voids a pending NAV.
+        let ai = ctx.accounts.feed.to_account_info();
+        if let Some(mut t) = FeedTail::load(&ai)? {
+            require!(
+                t.guard.quorum <= ctx.accounts.feed.n_publishers,
+                MarkError::QuorumAboveSet
+            );
+            t.pending = PendingNav::NONE;
+            t.store(&ai)?;
+        }
         emit!(PublishersChanged {
-            feed: feed.key(),
+            feed: ctx.accounts.feed.key(),
             publishers,
         });
         Ok(())
@@ -130,14 +173,106 @@ pub mod mark_engine {
 
     /// ME-P1: publish a NAV computed off-chain from treasury holdings
     /// (`credit_math::weekly_publish`). Only a publisher-set key signs.
-    pub fn publish_nav(ctx: Context<PublishNav>, publication: NavPublication) -> Result<()> {
+    ///
+    /// On a feed with a tail (#202): the optional SAS attestation of the
+    /// NAV is the first remaining account; a publication outside the
+    /// deviation bound, or on a feed with `quorum > 1`, is recorded as
+    /// pending and written only when enough publishers have signed the
+    /// identical publication (an out-of-band one needs at least two, or
+    /// the authority's `approve_nav_review`).
+    pub fn publish_nav<'info>(
+        ctx: Context<'info, PublishNav<'info>>,
+        publication: NavPublication,
+    ) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let ai = ctx.accounts.feed.to_account_info();
+        let key = ai.key();
+        let signer = ctx.accounts.publisher.key();
         let feed = &mut ctx.accounts.feed;
-        require!(
-            feed.is_publisher(&ctx.accounts.publisher.key()),
-            MarkError::NotPublisher
-        );
-        write_nav(feed.key(), feed, publication, now, false)
+        let slot = feed
+            .publisher_slot(&signer)
+            .ok_or(error!(MarkError::NotPublisher))?;
+        let Some(mut t) = FeedTail::load(&ai)? else {
+            // Not migrated: the pre-#202 single-publisher path.
+            return write_nav(key, feed, &mut None, publication, now, false);
+        };
+        check_publication(feed, &publication, now)?;
+        if t.guard.attestation_required() {
+            tail::verify_nav_attestation(
+                ctx.remaining_accounts.first(),
+                feed,
+                &t.guard,
+                &publication,
+                now,
+            )?;
+        }
+        // G5: the bound is against the prior real NAV (none before the
+        // first publication; a drill mark is no reference).
+        let deviation = if feed.nav_pico > 0 && !feed.last_drill {
+            tail::deviation_bps(feed.nav_pico, publication.nav_pico)
+        } else {
+            0
+        };
+        let out_of_band =
+            t.guard.max_nav_deviation_bps > 0 && deviation > t.guard.max_nav_deviation_bps;
+        let reviewed = out_of_band
+            && t.review
+                == (NavReview {
+                    nav_pico: publication.nav_pico,
+                    computed_ts: publication.computed_ts,
+                });
+        let mut required = t.guard.quorum.max(1);
+        if out_of_band && !reviewed {
+            required = required.max(2);
+        }
+        if required > feed.n_publishers {
+            return Err(if out_of_band {
+                error!(MarkError::NavDeviationTooLarge)
+            } else {
+                error!(MarkError::QuorumAboveSet)
+            });
+        }
+        // Co-signatures accumulate on the identical publication only; a
+        // different one (or an expired one) starts over.
+        let live = t.pending.signers != 0
+            && t.pending.publication == publication
+            && now.saturating_sub(t.pending.proposed_at) < feed.params.warn_after;
+        if !live {
+            t.pending = PendingNav {
+                publication,
+                signers: 0,
+                proposed_at: now,
+            };
+        }
+        let bit = 1u8 << slot;
+        require!(t.pending.signers & bit == 0, MarkError::AlreadySigned);
+        t.pending.signers |= bit;
+        let signatures = t.pending.signers.count_ones() as u8;
+        emit!(NavSigned {
+            feed: key,
+            publisher: signer,
+            nav_pico: publication.nav_pico,
+            computed_ts: publication.computed_ts,
+            signatures,
+            required,
+            deviation_bps: deviation,
+            out_of_band,
+            reviewed,
+        });
+        let mut tail = Some(t);
+        if signatures >= required {
+            if let Some(t) = tail.as_mut() {
+                t.pending = PendingNav::NONE;
+                if reviewed {
+                    t.review = NavReview {
+                        nav_pico: 0,
+                        computed_ts: 0,
+                    };
+                }
+            }
+            write_nav(key, feed, &mut tail, publication, now, false)?;
+        }
+        tail.unwrap().store(&ai)
     }
 
     /// AC-9 drill (devnet only, `drills_enabled` at init): the authority
@@ -145,38 +280,46 @@ pub mod mark_engine {
     /// export or demo can present it as a real NAV.
     pub fn publish_drill_nav(ctx: Context<FeedAdmin>, publication: NavPublication) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let ai = ctx.accounts.feed.to_account_info();
         let feed = &mut ctx.accounts.feed;
         require!(feed.params.drills_enabled, MarkError::DrillsDisabled);
-        write_nav(feed.key(), feed, publication, now, true)
+        let mut tail = FeedTail::load(&ai)?;
+        write_nav(ai.key(), feed, &mut tail, publication, now, true)?;
+        store_tail(&ai, &tail)
     }
 
     /// ME-P2: event the state the clock has moved the feed into
     /// (permissionless; idempotent).
     pub fn refresh(ctx: Context<Refresh>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
-        let feed = &mut ctx.accounts.feed;
-        transition(feed.key(), feed, now);
-        Ok(())
+        let ai = ctx.accounts.feed.to_account_info();
+        let mut tail = FeedTail::load(&ai)?;
+        transition(ai.key(), &mut ctx.accounts.feed, &mut tail, now);
+        store_tail(&ai, &tail)
     }
 
     /// ME-P2/P7: Suspended is explicit only (authority).
     pub fn suspend(ctx: Context<FeedAdmin>, reason_hash: [u8; 32]) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let ai = ctx.accounts.feed.to_account_info();
+        let mut tail = FeedTail::load(&ai)?;
         let feed = &mut ctx.accounts.feed;
         feed.suspended = true;
         feed.suspend_reason = reason_hash;
-        transition(feed.key(), feed, now);
-        Ok(())
+        transition(ai.key(), feed, &mut tail, now);
+        store_tail(&ai, &tail)
     }
 
     /// Lift a suspension (authority). The feed returns to its age state.
     pub fn resume(ctx: Context<FeedAdmin>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let ai = ctx.accounts.feed.to_account_info();
+        let mut tail = FeedTail::load(&ai)?;
         let feed = &mut ctx.accounts.feed;
         feed.suspended = false;
         feed.suspend_reason = [0; 32];
-        transition(feed.key(), feed, now);
-        Ok(())
+        transition(ai.key(), feed, &mut tail, now);
+        store_tail(&ai, &tail)
     }
 
     /// ME-P4/P6: an auction session's clearing print. Only the feed's print
@@ -185,6 +328,8 @@ pub mod mark_engine {
     /// never enter the implied curve.
     pub fn record_print(ctx: Context<RecordPrint>, print: PrintInput) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let ai = ctx.accounts.feed.to_account_info();
+        let mut tail = FeedTail::load(&ai)?;
         let feed = &mut ctx.accounts.feed;
         require_keys_eq!(
             ctx.accounts.print_source.key(),
@@ -195,23 +340,6 @@ pub mod mark_engine {
         let price_pico = feed.price_to_pico(print.price)?;
         let eligibility = feed.print_eligibility(&print, price_pico);
         let accepted = eligibility == PrintEligibility::Eligible;
-        if accepted {
-            feed.implied_pico = price_pico;
-            feed.implied_ts = now;
-            feed.prints_accepted = feed.prints_accepted.saturating_add(1);
-        } else {
-            feed.prints_rejected = feed.prints_rejected.saturating_add(1);
-        }
-        let rec = &mut ctx.accounts.record;
-        rec.feed = feed.key();
-        rec.session = print.session;
-        rec.price = print.price;
-        rec.volume = print.volume;
-        rec.n_investor_ids = print.n_investor_ids;
-        rec.forced_sale = print.forced_sale;
-        rec.eligibility = eligibility;
-        rec.recorded_at = now;
-        rec.bump = ctx.bumps.record;
 
         // ME-P6: what the print discloses depends on the market's class.
         let policy = feed.params.print_policy;
@@ -224,6 +352,52 @@ pub mod mark_engine {
             PrintPolicy::AggregateOnly => (None, Some(print.volume)),
             PrintPolicy::DataRoom => (None, None),
         };
+        if accepted {
+            feed.implied_pico = match tail.as_mut() {
+                // ME-P3 / M5: the VWAP of recent eligible prints. A BANDED
+                // feed remembers the band floor it discloses (never above
+                // the exact price, so the protective mark only errs low);
+                // AGGREGATE_ONLY / DATA_ROOM fold the ring to the derived
+                // implied point so no per-print price is kept.
+                Some(t) => {
+                    let point = match disclosed_price {
+                        Some(p) => feed.price_to_pico(p)?,
+                        None => price_pico,
+                    };
+                    let half_life = if t.guard.implied_half_life > 0 {
+                        t.guard.implied_half_life
+                    } else {
+                        feed.params.warn_after
+                    };
+                    t.push_print(
+                        point,
+                        print.volume,
+                        now,
+                        half_life,
+                        feed.params.stale_after,
+                        disclosed_price.is_none(),
+                    )
+                }
+                None => price_pico,
+            };
+            feed.implied_ts = now;
+            feed.prints_accepted = feed.prints_accepted.saturating_add(1);
+        } else {
+            feed.prints_rejected = feed.prints_rejected.saturating_add(1);
+        }
+        // The stored record holds only what the class discloses (0 =
+        // withheld); the data room reads the auction session instead.
+        let rec = &mut ctx.accounts.record;
+        rec.feed = feed.key();
+        rec.session = print.session;
+        rec.price = disclosed_price.unwrap_or(0);
+        rec.volume = disclosed_volume.unwrap_or(0);
+        rec.n_investor_ids = print.n_investor_ids;
+        rec.forced_sale = print.forced_sale;
+        rec.eligibility = eligibility;
+        rec.recorded_at = now;
+        rec.bump = ctx.bumps.record;
+        store_tail(&ai, &tail)?;
         emit!(PrintRecorded {
             feed: feed.key(),
             session: print.session,
@@ -237,13 +411,113 @@ pub mod mark_engine {
         });
         Ok(())
     }
+
+    /// #202: give a pre-#202 feed its tail (realloc, default guard).
+    /// Permissionless — the payer funds the extra rent; idempotent.
+    pub fn migrate_feed(ctx: Context<MigrateFeed>) -> Result<()> {
+        let ai = ctx.accounts.feed.to_account_info();
+        if ai.data_len() >= FeedTail::FEED_SPACE {
+            return Ok(());
+        }
+        let need = Rent::get()?
+            .minimum_balance(FeedTail::FEED_SPACE)
+            .saturating_sub(ai.lamports());
+        if need > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.key(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.payer.to_account_info(),
+                        to: ai.clone(),
+                    },
+                ),
+                need,
+            )?;
+        }
+        ai.resize(FeedTail::FEED_SPACE)?;
+        let feed = &ctx.accounts.feed;
+        FeedTail::new(feed.last_state).store(&ai)?;
+        emit!(FeedMigrated {
+            feed: ai.key(),
+            space: FeedTail::FEED_SPACE as u32,
+        });
+        emit!(GuardConfigured {
+            feed: ai.key(),
+            guard: GuardConfig::default(),
+        });
+        Ok(())
+    }
+
+    /// ME-P1 / G5: set the deviation bound, quorum, NAV attestation and
+    /// implied half-life (authority only; bounded, evented). Voids any
+    /// pending NAV and review approval.
+    pub fn set_guard(ctx: Context<FeedAdmin>, guard: GuardConfig) -> Result<()> {
+        let ai = ctx.accounts.feed.to_account_info();
+        let mut t = FeedTail::load(&ai)?.ok_or(error!(MarkError::FeedNotMigrated))?;
+        guard.validate(ctx.accounts.feed.n_publishers)?;
+        t.guard = guard;
+        t.pending = PendingNav::NONE;
+        t.review = NavReview {
+            nav_pico: 0,
+            computed_ts: 0,
+        };
+        t.store(&ai)?;
+        emit!(GuardConfigured {
+            feed: ai.key(),
+            guard,
+        });
+        Ok(())
+    }
+
+    /// G5 manual review: the authority approves one specific out-of-band
+    /// publication (`nav_pico`, `computed_ts`), which then needs only the
+    /// quorum. One-shot; `nav_pico = 0` withdraws the approval.
+    pub fn approve_nav_review(
+        ctx: Context<FeedAdmin>,
+        nav_pico: u128,
+        computed_ts: i64,
+    ) -> Result<()> {
+        let ai = ctx.accounts.feed.to_account_info();
+        let mut t = FeedTail::load(&ai)?.ok_or(error!(MarkError::FeedNotMigrated))?;
+        t.review = NavReview {
+            nav_pico,
+            computed_ts,
+        };
+        t.store(&ai)?;
+        emit!(NavReviewApproved {
+            feed: ai.key(),
+            nav_pico,
+            computed_ts,
+        });
+        Ok(())
+    }
 }
 
-fn write_nav(key: Pubkey, feed: &mut Feed, p: NavPublication, now: i64, drill: bool) -> Result<()> {
+fn store_tail(ai: &AccountInfo, tail: &Option<FeedTail>) -> Result<()> {
+    match tail {
+        Some(t) => t.store(ai),
+        None => Ok(()),
+    }
+}
+
+/// What every NAV write requires (checked before a NAV can be pending too).
+fn check_publication(feed: &Feed, p: &NavPublication, now: i64) -> Result<()> {
     require!(!feed.suspended, MarkError::Suspended);
     require!(p.nav_pico > 0, MarkError::ZeroNav);
     require!(p.computed_ts <= now, MarkError::FutureNav);
     require!(p.computed_ts > feed.computed_ts, MarkError::NavNotNewer);
+    Ok(())
+}
+
+fn write_nav(
+    key: Pubkey,
+    feed: &mut Feed,
+    tail: &mut Option<FeedTail>,
+    p: NavPublication,
+    now: i64,
+    drill: bool,
+) -> Result<()> {
+    check_publication(feed, &p, now)?;
     feed.nav_pico = p.nav_pico;
     feed.computed_ts = p.computed_ts;
     feed.effective_ts = now;
@@ -260,22 +534,36 @@ fn write_nav(key: Pubkey, feed: &mut Feed, p: NavPublication, now: i64, drill: b
         inputs_hash: p.inputs_hash,
         admin_drill: drill,
     });
-    transition(key, feed, now);
+    transition(key, feed, tail, now);
     Ok(())
 }
 
-/// Event a state change once (ME-P2: "transitions evented").
-fn transition(key: Pubkey, feed: &mut Feed, now: i64) {
+/// Event a state change once (ME-P2: "transitions evented"). `Feed`
+/// stores `Frozen` as `Stale` (programs built before `Frozen` existed must
+/// still decode the feed); the tail keeps the full state. A feed without a
+/// tail events Frozen once, on the transition out of Fresh/Warned.
+fn transition(key: Pubkey, feed: &mut Feed, tail: &mut Option<FeedTail>, now: i64) {
     let state = feed.state_at(now);
-    if state != feed.last_state {
+    let from = match tail {
+        Some(t) => t.last_state,
+        None => feed.last_state,
+    };
+    let changed = match tail {
+        Some(_) => state != from,
+        None => state.stored() != from,
+    };
+    if changed {
         emit!(MarkStateChanged {
             feed: key,
-            from: feed.last_state,
+            from,
             to: state,
             breaker: state.breaker(),
             at: now,
         });
-        feed.last_state = state;
+        feed.last_state = state.stored();
+        if let Some(t) = tail {
+            t.last_state = state;
+        }
     }
 }
 
@@ -303,13 +591,15 @@ pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1
 
 // ── state ───────────────────────────────────────────────────────────────
 
-/// ME-P2 mark states. `Suspended` is set only by `suspend`.
+/// ME-P2 mark states. `Suspended` is set only by `suspend`. `Frozen`
+/// (appended, #202) is age > 3× cadence (06 §4).
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum MarkState {
     Fresh,
     Warned,
     Stale,
     Suspended,
+    Frozen,
 }
 
 /// doc 06 §11 system breaker hierarchy (ME-P7).
@@ -327,7 +617,15 @@ impl MarkState {
             MarkState::Fresh => BreakerLevel::Normal,
             MarkState::Warned => BreakerLevel::Cautious,
             MarkState::Stale => BreakerLevel::Restricted,
-            MarkState::Suspended => BreakerLevel::Standstill,
+            MarkState::Suspended | MarkState::Frozen => BreakerLevel::Standstill,
+        }
+    }
+
+    /// The value `Feed::last_state` stores: `Frozen` as `Stale`.
+    pub fn stored(self) -> MarkState {
+        match self {
+            MarkState::Frozen => MarkState::Stale,
+            s => s,
         }
     }
 }
@@ -370,7 +668,8 @@ pub struct FeedParams {
     pub min_print_investors: u16,
     /// Maximum |print − NAV| / NAV for an eligible print.
     pub outlier_band_bps: u64,
-    /// Devnet only: allow `publish_drill_nav` (AC-9 drill).
+    /// Devnet only: allow `publish_drill_nav` (AC-9 drill). Fixed at
+    /// `initialize_feed`.
     pub drills_enabled: bool,
 }
 
@@ -400,7 +699,7 @@ impl FeedParams {
     }
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub struct NavPublication {
     /// NAV at [`NAV_SCALE`] (`credit_math::nav_published_pico`).
     pub nav_pico: u128,
@@ -460,7 +759,22 @@ impl Feed {
     pub const SEED: &'static [u8] = b"feed";
 
     pub fn is_publisher(&self, key: &Pubkey) -> bool {
-        self.publishers[..usize::from(self.n_publishers)].contains(key)
+        self.publisher_slot(key).is_some()
+    }
+
+    /// The publisher-set slot of `key`.
+    pub fn publisher_slot(&self, key: &Pubkey) -> Option<usize> {
+        self.publishers[..usize::from(self.n_publishers).min(MAX_PUBLISHERS)]
+            .iter()
+            .position(|p| p == key)
+    }
+
+    /// ME-P2 / 06 §4: Frozen at 3× cadence. Stale is 2× cadence, so the
+    /// Frozen age is `stale_after × 3/2`.
+    pub fn frozen_after(&self) -> i64 {
+        self.params
+            .stale_after
+            .saturating_add(self.params.stale_after / 2)
     }
 
     /// ME-P2: the state at `now`. Never published ⇒ Stale.
@@ -476,9 +790,17 @@ impl Feed {
             MarkState::Fresh
         } else if age < self.params.stale_after {
             MarkState::Warned
-        } else {
+        } else if age < self.frozen_after() {
             MarkState::Stale
+        } else {
+            MarkState::Frozen
         }
+    }
+
+    /// ME-P7 / 06 §11: the mark puts the market in Standstill (Suspended
+    /// or Frozen): auctions pause, queue-claims hold the last mark.
+    pub fn is_standstill(&self, now: i64) -> bool {
+        self.state_at(now).breaker() == BreakerLevel::Standstill
     }
 
     /// ME-P3: the haircut the state carries.
@@ -486,7 +808,9 @@ impl Feed {
         match self.state_at(now) {
             MarkState::Fresh => 0,
             MarkState::Warned => self.params.warned_haircut_bps,
-            MarkState::Stale | MarkState::Suspended => self.params.stale_haircut_bps,
+            MarkState::Stale | MarkState::Suspended | MarkState::Frozen => {
+                self.params.stale_haircut_bps
+            }
         }
     }
 
@@ -571,7 +895,11 @@ impl Feed {
 pub struct PrintRecord {
     pub feed: Pubkey,
     pub session: Pubkey,
+    /// As the class discloses it (ME-P6, #202): exact for PUBLIC, the band
+    /// floor for BANDED, 0 (withheld) for AGGREGATE_ONLY / DATA_ROOM.
+    /// Records written before #202 hold the exact price.
     pub price: u64,
+    /// 0 (withheld) for DATA_ROOM.
     pub volume: u64,
     pub n_investor_ids: u16,
     pub forced_sale: bool,
@@ -595,7 +923,7 @@ pub struct InitializeFeed<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + Feed::INIT_SPACE,
+        space = FeedTail::FEED_SPACE,
         seeds = [Feed::SEED, asset_mint.key().as_ref()],
         bump
     )]
@@ -629,6 +957,15 @@ pub struct PublishNav<'info> {
     #[account(mut, seeds = [Feed::SEED, feed.asset_mint.as_ref()], bump = feed.bump)]
     pub feed: Account<'info, Feed>,
     pub publisher: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MigrateFeed<'info> {
+    #[account(mut, seeds = [Feed::SEED, feed.asset_mint.as_ref()], bump = feed.bump)]
+    pub feed: Account<'info, Feed>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -716,6 +1053,43 @@ pub struct PrintRecorded {
     pub implied_pico: u128,
 }
 
+/// A publisher signed a publication (#202). `signatures < required` ⇒
+/// pending (quorum or out-of-band co-sign); otherwise `NavPublished`
+/// follows in the same instruction.
+#[event]
+pub struct NavSigned {
+    pub feed: Pubkey,
+    pub publisher: Pubkey,
+    pub nav_pico: u128,
+    pub computed_ts: i64,
+    pub signatures: u8,
+    pub required: u8,
+    /// |NAV − prior NAV| / prior NAV, bps (0 on the first or after a drill).
+    pub deviation_bps: u64,
+    pub out_of_band: bool,
+    /// The authority's `approve_nav_review` covers this publication.
+    pub reviewed: bool,
+}
+
+#[event]
+pub struct GuardConfigured {
+    pub feed: Pubkey,
+    pub guard: GuardConfig,
+}
+
+#[event]
+pub struct NavReviewApproved {
+    pub feed: Pubkey,
+    pub nav_pico: u128,
+    pub computed_ts: i64,
+}
+
+#[event]
+pub struct FeedMigrated {
+    pub feed: Pubkey,
+    pub space: u32,
+}
+
 // ── errors (append-only) ────────────────────────────────────────────────
 
 #[error_code]
@@ -754,6 +1128,24 @@ pub enum MarkError {
     MathOverflow,
     #[msg("Only the program's upgrade authority may do this")]
     NotUpgradeAuthority,
+    #[msg("drills_enabled is fixed at initialize_feed")]
+    DrillsImmutable,
+    #[msg("NAV deviates beyond the bound: needs a co-signing publisher or a manual review")]
+    NavDeviationTooLarge,
+    #[msg("this publisher already signed the pending NAV")]
+    AlreadySigned,
+    #[msg("quorum exceeds the publisher set")]
+    QuorumAboveSet,
+    #[msg("guard config outside its bounds")]
+    BadGuard,
+    #[msg("feed has no #202 tail: run migrate_feed")]
+    FeedNotMigrated,
+    #[msg("feed tail is malformed")]
+    BadTail,
+    #[msg("NAV attestation account missing")]
+    AttestationMissing,
+    #[msg("NAV attestation invalid, expired, or not for this publication")]
+    AttestationInvalid,
 }
 
 #[cfg(test)]
