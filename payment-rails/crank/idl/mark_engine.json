@@ -8,6 +8,65 @@
   },
   "instructions": [
     {
+      "name": "approve_nav_review",
+      "docs": [
+        "G5 manual review: the authority approves one specific out-of-band",
+        "publication (`nav_pico`, `computed_ts`), which then needs only the",
+        "quorum. One-shot; `nav_pico = 0` withdraws the approval."
+      ],
+      "discriminator": [
+        153,
+        253,
+        126,
+        168,
+        20,
+        234,
+        217,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "nav_pico",
+          "type": "u128"
+        },
+        {
+          "name": "computed_ts",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "initialize_feed",
       "docs": [
         "Create the feed for `asset_mint`. The signer becomes the feed",
@@ -80,6 +139,57 @@
       ]
     },
     {
+      "name": "migrate_feed",
+      "docs": [
+        "#202: give a pre-#202 feed its tail (realloc, default guard).",
+        "Permissionless — the payer funds the extra rent; idempotent."
+      ],
+      "discriminator": [
+        31,
+        100,
+        92,
+        110,
+        112,
+        252,
+        206,
+        56
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "publish_drill_nav",
       "docs": [
         "AC-9 drill (devnet only, `drills_enabled` at init): the authority",
@@ -142,7 +252,14 @@
       "name": "publish_nav",
       "docs": [
         "ME-P1: publish a NAV computed off-chain from treasury holdings",
-        "(`credit_math::weekly_publish`). Only a publisher-set key signs."
+        "(`credit_math::weekly_publish`). Only a publisher-set key signs.",
+        "",
+        "On a feed with a tail (#202): the optional SAS attestation of the",
+        "NAV is the first remaining account; a publication outside the",
+        "deviation bound, or on a feed with `quorum > 1`, is recorded as",
+        "pending and written only when enough publishers have signed the",
+        "identical publication (an out-of-band one needs at least two, or",
+        "the authority's `approve_nav_review`)."
       ],
       "discriminator": [
         45,
@@ -382,9 +499,70 @@
       "args": []
     },
     {
+      "name": "set_guard",
+      "docs": [
+        "ME-P1 / G5: set the deviation bound, quorum, NAV attestation and",
+        "implied half-life (authority only; bounded, evented). Voids any",
+        "pending NAV and review approval."
+      ],
+      "discriminator": [
+        250,
+        44,
+        173,
+        235,
+        219,
+        76,
+        36,
+        198
+      ],
+      "accounts": [
+        {
+          "name": "feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "feed.asset_mint",
+                "account": "Feed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "feed"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "guard",
+          "type": {
+            "defined": {
+              "name": "GuardConfig"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "set_params",
       "docs": [
-        "Change the feed's parameters (authority only; bounded, evented)."
+        "Change the feed's parameters (authority only; bounded, evented).",
+        "`drills_enabled` is fixed at `initialize_feed` (RISK: a production",
+        "feed can never be turned into a drill feed)."
       ],
       "discriminator": [
         27,
@@ -649,6 +827,32 @@
       ]
     },
     {
+      "name": "FeedMigrated",
+      "discriminator": [
+        186,
+        122,
+        248,
+        72,
+        225,
+        188,
+        242,
+        35
+      ]
+    },
+    {
+      "name": "GuardConfigured",
+      "discriminator": [
+        85,
+        219,
+        99,
+        249,
+        51,
+        208,
+        169,
+        73
+      ]
+    },
+    {
       "name": "MarkStateChanged",
       "discriminator": [
         204,
@@ -672,6 +876,32 @@
         251,
         51,
         56
+      ]
+    },
+    {
+      "name": "NavReviewApproved",
+      "discriminator": [
+        37,
+        176,
+        210,
+        170,
+        177,
+        59,
+        160,
+        85
+      ]
+    },
+    {
+      "name": "NavSigned",
+      "discriminator": [
+        35,
+        79,
+        170,
+        192,
+        240,
+        171,
+        243,
+        167
       ]
     },
     {
@@ -799,6 +1029,51 @@
       "code": 6016,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority may do this"
+    },
+    {
+      "code": 6017,
+      "name": "DrillsImmutable",
+      "msg": "drills_enabled is fixed at initialize_feed"
+    },
+    {
+      "code": 6018,
+      "name": "NavDeviationTooLarge",
+      "msg": "NAV deviates beyond the bound: needs a co-signing publisher or a manual review"
+    },
+    {
+      "code": 6019,
+      "name": "AlreadySigned",
+      "msg": "this publisher already signed the pending NAV"
+    },
+    {
+      "code": 6020,
+      "name": "QuorumAboveSet",
+      "msg": "quorum exceeds the publisher set"
+    },
+    {
+      "code": 6021,
+      "name": "BadGuard",
+      "msg": "guard config outside its bounds"
+    },
+    {
+      "code": 6022,
+      "name": "FeedNotMigrated",
+      "msg": "feed has no #202 tail: run migrate_feed"
+    },
+    {
+      "code": 6023,
+      "name": "BadTail",
+      "msg": "feed tail is malformed"
+    },
+    {
+      "code": 6024,
+      "name": "AttestationMissing",
+      "msg": "NAV attestation account missing"
+    },
+    {
+      "code": 6025,
+      "name": "AttestationInvalid",
+      "msg": "NAV attestation invalid, expired, or not for this publication"
     }
   ],
   "types": [
@@ -991,6 +1266,22 @@
       }
     },
     {
+      "name": "FeedMigrated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "space",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "FeedParams",
       "type": {
         "kind": "struct",
@@ -1062,7 +1353,8 @@
           {
             "name": "drills_enabled",
             "docs": [
-              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill). Fixed at",
+              "`initialize_feed`."
             ],
             "type": "bool"
           }
@@ -1070,9 +1362,78 @@
       }
     },
     {
+      "name": "GuardConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_nav_deviation_bps",
+            "docs": [
+              "G5: max |NAV − prior NAV| / prior NAV for a single-publisher",
+              "publication, bps. Above it the NAV needs a second publisher's",
+              "co-signature or the authority's `approve_nav_review`. 0 = unbounded."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "quorum",
+            "docs": [
+              "ME-P1: publishers that must sign the identical publication (1 = any",
+              "one publisher, the pre-#202 behaviour)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "sas_credential",
+            "docs": [
+              "ME-P1: SAS credential of the NAV attestation. Default key = no",
+              "attestation required."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_schema",
+            "docs": [
+              "SAS schema (`nundina.nav.v1`) of the NAV attestation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "implied_half_life",
+            "docs": [
+              "ME-P3 / M5: an eligible print's weight halves every",
+              "`implied_half_life` seconds. 0 = the feed's `warn_after`."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GuardConfigured",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "guard",
+            "type": {
+              "defined": {
+                "name": "GuardConfig"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "MarkState",
       "docs": [
-        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+        "ME-P2 mark states. `Suspended` is set only by `suspend`. `Frozen`",
+        "(appended, #202) is age > 3× cadence (06 §4)."
       ],
       "type": {
         "kind": "enum",
@@ -1088,6 +1449,9 @@
           },
           {
             "name": "Suspended"
+          },
+          {
+            "name": "Frozen"
           }
         ]
       }
@@ -1215,6 +1579,81 @@
       }
     },
     {
+      "name": "NavReviewApproved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "nav_pico",
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NavSigned",
+      "docs": [
+        "A publisher signed a publication (#202). `signatures < required` ⇒",
+        "pending (quorum or out-of-band co-sign); otherwise `NavPublished`",
+        "follows in the same instruction."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "publisher",
+            "type": "pubkey"
+          },
+          {
+            "name": "nav_pico",
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "signatures",
+            "type": "u8"
+          },
+          {
+            "name": "required",
+            "type": "u8"
+          },
+          {
+            "name": "deviation_bps",
+            "docs": [
+              "|NAV − prior NAV| / prior NAV, bps (0 on the first or after a drill)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "out_of_band",
+            "type": "bool"
+          },
+          {
+            "name": "reviewed",
+            "docs": [
+              "The authority's `approve_nav_review` covers this publication."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "PrintEligibility",
       "docs": [
         "Why a print did or did not enter the implied curve (ME-P4)."
@@ -1318,10 +1757,18 @@
           },
           {
             "name": "price",
+            "docs": [
+              "As the class discloses it (ME-P6, #202): exact for PUBLIC, the band",
+              "floor for BANDED, 0 (withheld) for AGGREGATE_ONLY / DATA_ROOM.",
+              "Records written before #202 hold the exact price."
+            ],
             "type": "u64"
           },
           {
             "name": "volume",
+            "docs": [
+              "0 (withheld) for DATA_ROOM."
+            ],
             "type": "u64"
           },
           {

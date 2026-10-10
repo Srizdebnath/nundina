@@ -200,6 +200,8 @@ impl Env {
                 credential: Pubkey::default(),
                 id_schema: Pubkey::default(),
                 acc_schema: Pubkey::default(),
+                nav_schema: Pubkey::default(),
+                rr_schema: Pubkey::default(),
             },
         };
         env.set_time(T0);

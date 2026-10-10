@@ -67,7 +67,7 @@ use credit_gate::{
     MAX_LOTS as GATE_MAX_LOTS,
 };
 use credit_math::{allocate_pro_rata, find_uniform_clear_price, mul_div, Order as MathOrder};
-use mark_engine::{Feed, MarkState, PrintInput, PrintPolicy};
+use mark_engine::{Feed, PrintInput, PrintPolicy};
 
 declare_id!("Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7");
 
@@ -1201,7 +1201,9 @@ fn compute_clear(
         };
         (0u64, reference)
     } else {
-        if feed.state_at(now) == MarkState::Suspended || feed.nav_pico == 0 {
+        // ME-P7 / 06 §11: Standstill (Suspended, or Frozen past 3×
+        // cadence) pauses auctions.
+        if feed.is_standstill(now) || feed.nav_pico == 0 {
             return Ok(Err(FailReason::MarkUnavailable));
         }
         let eff = feed.nav_effective(now)?;

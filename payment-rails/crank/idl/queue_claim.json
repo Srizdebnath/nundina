@@ -1631,7 +1631,8 @@
           {
             "name": "drills_enabled",
             "docs": [
-              "Devnet only: allow `publish_drill_nav` (AC-9 drill)."
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill). Fixed at",
+              "`initialize_feed`."
             ],
             "type": "bool"
           }
@@ -1697,7 +1698,8 @@
     {
       "name": "MarkState",
       "docs": [
-        "ME-P2 mark states. `Suspended` is set only by `suspend`."
+        "ME-P2 mark states. `Suspended` is set only by `suspend`. `Frozen`",
+        "(appended, #202) is age > 3× cadence (06 §4)."
       ],
       "type": {
         "kind": "enum",
@@ -1713,6 +1715,9 @@
           },
           {
             "name": "Suspended"
+          },
+          {
+            "name": "Frozen"
           }
         ]
       }
