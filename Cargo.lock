@@ -960,6 +960,9 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "credit-gate",
+ "credit-math",
+ "mark-engine",
 ]
 
 [[package]]
@@ -1151,6 +1154,7 @@ dependencies = [
  "credit-math",
  "liquidity-facility",
  "mark-engine",
+ "npcs-treasury",
  "payment-rails",
 ]
 

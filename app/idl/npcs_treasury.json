@@ -4,13 +4,15 @@
     "name": "npcs_treasury",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "NPCS treasury: USDC deposit -> 1:1 mint, the only mint path; supply == vault USDC enforced on every mint and burn (I1, doc 09 §3; SRS 08 §3.1 backup mode). #148."
+    "description": "NPCS treasury: USDC deposit -> 1:1 mint, the only mint path; redemption burns at the published NAV; supply backed by vault USDC on every mint and burn (I1, doc 09 §3; SRS 08 §3.1 backup mode). #148, #202."
   },
   "instructions": [
     {
       "name": "deposit",
       "docs": [
-        "I1 mint-on-deposit: `amount` USDC in, the same value of NPCS out."
+        "I1 mint-on-deposit: `amount` USDC in, the same value of NPCS out.",
+        "Remaining accounts (optional, all or none): [`GATE_LOT_ACCOUNTS`] —",
+        "the minted units are appended to the depositor's gate lot ledger."
       ],
       "discriminator": [
         242,
@@ -285,8 +287,9 @@
     {
       "name": "redeem",
       "docs": [
-        "The issuer burns `amount` NPCS it holds and takes the same USDC out",
-        "of the vault (I1 preserved). Authority only."
+        "doc 09 Path 8: the issuer burns `amount` NPCS it holds and takes",
+        "`amount × NAV_effective` USDC out of the vault (I1 preserved: every",
+        "remaining unit stays backed). Authority only."
       ],
       "discriminator": [
         184,
@@ -388,6 +391,261 @@
         },
         {
           "name": "authority_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "feed",
+          "docs": [
+            "The asset's mark-engine feed: the redemption NAV (doc 09 Path 8)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                91,
+                115,
+                3,
+                106,
+                217,
+                161,
+                1,
+                5,
+                169,
+                19,
+                233,
+                75,
+                14,
+                172,
+                255,
+                91,
+                11,
+                160,
+                20,
+                167,
+                230,
+                81,
+                241,
+                192,
+                239,
+                251,
+                103,
+                63,
+                231,
+                139,
+                177,
+                66
+              ]
+            }
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "redeem_from",
+      "docs": [
+        "doc 09 Path 5/8: burn `amount` NPCS held by `holder` (queue-claim's",
+        "request vault, its signer PDA signing) and pay `amount ×",
+        "NAV_effective` USDC to `usdc_destination` (the claim's cash vault).",
+        "The issuer authority co-signs: a redemption is always the issuer's",
+        "act, the holder only consents to the burn."
+      ],
+      "discriminator": [
+        167,
+        228,
+        67,
+        228,
+        199,
+        160,
+        87,
+        137
+      ],
+      "accounts": [
+        {
+          "name": "treasury",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "treasury"
+          ]
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "treasury"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_mint",
+          "writable": true,
+          "relations": [
+            "treasury"
+          ]
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "treasury"
+          ]
+        },
+        {
+          "name": "feed",
+          "docs": [
+            "The asset's mark-engine feed: the redemption NAV."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                91,
+                115,
+                3,
+                106,
+                217,
+                161,
+                1,
+                5,
+                169,
+                19,
+                233,
+                75,
+                14,
+                172,
+                255,
+                91,
+                11,
+                160,
+                20,
+                167,
+                230,
+                81,
+                241,
+                192,
+                239,
+                251,
+                103,
+                63,
+                231,
+                139,
+                177,
+                66
+              ]
+            }
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "The issuer: every redemption is its act."
+          ],
+          "signer": true,
+          "relations": [
+            "treasury"
+          ]
+        },
+        {
+          "name": "holder",
+          "docs": [
+            "Owner of the burned units (e.g. queue-claim's signer PDA)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "holder_asset",
+          "writable": true
+        },
+        {
+          "name": "usdc_destination",
           "writable": true
         },
         {
@@ -562,6 +820,16 @@
       "code": 6007,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6008,
+      "name": "MarkUnavailable",
+      "msg": "no redeemable NAV: the mark is Stale, Suspended or never published"
+    },
+    {
+      "code": 6009,
+      "name": "GateAccounts",
+      "msg": "gate lot accounts do not match the depositor"
     }
   ],
   "types": [
@@ -598,6 +866,250 @@
       }
     },
     {
+      "name": "Feed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "print_source",
+            "docs": [
+              "auction-engine's print PDA (the only `record_print` signer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "publishers",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "n_publishers",
+            "type": "u8"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "FeedParams"
+              }
+            }
+          },
+          {
+            "name": "nav_pico",
+            "docs": [
+              "Latest official NAV at [`NAV_SCALE`] (0 = never published)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "computed_ts",
+            "type": "i64"
+          },
+          {
+            "name": "effective_ts",
+            "docs": [
+              "When the NAV was written on-chain; ages are measured from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "model_version",
+            "type": "u32"
+          },
+          {
+            "name": "inputs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "publications",
+            "type": "u64"
+          },
+          {
+            "name": "last_drill",
+            "docs": [
+              "The latest NAV came from `publish_drill_nav`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "suspended",
+            "type": "bool"
+          },
+          {
+            "name": "suspend_reason",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_state",
+            "docs": [
+              "Last evented state (transitions are evented once)."
+            ],
+            "type": {
+              "defined": {
+                "name": "MarkState"
+              }
+            }
+          },
+          {
+            "name": "implied_pico",
+            "docs": [
+              "Implied NAV from the latest eligible print (0 = none)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "implied_ts",
+            "type": "i64"
+          },
+          {
+            "name": "prints_accepted",
+            "type": "u32"
+          },
+          {
+            "name": "prints_rejected",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeedParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "warn_after",
+            "docs": [
+              "Age at which a Fresh mark becomes Warned."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stale_after",
+            "docs": [
+              "Age at which the mark becomes Stale."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "warned_haircut_bps",
+            "docs": [
+              "Haircut applied while Warned (≤ `MAX_WARNED_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stale_haircut_bps",
+            "docs": [
+              "Haircut applied while Stale or Suspended (≤ `MAX_STALE_HAIRCUT_BPS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "print_policy",
+            "type": {
+              "defined": {
+                "name": "PrintPolicy"
+              }
+            }
+          },
+          {
+            "name": "band_bps",
+            "docs": [
+              "BANDED width, bps of price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_volume",
+            "docs": [
+              "Minimum print volume (base units) to enter the implied curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_print_investors",
+            "docs": [
+              "Minimum distinct investor_ids on a print (G2)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "outlier_band_bps",
+            "docs": [
+              "Maximum |print − NAV| / NAV for an eligible print."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drills_enabled",
+            "docs": [
+              "Devnet only: allow `publish_drill_nav` (AC-9 drill). Fixed at",
+              "`initialize_feed`."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarkState",
+      "docs": [
+        "ME-P2 mark states. `Suspended` is set only by `suspend`. `Frozen`",
+        "(appended, #202) is age > 3× cadence (06 §4)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fresh"
+          },
+          {
+            "name": "Warned"
+          },
+          {
+            "name": "Stale"
+          },
+          {
+            "name": "Suspended"
+          },
+          {
+            "name": "Frozen"
+          }
+        ]
+      }
+    },
+    {
       "name": "PauseChanged",
       "type": {
         "kind": "struct",
@@ -609,6 +1121,29 @@
           {
             "name": "paused",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrintPolicy",
+      "docs": [
+        "ME-P6 print policy classes."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Public"
+          },
+          {
+            "name": "Banded"
+          },
+          {
+            "name": "AggregateOnly"
+          },
+          {
+            "name": "DataRoom"
           }
         ]
       }

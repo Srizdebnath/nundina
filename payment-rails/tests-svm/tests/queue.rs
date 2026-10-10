@@ -57,6 +57,9 @@ fn issuer_of(env: &mut Env) -> Party {
     Party { key, usdc, asset }
 }
 
+/// The redemption window every test request names.
+const WINDOW: i64 = T0 + 90 * 86_400;
+
 fn qpda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &queue_claim::ID).0
 }
@@ -87,6 +90,9 @@ impl Q {
     }
     fn holder_claim(&self, id: u64) -> Pubkey {
         qpda(&[queue_claim::CLAIM_ACCOUNT_SEED, self.request(id).as_ref()])
+    }
+    fn config(&self) -> Pubkey {
+        qpda(&[queue_claim::QUEUE_CONFIG_SEED, self.queue.as_ref()])
     }
 }
 
@@ -122,6 +128,20 @@ fn load_queue(env: &mut Env) -> Q {
 }
 
 fn request(env: &mut Env, q: &Q, holder: &Party, qty: u64) -> u64 {
+    let (ix, id) = request_ix(env, q, holder, qty, None);
+    env.send(&[ix], &[&holder.key]).expect("request");
+    id
+}
+
+/// `request_redemption` for the queue's next id, with the QC-P1 SAS
+/// attestation slot.
+fn request_ix(
+    env: &Env,
+    q: &Q,
+    holder: &Party,
+    qty: u64,
+    attestation: Option<Pubkey>,
+) -> (Instruction, u64) {
     let id = {
         let a = env.svm.get_account(&q.queue).unwrap();
         queue_claim::Queue::try_deserialize(&mut &a.data[..])
@@ -140,16 +160,17 @@ fn request(env: &mut Env, q: &Q, holder: &Party, qty: u64) -> u64 {
             asset_mint: q.npcs,
             asset_token_program: env.asset_tp.id(),
             system_program: SYSTEM,
+            queue_config: q.config(),
+            attestation,
         }
         .to_account_metas(None),
         data: qix::RequestRedemption {
             qty,
-            window_date: T0 + 90 * 86_400,
+            window_date: WINDOW,
         }
         .data(),
     };
-    env.send(&[ix], &[&holder.key]).expect("request");
-    id
+    (ix, id)
 }
 
 fn attest_as(env: &mut Env, q: &Q, attester: &Keypair, id: u64, holder: &Pubkey) -> Res {
@@ -232,6 +253,10 @@ fn quote_pv(env: &mut Env, q: &Q, id: u64, bps: u64) -> u64 {
 
 /// The issuer executes `qty` of request `id` at `price`.
 fn record_fill(env: &mut Env, q: &Q, id: u64, issuer: &Party, qty: u64, price: u64) {
+    record_fill_res(env, q, id, issuer, qty, price).expect("record fill");
+}
+
+fn record_fill_res(env: &mut Env, q: &Q, id: u64, issuer: &Party, qty: u64, price: u64) -> Res {
     let auth = env.authority.insecure_clone();
     let ix = Instruction {
         program_id: queue_claim::ID,
@@ -248,6 +273,7 @@ fn record_fill(env: &mut Env, q: &Q, id: u64, issuer: &Party, qty: u64, price: u
             usdc_mint: env.mint,
             token_program: env.tp.id(),
             asset_token_program: env.asset_tp.id(),
+            asset_feed: feed_pda(&q.npcs),
         }
         .to_account_metas(None),
         data: qix::RecordFill {
@@ -256,7 +282,7 @@ fn record_fill(env: &mut Env, q: &Q, id: u64, issuer: &Party, qty: u64, price: u
         }
         .data(),
     };
-    env.send(&[ix], &[&auth]).expect("record fill");
+    env.send(&[ix], &[&auth])
 }
 
 fn collect(env: &mut Env, q: &Q, id: u64, who: &Keypair, claim: &Pubkey, usdc: &Pubkey) -> Res {
@@ -672,4 +698,295 @@ fn only_the_upgrade_authority_creates_a_queue() {
         env.send(&[ix], &[&stranger]).unwrap_err(),
         qc(QcError::NotUpgradeAuthority)
     );
+}
+
+/// QC-P4 (#202): the issuer cannot book a window fill at a price of its
+/// choosing — it must sit within 50 bps of the asset feed's redemption NAV
+/// (doc 09: redemption at published NAV), and no fill books on a mark that
+/// is no longer Fresh or Warned.
+#[test]
+fn a_window_fill_is_bound_to_the_published_nav() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let q = load_queue(&mut env);
+    let holder = env.party(BOND, 10 * UNIT);
+    let issuer = issuer_of(&mut env);
+    let id = request(&mut env, &q, &holder, 10 * UNIT);
+    let att = q.attester.insecure_clone();
+    attest_as(&mut env, &q, &att, id, &holder.key.pubkey()).unwrap();
+    assert_eq!(
+        record_fill_res(&mut env, &q, id, &issuer, 4 * UNIT, 970_000).unwrap_err(),
+        qc(QcError::FillPriceOffNav),
+        "3% under NAV"
+    );
+    record_fill_res(&mut env, &q, id, &issuer, 4 * UNIT, 1_004_000).expect("within 50 bps");
+    assert_eq!(request_state(&env, &q, id).cash_received, 4_016_000);
+    env.set_time(env.now() + 15 * 86_400);
+    assert_eq!(
+        record_fill_res(&mut env, &q, id, &issuer, UNIT, 1_000_000).unwrap_err(),
+        qc(QcError::MarkUnavailable),
+        "a Stale mark books nothing"
+    );
+}
+
+fn queue_config_ix(env: &Env, q: &Q, params: queue_claim::QueueConfigParams) -> Instruction {
+    Instruction {
+        program_id: queue_claim::ID,
+        accounts: qacc::InitQueueConfig {
+            queue: q.queue,
+            config: q.config(),
+            authority: env.authority.pubkey(),
+            system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+        data: qix::InitQueueConfig { params }.data(),
+    }
+}
+
+/// QC-P1 (#202): a queue configured `require_sas` opens a request only
+/// against the issuer bridge's SAS `redemption_request` attestation for
+/// exactly that request (id, quantity, window) of that holder. A queue
+/// without a config (the live devnet one) is unchanged.
+#[test]
+fn a_sas_gated_queue_opens_only_an_attested_request() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let q = load_queue(&mut env);
+    let holder = env.party(BOND, 10 * UNIT);
+    let (credential, schema, attester) = (
+        env.sas.credential,
+        env.sas.rr_schema,
+        env.sas.attester.pubkey(),
+    );
+    let auth = env.authority.insecure_clone();
+    let bad = queue_claim::QueueConfigParams {
+        require_sas: true,
+        sas_credential: credential,
+        sas_schema: Pubkey::default(),
+        sas_attester: attester,
+    };
+    assert_eq!(
+        env.send(&[queue_config_ix(&env, &q, bad)], &[&auth])
+            .unwrap_err(),
+        qc(QcError::BadQueueConfig)
+    );
+    let params = queue_claim::QueueConfigParams {
+        sas_schema: schema,
+        ..bad
+    };
+    env.send(&[queue_config_ix(&env, &q, params)], &[&auth])
+        .expect("config");
+
+    let (ix, id) = request_ix(&env, &q, &holder, 10 * UNIT, None);
+    assert_eq!(
+        env.send(&[ix], &[&holder.key]).unwrap_err(),
+        qc(QcError::BadRedemptionAttestation),
+        "no attestation"
+    );
+    let hk = holder.key.pubkey();
+    let data = |qty: u64| {
+        queue_claim::sas::RedemptionRequestData {
+            request_id: id,
+            qty,
+            window_date: WINDOW,
+        }
+        .encode()
+    };
+    // An attestation for a different quantity does not open this request.
+    env.sas_attest(schema, &hk, data(9 * UNIT), ATTESTATION_EXPIRY);
+    let att = env.sas.attestation(&schema, &hk);
+    let (ix, _) = request_ix(&env, &q, &holder, 10 * UNIT, Some(att));
+    assert_eq!(
+        env.send(&[ix], &[&holder.key]).unwrap_err(),
+        qc(QcError::BadRedemptionAttestation)
+    );
+    env.sas_close(att);
+    env.sas_attest(schema, &hk, data(10 * UNIT), ATTESTATION_EXPIRY);
+    let (ix, id2) = request_ix(&env, &q, &holder, 10 * UNIT, Some(att));
+    env.send(&[ix], &[&holder.key]).expect("attested request");
+    assert_eq!(id2, id);
+    assert_eq!(env.bal(&q.npcs_vault(id)), 10 * UNIT);
+}
+
+/// QC-P3 (#202, doc 06 §5): with a published fill model the claim's value
+/// comes from the gate %, the queue depth and the fill history; the
+/// attested schedule (`quote_pv`) stays the fallback.
+#[test]
+fn the_pv_model_values_a_claim_from_gate_depth_and_history() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let q = load_queue(&mut env);
+    let holder = env.party(BOND, 10 * UNIT);
+    let id = request(&mut env, &q, &holder, 10 * UNIT);
+    let att = q.attester.insecure_clone();
+    attest_as(&mut env, &q, &att, id, &holder.key.pubkey()).unwrap();
+    let auth = env.authority.insecure_clone();
+    let off = queue_claim::QueueConfigParams {
+        require_sas: false,
+        sas_credential: Pubkey::default(),
+        sas_schema: Pubkey::default(),
+        sas_attester: Pubkey::default(),
+    };
+    env.send(&[queue_config_ix(&env, &q, off)], &[&auth])
+        .expect("config");
+    let quote = |env: &mut Env, bps: u64| {
+        let ix = Instruction {
+            program_id: queue_claim::ID,
+            accounts: qacc::QuotePvModel {
+                queue: q.queue,
+                config: q.config(),
+                request: q.request(id),
+                asset_feed: feed_pda(&q.npcs),
+            }
+            .to_account_metas(None),
+            data: qix::QuotePvModel {
+                discount_bps_per_period: bps,
+            }
+            .data(),
+        };
+        let a = env.authority.insecure_clone();
+        env.send(&[ix], &[&a])
+    };
+    assert_eq!(quote(&mut env, 500).unwrap_err(), qc(QcError::NoFillModel));
+    // 5% of a 100-unit fund against a 20-unit queue: 25% of what is left
+    // fills each window; two windows valued.
+    let model = queue_claim::FillModel {
+        gate_bps: 500,
+        fund_supply: 100 * UNIT,
+        queue_depth: 20 * UNIT,
+        fill_history_bps: 0,
+        periods: 2,
+    };
+    let outsider = env.funded();
+    let set = |who: &Pubkey| Instruction {
+        program_id: queue_claim::ID,
+        accounts: qacc::SetFillModel {
+            queue: q.queue,
+            config: q.config(),
+            publisher: *who,
+        }
+        .to_account_metas(None),
+        data: qix::SetFillModel { model }.data(),
+    };
+    assert_eq!(
+        env.send(&[set(&outsider.pubkey())], &[&outsider])
+            .unwrap_err(),
+        qc(QcError::NotAttester)
+    );
+    env.send(&[set(&att.pubkey())], &[&att]).expect("model");
+    let meta = quote(&mut env, 500).expect("quote");
+    // Fills 2.5 then 1.875 units at 1.00; the second discounted 5%.
+    let pv = events::<ClaimPv>(&meta.logs)[0].pv;
+    assert_eq!(pv, 2_500_000 + 1_875_000 * 95 / 100);
+}
+
+/// Rewrite a token-program account in place (mint or token account): the
+/// test stand-in for state an ops hand-over produces.
+fn rewrite<T: Pack>(env: &mut Env, key: &Pubkey, f: impl FnOnce(&mut T)) {
+    let mut a = env.svm.get_account(key).unwrap();
+    let mut v = T::unpack_from_slice(&a.data[..T::LEN]).unwrap();
+    f(&mut v);
+    v.pack_into_slice(&mut a.data[..T::LEN]);
+    env.svm.set_account(*key, a).unwrap();
+}
+
+/// QC-P4 / doc 09 Path 5 + 8 (#202): for a treasury-backed asset the
+/// window fill is not a transfer to the issuer at an issuer-quoted price.
+/// `record_fill_redeem` burns the units out of the request vault through
+/// npcs-treasury `redeem_from`, which pays `qty × NAV_effective` from the
+/// treasury vault straight into the claim's cash vault; `record_fill` is
+/// refused for such an asset.
+#[test]
+fn a_treasury_backed_claim_redeems_through_the_treasury_at_nav() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let q = load_queue(&mut env);
+    let holder = env.party(BOND, 10 * UNIT);
+    let issuer = issuer_of(&mut env);
+    let so = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../target/deploy/npcs_treasury.so"
+    );
+    env.svm
+        .add_program(npcs_treasury::ID, &std::fs::read(so).expect("anchor build"))
+        .unwrap();
+    let mint = q.npcs;
+    let tpda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &npcs_treasury::ID).0;
+    let treasury = tpda(&[npcs_treasury::TREASURY_SEED, mint.as_ref()]);
+    let vault = tpda(&[npcs_treasury::VAULT_SEED, treasury.as_ref()]);
+    let tsigner = npcs_treasury::signer_pda(&treasury).0;
+    // The hand-over (ops/squads execute-treasury): the treasury signer
+    // becomes the mint authority; the 10 units in circulation are the
+    // supply.
+    rewrite::<spl_token_2022::state::Mint>(&mut env, &mint, |m| {
+        m.mint_authority = Some(tsigner).into();
+        m.supply = 10 * UNIT;
+    });
+    let auth = env.authority.insecure_clone();
+    let init = Instruction {
+        program_id: npcs_treasury::ID,
+        accounts: npcs_treasury::accounts::Initialize {
+            treasury,
+            vault,
+            signer: tsigner,
+            asset_mint: mint,
+            usdc_mint: env.mint,
+            authority: auth.pubkey(),
+            token_program: env.tp.id(),
+            system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+        data: npcs_treasury::instruction::Initialize {}.data(),
+    };
+    env.send(&[init], &[&auth]).expect("treasury");
+    // ... and the sleeve's USDC moves into the vault: every unit backed.
+    rewrite::<spl_token_2022::state::Account>(&mut env, &vault, |a| a.amount = 10 * UNIT);
+
+    let id = request(&mut env, &q, &holder, 10 * UNIT);
+    let att = q.attester.insecure_clone();
+    attest_as(&mut env, &q, &att, id, &holder.key.pubkey()).unwrap();
+    assert_eq!(
+        record_fill_res(&mut env, &q, id, &issuer, 4 * UNIT, 1_000_000).unwrap_err(),
+        qc(QcError::UseTreasuryRedeem)
+    );
+    let ix = Instruction {
+        program_id: queue_claim::ID,
+        accounts: qacc::RecordFillRedeem {
+            queue: q.queue,
+            request: q.request(id),
+            npcs_vault: q.npcs_vault(id),
+            cash_vault: q.cash_vault(id),
+            signer: queue_claim::signer_pda().0,
+            authority: auth.pubkey(),
+            asset_mint: mint,
+            usdc_mint: env.mint,
+            asset_feed: feed_pda(&mint),
+            treasury,
+            treasury_vault: vault,
+            treasury_signer: tsigner,
+            token_program: env.tp.id(),
+            asset_token_program: env.asset_tp.id(),
+            treasury_program: npcs_treasury::ID,
+        }
+        .to_account_metas(None),
+        data: qix::RecordFillRedeem { fill_qty: 4 * UNIT }.data(),
+    };
+    env.send(&[ix], &[&auth]).expect("redeem fill");
+    let r = request_state(&env, &q, id);
+    assert_eq!(
+        (r.filled_qty, r.cash_received, r.state),
+        (4 * UNIT, 4 * UNIT, ClaimState::PartiallyFilled)
+    );
+    assert_eq!(
+        env.bal(&q.cash_vault(id)),
+        4 * UNIT,
+        "paid at NAV 1.00 by the treasury"
+    );
+    assert_eq!(
+        env.bal(&q.npcs_vault(id)),
+        6 * UNIT,
+        "burned, not delivered"
+    );
+    assert_eq!(env.bal(&issuer.asset), 0);
+    assert_eq!(env.bal(&vault), 6 * UNIT);
 }

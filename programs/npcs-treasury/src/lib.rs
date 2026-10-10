@@ -1,32 +1,50 @@
 //! `npcs-treasury` — the NPCS backing, enforced by code (#148).
 //!
-//! doc 09 §3 invariant **I1**: NPCS supply equals the USDC held by the
-//! treasury, 1:1 at deposit. SRS 08 §3.1 "backup mode": the USDC sits in a
-//! program-controlled treasury PDA and NAV accrues flat. No yield venue is
-//! integrated (Kamino stays a future venue, unnamed in `token/params.toml`).
+//! doc 09 §3 invariant **I1**: every NPCS base unit maps to a USDC that
+//! entered the treasury, 1:1 at deposit; redemptions exit at the published
+//! mark ("burn amount × published NAV is paid out of the sleeve"). SRS 08
+//! §3.1 "backup mode": the USDC sits in a program-controlled treasury PDA
+//! and NAV accrues flat. No yield venue is integrated (Kamino stays a
+//! future venue, unnamed in `token/params.toml`).
 //!
 //! - The treasury's signer PDA must be the asset mint's **mint authority**
 //!   (checked at `initialize`), so `deposit` is the only way NPCS is ever
 //!   minted.
 //! - `deposit(amount)`: USDC → the treasury vault, the same amount of NPCS
-//!   (scaled by decimals) → the depositor's account. For default-frozen
-//!   NPCS that account must be gate-thawed first; the token program refuses
-//!   a frozen destination.
-//! - `redeem(amount)`: the issuer authority burns NPCS it holds (e.g. what
-//!   queue-claim `record_fill` delivered to it) and takes the same USDC out.
-//! - Every mint and burn checks I1 **before and after**: `supply ==
-//!   vault × scale`. A mint outside this program (or a vault drained by a
-//!   delegate) makes every further mint and burn fail with `Unreconciled`
-//!   until governance repairs it; `reconcile` (permissionless) reports it.
+//!   (scaled by decimals) → the depositor's account (doc 09 Path 1: deposit
+//!   stays 1:1). For default-frozen NPCS that account must be gate-thawed
+//!   first; the token program refuses a frozen destination. With the gate
+//!   accounts appended (and the gate-config authority co-signing: credit-gate
+//!   `append_lot` is gate-authority-only) the minted units get their
+//!   `PrimaryMint` seasoning lot in the same instruction (doc 09 §3 I3.2).
+//! - `redeem(amount)`: the issuer authority burns NPCS it holds and takes
+//!   `amount × NAV_effective` USDC out (doc 09 Path 8), NAV read from the
+//!   asset's mark-engine feed, which must be Fresh or Warned (a Stale or
+//!   Suspended mark redeems nothing).
+//! - `redeem_from(amount)`: the same, burning from a holder other than the
+//!   authority — queue-claim's request vault (doc 09 Path 5: the claim's
+//!   NPCS burns at the window, the proceeds land in the claim's cash
+//!   vault). The issuer authority co-signs every redemption.
+//! - Every mint and burn checks I1 **before and after**: `supply ≤ vault ×
+//!   scale` (every unit backed). A redemption below 1.00 leaves the NAV fee
+//!   accrual in the vault, so the vault may hold more than the supply; a
+//!   mint outside this program (or a vault drained by a delegate) leaves
+//!   units unbacked and makes every further mint and burn fail with
+//!   `Unreconciled` until governance repairs it; `reconcile`
+//!   (permissionless) reports it.
 
 #![deny(unsafe_code)]
 #![allow(missing_docs)]
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+use anchor_lang::solana_program::program::invoke;
+use anchor_lang::InstructionData;
 use anchor_spl::token_interface::{
     self, Burn, Mint, MintTo, TokenAccount, TokenInterface, TransferChecked,
 };
+use mark_engine::Feed;
 
 declare_id!("4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y");
 
@@ -37,6 +55,16 @@ pub const SIGNER_SEED: &[u8] = b"treasury_signer";
 pub fn signer_pda(treasury: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SIGNER_SEED, treasury.as_ref()], &crate::ID)
 }
+
+/// The treasury PDA of `asset_mint`.
+pub fn treasury_pda(asset_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[TREASURY_SEED, asset_mint.as_ref()], &crate::ID)
+}
+
+/// Gate accounts appended to `deposit` for the I1 lot: credit-gate program,
+/// market config, the depositor's `HolderLots`, its block entry, and the
+/// gate-config authority (signer).
+pub const GATE_LOT_ACCOUNTS: usize = 5;
 
 #[program]
 pub mod npcs_treasury {
@@ -73,12 +101,14 @@ pub mod npcs_treasury {
     }
 
     /// I1 mint-on-deposit: `amount` USDC in, the same value of NPCS out.
-    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+    /// Remaining accounts (optional, all or none): [`GATE_LOT_ACCOUNTS`] —
+    /// the minted units are appended to the depositor's gate lot ledger.
+    pub fn deposit<'info>(ctx: Context<'info, Deposit<'info>>, amount: u64) -> Result<()> {
         require!(amount > 0, TreasuryError::ZeroAmount);
         let t = &ctx.accounts.treasury;
         require!(!t.paused, TreasuryError::Paused);
         let scale = scale(&ctx.accounts.asset_mint, &ctx.accounts.usdc_mint);
-        check_i1(&ctx.accounts.asset_mint, &ctx.accounts.vault, scale)?;
+        check_backed(&ctx.accounts.asset_mint, &ctx.accounts.vault, scale)?;
         let minted = amount
             .checked_mul(scale)
             .ok_or(TreasuryError::MathOverflow)?;
@@ -111,7 +141,16 @@ pub mod npcs_treasury {
         )?;
         ctx.accounts.asset_mint.reload()?;
         ctx.accounts.vault.reload()?;
-        check_i1(&ctx.accounts.asset_mint, &ctx.accounts.vault, scale)?;
+        check_backed(&ctx.accounts.asset_mint, &ctx.accounts.vault, scale)?;
+        let gate = ctx.remaining_accounts;
+        if !gate.is_empty() {
+            append_mint_lot(
+                gate,
+                &ctx.accounts.asset_mint.to_account_info(),
+                &ctx.accounts.depositor.key(),
+                minted,
+            )?;
+        }
         let t = &mut ctx.accounts.treasury;
         t.total_deposited = t.total_deposited.saturating_add(amount);
         emit!(Deposited {
@@ -125,57 +164,67 @@ pub mod npcs_treasury {
         Ok(())
     }
 
-    /// The issuer burns `amount` NPCS it holds and takes the same USDC out
-    /// of the vault (I1 preserved). Authority only.
+    /// doc 09 Path 8: the issuer burns `amount` NPCS it holds and takes
+    /// `amount × NAV_effective` USDC out of the vault (I1 preserved: every
+    /// remaining unit stays backed). Authority only.
     pub fn redeem(ctx: Context<Redeem>, amount: u64) -> Result<()> {
-        require!(amount > 0, TreasuryError::ZeroAmount);
-        let t = &ctx.accounts.treasury;
-        let scale = scale(&ctx.accounts.asset_mint, &ctx.accounts.usdc_mint);
-        require!(
-            amount.checked_rem(scale) == Some(0),
-            TreasuryError::BadDecimals
-        );
-        check_i1(&ctx.accounts.asset_mint, &ctx.accounts.vault, scale)?;
-        token_interface::burn(
-            CpiContext::new(
-                ctx.accounts.asset_token_program.key(),
-                Burn {
-                    mint: ctx.accounts.asset_mint.to_account_info(),
-                    from: ctx.accounts.authority_asset.to_account_info(),
-                    authority: ctx.accounts.authority.to_account_info(),
-                },
-            ),
-            amount,
-        )?;
-        let usdc = amount / scale;
-        let key = t.key();
-        let seeds: &[&[u8]] = &[SIGNER_SEED, key.as_ref(), &[t.signer_bump]];
-        token_interface::transfer_checked(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                TransferChecked {
-                    from: ctx.accounts.vault.to_account_info(),
-                    mint: ctx.accounts.usdc_mint.to_account_info(),
-                    to: ctx.accounts.authority_usdc.to_account_info(),
-                    authority: ctx.accounts.signer.to_account_info(),
-                },
-                &[seeds],
-            ),
-            usdc,
-            ctx.accounts.usdc_mint.decimals,
-        )?;
-        ctx.accounts.asset_mint.reload()?;
-        ctx.accounts.vault.reload()?;
-        check_i1(&ctx.accounts.asset_mint, &ctx.accounts.vault, scale)?;
+        let a = &mut *ctx.accounts;
+        let r = RedeemAccounts {
+            treasury: &a.treasury,
+            vault: &mut a.vault,
+            signer: &a.signer,
+            asset_mint: &mut a.asset_mint,
+            usdc_mint: &a.usdc_mint,
+            feed: &a.feed,
+            burner: a.authority.to_account_info(),
+            from: &a.authority_asset,
+            to: &a.authority_usdc,
+            token_program: &a.token_program,
+            asset_token_program: &a.asset_token_program,
+        };
+        let (burned, usdc) = redeem_at_nav(r, amount)?;
         let t = &mut ctx.accounts.treasury;
         t.total_redeemed = t.total_redeemed.saturating_add(usdc);
-        emit!(Redeemed {
-            treasury: key,
-            burned: amount,
+        emit_redeemed(
+            &ctx.accounts.treasury,
+            burned,
             usdc,
-            supply: ctx.accounts.asset_mint.supply,
-            vault: ctx.accounts.vault.amount,
-        });
+            &ctx.accounts.asset_mint,
+            &ctx.accounts.vault,
+        );
+        Ok(())
+    }
+
+    /// doc 09 Path 5/8: burn `amount` NPCS held by `holder` (queue-claim's
+    /// request vault, its signer PDA signing) and pay `amount ×
+    /// NAV_effective` USDC to `usdc_destination` (the claim's cash vault).
+    /// The issuer authority co-signs: a redemption is always the issuer's
+    /// act, the holder only consents to the burn.
+    pub fn redeem_from(ctx: Context<RedeemFrom>, amount: u64) -> Result<()> {
+        let a = &mut *ctx.accounts;
+        let r = RedeemAccounts {
+            treasury: &a.treasury,
+            vault: &mut a.vault,
+            signer: &a.signer,
+            asset_mint: &mut a.asset_mint,
+            usdc_mint: &a.usdc_mint,
+            feed: &a.feed,
+            burner: a.holder.to_account_info(),
+            from: &a.holder_asset,
+            to: &a.usdc_destination,
+            token_program: &a.token_program,
+            asset_token_program: &a.asset_token_program,
+        };
+        let (burned, usdc) = redeem_at_nav(r, amount)?;
+        let t = &mut ctx.accounts.treasury;
+        t.total_redeemed = t.total_redeemed.saturating_add(usdc);
+        emit_redeemed(
+            &ctx.accounts.treasury,
+            burned,
+            usdc,
+            &ctx.accounts.asset_mint,
+            &ctx.accounts.vault,
+        );
         Ok(())
     }
 
@@ -188,7 +237,7 @@ pub mod npcs_treasury {
             treasury: ctx.accounts.treasury.key(),
             supply,
             vault,
-            backed: u128::from(supply) == u128::from(vault) * u128::from(scale),
+            backed: is_backed(supply, vault, scale),
         });
         Ok(())
     }
@@ -209,17 +258,167 @@ fn scale(asset: &InterfaceAccount<Mint>, usdc: &InterfaceAccount<Mint>) -> u64 {
     10u64.pow(u32::from(asset.decimals - usdc.decimals))
 }
 
-/// I1: `supply == vault × scale`.
-fn check_i1(
+/// I1: every unit backed, `supply ≤ vault × scale`.
+pub fn is_backed(supply: u64, vault: u64, scale: u64) -> bool {
+    u128::from(supply) <= u128::from(vault) * u128::from(scale)
+}
+
+fn check_backed(
     asset: &InterfaceAccount<Mint>,
     vault: &InterfaceAccount<TokenAccount>,
     scale: u64,
 ) -> Result<()> {
     require!(
-        u128::from(asset.supply) == u128::from(vault.amount) * u128::from(scale),
+        is_backed(asset.supply, vault.amount, scale),
         TreasuryError::Unreconciled
     );
     Ok(())
+}
+
+/// USDC micros paid for `burned` base units at `nav_pico` (micro-USDC per
+/// base unit × 10¹², mark-engine's scale), floored: the redeemer
+/// initiates, the remaining holders keep the rounding.
+pub fn payout_at_nav(burned: u64, nav_pico: u128) -> Option<u64> {
+    let v = credit_math::mul_div(u128::from(burned), nav_pico, mark_engine::NAV_SCALE).ok()?;
+    u64::try_from(v).ok()
+}
+
+/// The NAV a redemption pays at `now`: `NAV_effective` of a Fresh or
+/// Warned mark (doc 09 §3 I2; ME-P3). Stale, Suspended or never-published
+/// marks redeem nothing.
+pub fn redemption_nav(feed: &Feed, now: i64) -> Result<u128> {
+    require!(feed.allows_liquidation(now), TreasuryError::MarkUnavailable);
+    let nav = feed.nav_effective(now)?;
+    require!(nav > 0, TreasuryError::MarkUnavailable);
+    Ok(nav)
+}
+
+struct RedeemAccounts<'a, 'info> {
+    treasury: &'a Account<'info, Treasury>,
+    vault: &'a mut Box<InterfaceAccount<'info, TokenAccount>>,
+    signer: &'a UncheckedAccount<'info>,
+    asset_mint: &'a mut Box<InterfaceAccount<'info, Mint>>,
+    usdc_mint: &'a InterfaceAccount<'info, Mint>,
+    feed: &'a Account<'info, Feed>,
+    burner: AccountInfo<'info>,
+    from: &'a InterfaceAccount<'info, TokenAccount>,
+    to: &'a InterfaceAccount<'info, TokenAccount>,
+    token_program: &'a Interface<'info, TokenInterface>,
+    asset_token_program: &'a Interface<'info, TokenInterface>,
+}
+
+/// Burn `amount`, pay it out at the redemption NAV; I1 before and after.
+fn redeem_at_nav(r: RedeemAccounts, amount: u64) -> Result<(u64, u64)> {
+    require!(amount > 0, TreasuryError::ZeroAmount);
+    let now = Clock::get()?.unix_timestamp;
+    let nav = redemption_nav(r.feed, now)?;
+    let usdc = payout_at_nav(amount, nav).ok_or(TreasuryError::MathOverflow)?;
+    require!(usdc > 0, TreasuryError::ZeroAmount);
+    let scale = scale(r.asset_mint, r.usdc_mint);
+    check_backed(r.asset_mint, r.vault, scale)?;
+    token_interface::burn(
+        CpiContext::new(
+            r.asset_token_program.key(),
+            Burn {
+                mint: r.asset_mint.to_account_info(),
+                from: r.from.to_account_info(),
+                authority: r.burner,
+            },
+        ),
+        amount,
+    )?;
+    let key = r.treasury.key();
+    let seeds: &[&[u8]] = &[SIGNER_SEED, key.as_ref(), &[r.treasury.signer_bump]];
+    token_interface::transfer_checked(
+        CpiContext::new_with_signer(
+            r.token_program.key(),
+            TransferChecked {
+                from: r.vault.to_account_info(),
+                mint: r.usdc_mint.to_account_info(),
+                to: r.to.to_account_info(),
+                authority: r.signer.to_account_info(),
+            },
+            &[seeds],
+        ),
+        usdc,
+        r.usdc_mint.decimals,
+    )?;
+    r.asset_mint.reload()?;
+    r.vault.reload()?;
+    check_backed(r.asset_mint, r.vault, scale)?;
+    Ok((amount, usdc))
+}
+
+fn emit_redeemed(
+    t: &Account<Treasury>,
+    burned: u64,
+    usdc: u64,
+    asset: &InterfaceAccount<Mint>,
+    vault: &InterfaceAccount<TokenAccount>,
+) {
+    emit!(Redeemed {
+        treasury: t.key(),
+        burned,
+        usdc,
+        supply: asset.supply,
+        vault: vault.amount,
+    });
+}
+
+/// doc 09 I3.2: the minted units become a `PrimaryMint` lot on the
+/// depositor's gate ledger. credit-gate `append_lot` is gate-config-authority
+/// only, so that authority co-signs the deposit (it is passed through);
+/// the ledger must be the depositor's own.
+fn append_mint_lot<'info>(
+    gate: &[AccountInfo<'info>],
+    mint: &AccountInfo<'info>,
+    depositor: &Pubkey,
+    qty: u64,
+) -> Result<()> {
+    require!(gate.len() == GATE_LOT_ACCOUNTS, TreasuryError::GateAccounts);
+    let (program, config, lots, block_entry, authority) =
+        (&gate[0], &gate[1], &gate[2], &gate[3], &gate[4]);
+    require_keys_eq!(program.key(), credit_gate::ID, TreasuryError::GateAccounts);
+    let expected = Pubkey::find_program_address(
+        &[
+            credit_gate::HolderLots::SEED,
+            mint.key.as_ref(),
+            depositor.as_ref(),
+        ],
+        &credit_gate::ID,
+    )
+    .0;
+    require_keys_eq!(lots.key(), expected, TreasuryError::GateAccounts);
+    require!(authority.is_signer, TreasuryError::GateAccounts);
+    let ix = Instruction {
+        program_id: credit_gate::ID,
+        accounts: vec![
+            AccountMeta::new_readonly(config.key(), false),
+            AccountMeta::new(lots.key(), false),
+            AccountMeta::new_readonly(block_entry.key(), false),
+            AccountMeta::new_readonly(mint.key(), false),
+            AccountMeta::new_readonly(authority.key(), true),
+        ],
+        data: credit_gate::instruction::AppendLot {
+            qty,
+            source: credit_gate::LotSource::PrimaryMint,
+            affiliate: false,
+            exemption_path: 0,
+        }
+        .data(),
+    };
+    invoke(
+        &ix,
+        &[
+            config.clone(),
+            lots.clone(),
+            block_entry.clone(),
+            mint.clone(),
+            authority.clone(),
+            program.clone(),
+        ],
+    )
+    .map_err(Into::into)
 }
 
 #[account]
@@ -322,6 +521,52 @@ pub struct Redeem<'info> {
     pub authority_usdc: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub asset_token_program: Interface<'info, TokenInterface>,
+    /// The asset's mark-engine feed: the redemption NAV (doc 09 Path 8).
+    #[account(
+        seeds = [Feed::SEED, asset_mint.key().as_ref()],
+        bump = feed.bump,
+        seeds::program = mark_engine::ID
+    )]
+    pub feed: Box<Account<'info, Feed>>,
+}
+
+#[derive(Accounts)]
+pub struct RedeemFrom<'info> {
+    #[account(
+        mut,
+        seeds = [TREASURY_SEED, asset_mint.key().as_ref()],
+        bump = treasury.bump,
+        has_one = vault @ TreasuryError::Mismatch,
+        has_one = asset_mint @ TreasuryError::Mismatch,
+        has_one = usdc_mint @ TreasuryError::Mismatch,
+        has_one = authority @ TreasuryError::NotAuthority
+    )]
+    pub treasury: Box<Account<'info, Treasury>>,
+    #[account(mut)]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the treasury's signer PDA (vault owner).
+    #[account(seeds = [SIGNER_SEED, treasury.key().as_ref()], bump = treasury.signer_bump)]
+    pub signer: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// The asset's mark-engine feed: the redemption NAV.
+    #[account(
+        seeds = [Feed::SEED, asset_mint.key().as_ref()],
+        bump = feed.bump,
+        seeds::program = mark_engine::ID
+    )]
+    pub feed: Box<Account<'info, Feed>>,
+    /// The issuer: every redemption is its act.
+    pub authority: Signer<'info>,
+    /// Owner of the burned units (e.g. queue-claim's signer PDA).
+    pub holder: Signer<'info>,
+    #[account(mut, token::mint = asset_mint, token::authority = holder)]
+    pub holder_asset: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = usdc_mint)]
+    pub usdc_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub asset_token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -399,4 +644,40 @@ pub enum TreasuryError {
     NotAuthority,
     #[msg("arithmetic overflow")]
     MathOverflow,
+    #[msg("no redeemable NAV: the mark is Stale, Suspended or never published")]
+    MarkUnavailable,
+    #[msg("gate lot accounts do not match the depositor")]
+    GateAccounts,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NAV_ONE: u128 = 1_000_000_000_000;
+
+    #[test]
+    fn payout_is_burn_times_nav_floored() {
+        // 6dp asset / 6dp USDC: 1.000 NAV pays 1:1.
+        assert_eq!(payout_at_nav(5_000_000, NAV_ONE), Some(5_000_000));
+        // NAV 0.999980821918 (one week of 10bps fee): 1 NPCS → 999_980 µ.
+        assert_eq!(payout_at_nav(1_000_000, 999_980_821_918), Some(999_980));
+        // A sub-micro payout floors to zero (the redeemer initiates).
+        assert_eq!(payout_at_nav(1, NAV_ONE - 1), Some(0));
+        // 9dp asset at 1 USDC/NPCS: NAV per base unit is 10⁹ pico.
+        assert_eq!(
+            payout_at_nav(3_000_000_000, NAV_ONE / 1_000),
+            Some(3_000_000)
+        );
+        assert_eq!(payout_at_nav(u64::MAX, u128::MAX), None);
+    }
+
+    #[test]
+    fn backing_allows_surplus_not_shortfall() {
+        assert!(is_backed(5, 5, 1));
+        assert!(is_backed(4, 5, 1), "NAV fee residue stays in the vault");
+        assert!(!is_backed(6, 5, 1), "an outside mint is unbacked");
+        assert!(is_backed(5_000, 5, 1_000));
+        assert!(!is_backed(5_001, 5, 1_000));
+    }
 }

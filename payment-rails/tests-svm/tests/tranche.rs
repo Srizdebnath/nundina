@@ -4,7 +4,8 @@
 //! junior at the attachment point; one coupon period's actual cash runs
 //! the waterfall through payment-rails (fees → senior coupon → reserve →
 //! junior coupon → junior residual, conserving every micro-USDC); the
-//! subordination invariant blocks a junior exit; a mark-down impairs the
+//! junior exits by sale only while a senior is outstanding (TE-P5); a
+//! junior-less pool cancels and refunds (TE-P6); a mark-down impairs the
 //! pool without touching principal; realised losses hit junior → reserve →
 //! senior and recoveries reverse senior first.
 
@@ -113,6 +114,11 @@ fn admin(env: &mut Env, pool: &Pubkey, data: Vec<u8>) -> Res {
 /// Pool 1: 20% attachment, senior 6% / junior 12% / fees 0.1% APR,
 /// reserve target 1 USDC; 100 NPCS at 1.00 → 80 senior + 20 junior.
 fn fx() -> Fx {
+    fx_with(true)
+}
+
+/// [`fx`], left Warehousing unless `activate`.
+fn fx_with(activate: bool) -> Fx {
     let mut env = Env::new(Tp::Spl);
     env.load_mark_engine();
     load_root_program(&mut env, tranche_engine::ID, "tranche_engine");
@@ -179,7 +185,9 @@ fn fx() -> Fx {
         data: tix::Deposit { qty: 100 * UNIT }.data(),
     };
     env.send(&[ix], &[&spv.key]).expect("deposit");
-    admin(&mut env, &pool, tix::Activate {}.data()).expect("activate");
+    if activate {
+        admin(&mut env, &pool, tix::Activate {}.data()).expect("activate");
+    }
     Fx {
         env,
         pool,
@@ -336,23 +344,143 @@ fn ac10_one_coupon_period_runs_the_waterfall_through_the_rails() {
     assert!(distribute(&mut f, 0, 2 * UNIT).is_err());
 }
 
+/// TE-P5 (#202, doc 06 §632): while a senior is outstanding a junior
+/// holder exits only by sale to a replacement holder in an auction session,
+/// never by redeeming collateral out of the structure — even with the
+/// headroom a mark-up gives (the subordination check stays as the guard of
+/// the wind-down residual path).
 #[test]
-fn ac10_subordination_invariant_blocks_a_junior_exit() {
+fn ac10_a_junior_cannot_redeem_out_while_a_senior_is_outstanding() {
     let mut f = fx();
-    // Any junior exit from an exactly-20% pool would take it below 20%.
     assert_eq!(
         exit_junior(&mut f, UNIT).unwrap_err(),
-        te(TeError::SubordinationBreach)
+        te(TeError::JuniorLocked)
     );
-    // A pool marked up to 1.10 has headroom: 110 value, 80 senior.
     let mint = f.env.asset_mint;
     let now = f.env.now();
     f.env.set_time(now + 60);
     f.env.drill_nav(&mint, NAV_ONE * 11 / 10).unwrap();
-    exit_junior(&mut f, UNIT).unwrap();
+    assert_eq!(
+        exit_junior(&mut f, UNIT).unwrap_err(),
+        te(TeError::JuniorLocked),
+        "headroom does not open a redemption"
+    );
+    assert_eq!(pool_of(&f.env, &f.pool).junior_principal, 20 * UNIT);
+}
+
+fn refund(f: &mut Fx, senior: u64, junior: u64) -> Res {
     let p = pool_of(&f.env, &f.pool);
-    assert_eq!(p.junior_principal, 19 * UNIT);
-    assert_eq!(f.env.bal(&f.junior_acct), 19 * UNIT);
+    let ix = Instruction {
+        program_id: tranche_engine::ID,
+        accounts: tacc::Refund {
+            pool: f.pool,
+            senior_mint: p.senior_mint,
+            junior_mint: p.junior_mint,
+            collateral_vault: p.collateral_vault,
+            collateral_mint: f.env.asset_mint,
+            holder: f.spv.key.pubkey(),
+            holder_senior: f.senior_acct,
+            holder_junior: f.junior_acct,
+            holder_collateral: f.spv.asset,
+            signer: tranche_engine::signer_pda().0,
+            tranche_token_program: Tp::T22.id(),
+            collateral_token_program: f.env.asset_tp.id(),
+        }
+        .to_account_metas(None),
+        data: tix::Refund { senior, junior }.data(),
+    };
+    let k = f.spv.key.insecure_clone();
+    f.env.send(&[ix], &[&k])
+}
+
+/// TE-P6 / E1 (#202): a pool whose junior never filled is Cancelled from
+/// Warehousing (authority only, never once Active), and its holders burn
+/// their units for their pro-rata collateral; the junior lock-up holds on
+/// the remainder.
+#[test]
+fn te_p6_a_cancelled_pool_refunds_its_holders() {
+    let mut active = fx();
+    assert_eq!(
+        admin(
+            &mut active.env,
+            &active.pool,
+            tix::CancelPool {
+                reason_hash: [9; 32]
+            }
+            .data()
+        )
+        .unwrap_err(),
+        te(TeError::WrongState),
+        "an active pool cannot be cancelled"
+    );
+    assert_eq!(
+        refund(&mut active, UNIT, 0).unwrap_err(),
+        te(TeError::WrongState)
+    );
+
+    let mut f = fx_with(false);
+    assert_eq!(pool_of(&f.env, &f.pool).state, PoolState::Warehousing);
+    admin(
+        &mut f.env,
+        &f.pool,
+        tix::CancelPool {
+            reason_hash: [9; 32],
+        }
+        .data(),
+    )
+    .expect("cancel");
+    assert_eq!(pool_of(&f.env, &f.pool).state, PoolState::Cancelled);
+    assert_eq!(f.env.bal(&f.spv.asset), 0);
+    // Half of each tranche back: 40 + 10 of 100 principal → 50 NPCS.
+    refund(&mut f, 40 * UNIT, 10 * UNIT).expect("refund");
+    assert_eq!(f.env.bal(&f.spv.asset), 50 * UNIT);
+    assert_eq!(f.env.bal(&f.senior_acct), 40 * UNIT);
+    assert_eq!(f.env.bal(&f.junior_acct), 10 * UNIT);
+    let a = f.env.svm.get_account(&f.junior_acct).unwrap();
+    assert_eq!(a.data[108], 2, "junior re-locked");
+    refund(&mut f, 40 * UNIT, 10 * UNIT).expect("the rest");
+    assert_eq!(f.env.bal(&f.spv.asset), 100 * UNIT);
+    let p = pool_of(&f.env, &f.pool);
+    assert_eq!(
+        (p.senior_principal, p.junior_principal, p.collateral_qty),
+        (0, 0, 0)
+    );
+}
+
+/// TE-P2 (#202): the junior lock-up is the engine's freeze. `relock_junior`
+/// (permissionless) freezes any thawed junior account, e.g. a replacement
+/// holder's after a session delivered into it; a locked one is left alone.
+#[test]
+fn te_p2_relock_freezes_any_thawed_junior_account() {
+    let mut f = fx();
+    let p = pool_of(&f.env, &f.pool);
+    let relock = |f: &mut Fx, account: Pubkey| {
+        let ix = Instruction {
+            program_id: tranche_engine::ID,
+            accounts: tacc::RelockJunior {
+                pool: f.pool,
+                account,
+                junior_mint: p.junior_mint,
+                signer: tranche_engine::signer_pda().0,
+                tranche_token_program: Tp::T22.id(),
+            }
+            .to_account_metas(None),
+            data: tix::RelockJunior {}.data(),
+        };
+        let k = f.env.funded();
+        f.env.send(&[ix], &[&k])
+    };
+    let junior = f.junior_acct;
+    assert_eq!(
+        relock(&mut f, junior).unwrap_err(),
+        te(TeError::WrongState),
+        "already locked"
+    );
+    let owner = Pubkey::new_unique();
+    let fresh = f.env.token_account_in(Tp::T22, &p.junior_mint, &owner, 0);
+    assert_eq!(f.env.svm.get_account(&fresh).unwrap().data[108], 1);
+    relock(&mut f, fresh).expect("relock");
+    assert_eq!(f.env.svm.get_account(&fresh).unwrap().data[108], 2);
 }
 
 #[test]
