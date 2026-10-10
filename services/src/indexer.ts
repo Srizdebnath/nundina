@@ -41,7 +41,8 @@ export interface RawTx {
 const s = (v: unknown) => (v === null || v === undefined ? null : typeof v === "bigint" ? v.toString() : v);
 const hex = (b: unknown) => plain(b) as string;
 const variant = (v: unknown) => (typeof v === "string" ? v : v && typeof v === "object" ? Object.keys(v)[0]! : String(v));
-const PHASES = ["Commit", "Reveal", "Allocating", "IssuerRofr", "Settling", "Printed", "Failed"];
+/** Lifecycle order (not the enum index: `Clearing` was appended on-chain, AE-P6). */
+const PHASES = ["Commit", "Reveal", "Clearing", "Allocating", "IssuerRofr", "Settling", "Printed", "Failed"];
 /** Printed and Failed are both terminal and exclusive on-chain: once either is stored, a late event never replaces it. */
 const TERMINAL = ["Printed", "Failed"];
 const LOT_KIND = ["append", "split", "merge"];

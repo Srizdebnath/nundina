@@ -20,10 +20,10 @@ import { CREDIT_GATE } from "./seasoning.ts";
 const utf8 = new TextEncoder();
 const enc = getAddressEncoder();
 
-async function gatePda(literal: string, ...keys: Address[]): Promise<Address> {
+async function gatePda(literal: string, ...keys: (Address | Uint8Array)[]): Promise<Address> {
   const [a] = await getProgramDerivedAddress({
     programAddress: CREDIT_GATE,
-    seeds: [utf8.encode(literal), ...keys.map((k) => enc.encode(k))],
+    seeds: [utf8.encode(literal), ...keys.map((k) => (k instanceof Uint8Array ? k : enc.encode(k)))],
   });
   return a;
 }
@@ -39,8 +39,12 @@ export async function gateSettlePda(): Promise<Address> {
   return a;
 }
 
+export const investorRecordPda = (mint: Address, investorId: Uint8Array) => gatePda("investor", mint, investorId);
+
 export const HOLDER_LINK_IDENTITY_AT = 72;
 export const HOLDER_LINK_ACCREDITATION_AT = 104;
+/** `HolderLink::investor_id` ([u8; 16]) follows the two attestations. */
+export const HOLDER_LINK_INVESTOR_ID_AT = 136;
 
 /** Pure: the two attestation addresses a `HolderLink` rests on. */
 export function linkAttestations(data: Uint8Array): { identity: Address; accreditation: Address } | null {
@@ -80,5 +84,31 @@ export async function fillGateAccounts(
       buyer_identity: atts.identity,
       buyer_accreditation: atts.accreditation,
     },
+  };
+}
+
+/**
+ * The credit-gate accounts auction-engine's AE-P6 `screen_bid` /
+ * `screen_ask` read for `wallet`. A wallet with no `HolderLink` still gets a
+ * full set (the link address stands in for the attestations and investor
+ * record): the program sees no link and excludes the bid as NotAdmitted
+ * before it looks at the rest. Every address is re-derived on-chain.
+ */
+export async function screenGateAccounts(rpc: R, mint: Address, wallet: Address) {
+  const link = await holderLinkPda(mint, wallet);
+  const raw = await rawAccount(rpc, link);
+  const admitted = raw && raw.owner === CREDIT_GATE && raw.data.length >= HOLDER_LINK_INVESTOR_ID_AT + 16;
+  const atts = admitted ? linkAttestations(raw.data) : null;
+  const investorId = admitted ? raw.data.subarray(HOLDER_LINK_INVESTOR_ID_AT, HOLDER_LINK_INVESTOR_ID_AT + 16) : null;
+  return {
+    gate_program: CREDIT_GATE,
+    gate_config: await gateConfigPda(mint),
+    gate_policy: await gatePolicyPda(mint),
+    block_entry: await blockEntryPda(mint, wallet),
+    lots: await holderLotsPda(mint, wallet),
+    holder_link: link,
+    investor: investorId ? await investorRecordPda(mint, investorId) : link,
+    identity: atts?.identity ?? link,
+    accreditation: atts?.accreditation ?? link,
   };
 }

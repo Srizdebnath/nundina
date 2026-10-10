@@ -7,13 +7,17 @@
 //! `settle_check`, the print lands in mark-engine, and every unfilled
 //! micro-USDC is refundable (AC-11). Failure paths: too few reveals, no
 //! cross above the reserve, a suspended mark, a bad preimage, the deadline.
+//! AE-P6 / AC-7: the gate check excludes a would-be investor past the holder
+//! cap, a block-listed buyer and an unseasoned seller before the clear, and
+//! their volume is reallocated to eligible orders.
 
 mod common;
 
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData};
 use auction_engine::{
-    AuctionError, ClearingPrint, FailReason, Phase, SessionFailed, SessionParams, Side,
+    instruction as aix, AuctionError, ClearingPrint, Exclusion, FailReason, OrderScreened, Phase,
+    SessionFailed, SessionParams, Side,
 };
 use base64::Engine;
 use common::*;
@@ -488,4 +492,201 @@ fn only_the_upgrade_authority_creates_the_venue() {
     let auth = env.authority.insecure_clone();
     env.send(&[venue_init_ix(&auth.pubkey())], &[&auth])
         .expect("the upgrade authority creates it");
+}
+
+fn screen_reasons(env: &mut Env, id: u64, n: u8, crank: &Keypair) -> Vec<Option<Exclusion>> {
+    (0..n)
+        .map(|i| {
+            let m = env.screen(id, i, crank).expect("screen");
+            events::<OrderScreened>(&m.logs)[0].exclusion
+        })
+        .collect()
+}
+
+/// AE-P6 / AC-7: every revealed order passes the gate check before the
+/// clear. A would-be new investor past the holder cap (the gate refused to
+/// admit it) holds the best bid, and an admitted buyer is block-listed
+/// after revealing; both are excluded with their reason, the clear runs
+/// over the eligible orders, so the volume the best bid would have taken is
+/// reallocated to admitted holders. Every fill settles (no ineligible fill
+/// can wedge the session) and the excluded bidders get cash and bond back.
+#[test]
+fn ae_p6_ineligible_bids_are_excluded_and_their_volume_reallocated() {
+    for tp in Tp::ALL {
+        let mut env = Env::new(tp);
+        env.setup_auction();
+        let seller = env.party(BOND, 10 * UNIT);
+        let b2 = env.party(10 * UNIT + BOND, 0);
+        let b3 = env.party(10 * UNIT + BOND, 0);
+        let blocked = env.party(10 * UNIT + BOND, 0);
+        let crank = env.funded();
+
+        // CG-P4: the cap is full, so X attests but `validate` refuses it.
+        let full = env.policy_state().distinct_investors;
+        env.set_holder_cap(full);
+        let x = env.stranger(10 * UNIT + BOND);
+        let xk = x.key.pubkey();
+        let (id_schema, acc_schema) = (env.sas.id_schema, env.sas.acc_schema);
+        env.sas_attest(
+            id_schema,
+            &xk,
+            identity_data(investor_of(&xk)),
+            ATTESTATION_EXPIRY,
+        );
+        env.sas_attest(acc_schema, &xk, vec![1, 1], ATTESTATION_EXPIRY);
+        env.validate(&xk).expect("decision recorded");
+        assert!(!env.exists(&env.link_pda(&xk)), "GovernorCap: not admitted");
+        assert_eq!(env.policy_state().distinct_investors, full);
+
+        env.open_auction(1, params(Pubkey::default())).unwrap();
+        let orders = [
+            sealed(Side::Sell, 900_000, 10 * UNIT, 1),
+            sealed(Side::Buy, 990_000, 10 * UNIT, 2), // X: the best bid
+            sealed(Side::Buy, 970_000, 10 * UNIT, 3), // blocked after reveal
+            sealed(Side::Buy, 950_000, 6 * UNIT, 4),  // B2
+            sealed(Side::Buy, 930_000, 6 * UNIT, 5),  // B3
+        ];
+        let bidders = [&x, &blocked, &b2, &b3];
+        env.commit_ask(1, &seller, &orders[0], 10 * UNIT).unwrap();
+        for (p, o) in bidders.iter().zip(&orders[1..]) {
+            env.commit_bid(1, p, o, 10 * UNIT).expect("commit");
+        }
+        env.set_time(COMMIT_END_A);
+        env.reveal(1, &seller, &orders[0]).unwrap();
+        for (p, o) in bidders.iter().zip(&orders[1..]) {
+            env.reveal(1, p, o).expect("reveal");
+        }
+        env.block(&blocked.key.pubkey());
+
+        // The check runs once reveals close, and before any clear.
+        assert_eq!(
+            env.screen(1, 1, &crank).unwrap_err(),
+            aerr(AuctionError::OutsideWindow)
+        );
+        env.set_time(REVEAL_END_A);
+        assert_eq!(
+            env.clear_only(1, &crank).unwrap_err(),
+            aerr(AuctionError::ScreeningPending)
+        );
+        // A crank cannot swap in another wallet's attestation to exclude
+        // B2, nor screen a bid as an ask.
+        let mut bad = env.screen_ix(1, 3);
+        bad.accounts[7].pubkey = env.identity_att(&b3.key.pubkey());
+        assert_eq!(
+            env.send(&[bad], &[&crank]).unwrap_err(),
+            aerr(AuctionError::GateAccounts)
+        );
+        let mut bad = env.screen_ix(1, 0);
+        bad.data = aix::ScreenAsk { order_index: 1 }.data();
+        assert_eq!(
+            env.send(&[bad], &[&crank]).unwrap_err(),
+            aerr(AuctionError::WrongSide)
+        );
+
+        let reasons = screen_reasons(&mut env, 1, 5, &crank);
+        assert_eq!(
+            reasons,
+            vec![
+                None,
+                Some(Exclusion::NotAdmitted),
+                Some(Exclusion::Blocklisted),
+                None,
+                None
+            ]
+        );
+        assert_eq!(env.auction(1).phase, Phase::Clearing);
+        assert_eq!(
+            env.screen(1, 3, &crank).unwrap_err(),
+            aerr(AuctionError::AlreadyScreened)
+        );
+
+        // The clear sees only the eligible book: B2 and B3 split the 10.
+        env.clear_only(1, &crank).expect("clear");
+        let s = env.auction(1);
+        assert_eq!(s.phase, Phase::Allocating);
+        assert_eq!(s.cleared_volume, 10 * UNIT);
+        assert!(s.clear_price <= 930_000, "X's 0.99 did not set the price");
+        let alloc: Vec<u64> = s.orders.iter().map(|o| o.alloc).collect();
+        assert_eq!(alloc, vec![10 * UNIT, 0, 0, 5 * UNIT, 5 * UNIT], "AC-7");
+
+        env.allocate(1, &crank, 8).unwrap();
+        env.settle_auction(1, &crank, 0, &b2, &seller)
+            .expect("fill 0");
+        env.settle_auction(1, &crank, 1, &b3, &seller)
+            .expect("fill 1");
+        env.finish_auction(1, &crank).expect("finish");
+        assert_eq!(env.bal(&b2.asset), 5 * UNIT);
+        assert_eq!(env.bal(&b3.asset), 5 * UNIT);
+        assert_eq!(env.bal(&x.asset), 0);
+        let rs = env.rails_session_of(1);
+        for p in [&x, &blocked] {
+            env.refund(&crank, &rs, &p.key.pubkey(), &p.usdc)
+                .expect("refund");
+            assert_eq!(env.bal(&p.usdc), 10 * UNIT + BOND, "excluded: whole");
+        }
+    }
+}
+
+/// AE-P6, sell side (C2): an ask whose seasoned lots do not cover it is
+/// excluded, so a cheaper unseasoned ask cannot take the fill and then
+/// fail `settle_check`; the seasoned seller fills, the other gets its
+/// asset back.
+#[test]
+fn ae_p6_an_unseasoned_ask_is_excluded_before_it_can_fail_settlement() {
+    let mut env = Env::new(Tp::Spl);
+    env.setup_auction();
+    let s1 = env.party(BOND, 6 * UNIT);
+    // S2 holds 6 units acquired just now: not sellable for 7 days.
+    let (k, usdc) = env.bidder(BOND);
+    let asset = env.asset_account(&k.pubkey(), 6 * UNIT);
+    env.admit(&k.pubkey(), 0);
+    let now = env.now();
+    env.append_lot_at(&k.pubkey(), 6 * UNIT, now);
+    let s2 = Party {
+        key: k,
+        usdc,
+        asset,
+    };
+    let b1 = env.party(10 * UNIT + BOND, 0);
+    let b2 = env.party(10 * UNIT + BOND, 0);
+    let crank = env.funded();
+    env.open_auction(1, params(Pubkey::default())).unwrap();
+    let orders = [
+        sealed(Side::Sell, 900_000, 6 * UNIT, 1),
+        sealed(Side::Sell, 850_000, 6 * UNIT, 2),
+        sealed(Side::Buy, 970_000, 6 * UNIT, 3),
+        sealed(Side::Buy, 950_000, 6 * UNIT, 4),
+    ];
+    env.commit_ask(1, &s1, &orders[0], 6 * UNIT).unwrap();
+    env.commit_ask(1, &s2, &orders[1], 6 * UNIT).unwrap();
+    env.commit_bid(1, &b1, &orders[2], 10 * UNIT).unwrap();
+    env.commit_bid(1, &b2, &orders[3], 10 * UNIT).unwrap();
+    env.set_time(COMMIT_END_A);
+    for (p, o) in [&s1, &s2, &b1, &b2].iter().zip(&orders) {
+        env.reveal(1, p, o).expect("reveal");
+    }
+    env.set_time(REVEAL_END_A);
+    let reasons = screen_reasons(&mut env, 1, 4, &crank);
+    assert_eq!(
+        reasons,
+        vec![None, Some(Exclusion::NotSeasoned), None, None]
+    );
+    env.clear_only(1, &crank).expect("clear");
+    let s = env.auction(1);
+    assert_eq!(s.cleared_volume, 6 * UNIT);
+    assert_eq!(s.orders[1].alloc, 0, "S2 excluded");
+    assert_eq!(s.orders[0].alloc, 6 * UNIT);
+    env.allocate(1, &crank, 8).unwrap();
+    let fills = env.auction(1).fills;
+    assert!(fills.iter().all(|f| f.seller == s1.key.pubkey()));
+    for (i, f) in fills.iter().enumerate() {
+        let buyer = if f.buyer == b1.key.pubkey() { &b1 } else { &b2 };
+        env.settle_auction(1, &crank, i as u32, buyer, &s1)
+            .expect("settle");
+    }
+    env.finish_auction(1, &crank).expect("finish");
+    let rs = env.rails_session_of(1);
+    env.refund_ask(&crank, &rs, &s2).expect("refund ask");
+    assert_eq!(env.bal(&s2.asset), 6 * UNIT, "S2's asset back");
+    assert_eq!(env.bal(&s1.asset), 0);
 }

@@ -8,7 +8,7 @@ import type { Struct } from "./borsh";
 import { codecs, pdas, PROGRAMS } from "./programs";
 import { getAccount, getAccounts, getProgramAccounts } from "./rpc";
 
-export const PHASES = ["Commit", "Reveal", "Allocating", "IssuerRofr", "Settling", "Printed"] as const;
+export const PHASES = ["Commit", "Reveal", "Clearing", "Allocating", "IssuerRofr", "Settling", "Printed"] as const;
 
 /** NAV scale: micro-USDC per base unit × 10¹² (mark-engine `nav_pico`). */
 export const PICO = 1_000_000_000_000n;
@@ -22,6 +22,10 @@ export interface OrderView {
   limit: bigint;
   qty: bigint;
   alloc: bigint;
+  /** AE-P6: the gate check ran on this order. */
+  screened: boolean;
+  /** AE-P6: it passed (only eligible orders clear). */
+  eligible: boolean;
 }
 
 export interface FillView {
@@ -80,6 +84,8 @@ export function toSessionView(address: Address, s: Struct): Omit<SessionView, "f
       limit: o.limit as bigint,
       qty: o.qty as bigint,
       alloc: o.alloc as bigint,
+      screened: o.screened as boolean,
+      eligible: o.eligible as boolean,
     })),
     fills: (s.fills as Struct[]).map((f, index) => ({
       index,
@@ -137,7 +143,8 @@ export interface CurvePoint {
  * bid limit, cumulative supply at or below each ask limit.
  */
 export function curves(orders: OrderView[]): { demand: CurvePoint[]; supply: CurvePoint[] } {
-  const rev = orders.filter((o) => o.revealed && o.qty > 0n);
+  // The book the clear sees: revealed, and not excluded by the AE-P6 gate check.
+  const rev = orders.filter((o) => o.revealed && o.qty > 0n && (!o.screened || o.eligible));
   const bids = rev.filter((o) => o.side === "Buy").sort((a, b) => (a.limit > b.limit ? -1 : a.limit < b.limit ? 1 : 0));
   const asks = rev.filter((o) => o.side === "Sell").sort((a, b) => (a.limit < b.limit ? -1 : a.limit > b.limit ? 1 : 0));
   let d = 0n;

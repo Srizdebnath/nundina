@@ -11,6 +11,10 @@
 #
 #   bash scripts/devnet/rehearse-npcs.sh                  # npcs-dvp.ts: rails-direct DvP
 #   bash scripts/devnet/rehearse-npcs.sh auction-session  # the sealed-bid auction-engine session
+#
+# AUCTION_SO=<path to auction_engine.so> loads that build at auction-engine's
+# id (upgrade authority 9WH1, as on devnet) instead of cloning the deployed
+# one: the rehearsal of a pending auction-engine upgrade.
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # → crank/
 RUN=${1:-npcs-dvp}
@@ -27,9 +31,16 @@ echo "rails.so sha256 $(sha256sum "$TMP/rails.so" | cut -d' ' -f1)"
 
 args=(--reset --quiet --ledger "$TMP/ledger" --rpc-port "$PORT" --url "$DEVNET"
   --faucet-port "${FAUCET_PORT:-9910}" --gossip-port "${GOSSIP_PORT:-8010}" --dynamic-port-range "${DYNAMIC_PORTS:-8020-8070}")
-for p in gate tokenAcl sas auction mark; do
-  args+=(--clone-upgradeable-program "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['programs'][sys.argv[2]])" "$TMP/plan.json" "$p")")
+prog() { python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['programs'][sys.argv[2]])" "$TMP/plan.json" "$1"; }
+for p in gate tokenAcl sas mark; do
+  args+=(--clone-upgradeable-program "$(prog "$p")")
 done
+if [ -n "${AUCTION_SO:-}" ]; then
+  echo "auction_engine.so (pending upgrade) sha256 $(sha256sum "$AUCTION_SO" | cut -d' ' -f1)"
+  args+=(--upgradeable-program "$(prog auction)" "$AUCTION_SO" 9WH1WZWBSEQRpixmREZ8RFkzT9xkG9X8NvRpU3Jo2uDZ)
+else
+  args+=(--clone-upgradeable-program "$(prog auction)")
+fi
 RAILS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['programs']['rails'])" "$TMP/plan.json")
 args+=(--upgradeable-program "$RAILS" "$TMP/rails.so" 8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV)
 for a in $(python3 -c "import json,sys; print(' '.join(json.load(open(sys.argv[1]))['clone']))" "$TMP/plan.json"); do args+=(--maybe-clone "$a"); done

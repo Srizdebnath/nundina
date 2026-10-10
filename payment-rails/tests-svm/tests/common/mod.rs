@@ -646,6 +646,18 @@ impl Env {
         }
     }
 
+    /// A participant with USDC and asset accounts the gate has NOT
+    /// admitted (no `validate`, no lots).
+    pub fn stranger(&mut self, usdc: u64) -> Party {
+        let (key, usdc_acct) = self.bidder(usdc);
+        let asset_acct = self.asset_account(&key.pubkey(), 0);
+        Party {
+            key,
+            usdc: usdc_acct,
+            asset: asset_acct,
+        }
+    }
+
     // ── escrow ──────────────────────────────────────────────────────────
 
     pub fn deposit_with_mint(

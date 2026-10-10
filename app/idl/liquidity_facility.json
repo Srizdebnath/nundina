@@ -2079,6 +2079,20 @@
               "Allocation not yet paired into a fill (AE-P6 cursor)."
             ],
             "type": "u64"
+          },
+          {
+            "name": "screened",
+            "docs": [
+              "AE-P6: the gate check ran on this order."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "eligible",
+            "docs": [
+              "AE-P6: it passed; only eligible orders clear."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -2111,6 +2125,9 @@
           },
           {
             "name": "Failed"
+          },
+          {
+            "name": "Clearing"
           }
         ]
       }

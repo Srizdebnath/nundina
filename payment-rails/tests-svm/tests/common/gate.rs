@@ -415,6 +415,37 @@ impl Env {
         self.set_time(now);
     }
 
+    /// The market's live policy (CG-P4 count included).
+    pub fn policy_state(&self) -> MarketPolicy {
+        let a = self.svm.get_account(&self.gate_policy()).expect("policy");
+        MarketPolicy::try_deserialize(&mut &a.data[..]).unwrap()
+    }
+
+    /// `update_config(holder_cap)` by the gate authority (CG-P4).
+    pub fn set_holder_cap(&mut self, cap: u32) {
+        let auth = self.authority.insecure_clone();
+        let ix = Instruction {
+            program_id: GATE_ID,
+            accounts: gacc::UpdateConfig {
+                config: self.gate_config(),
+                mint: self.asset_mint,
+                gate_config_authority: auth.pubkey(),
+            }
+            .to_account_metas(None),
+            data: gix::UpdateConfig {
+                policy_class: None,
+                holder_cap: Some(cap),
+                seasoning_seconds: None,
+                settlement_horizon_seconds: None,
+                attester_add: None,
+                attester_remove: None,
+                blocklist_set: None,
+            }
+            .data(),
+        };
+        self.send(&[ix], &[&auth]).expect("update_config");
+    }
+
     /// Put `wallet` on the market block-list (CG-P5).
     pub fn block(&mut self, wallet: &Pubkey) {
         let auth = self.authority.insecure_clone();

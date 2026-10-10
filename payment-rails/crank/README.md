@@ -155,7 +155,8 @@ step, sends it, and repeats until nothing is due:
 
 | Phase | Step sent |
 |---|---|
-| Commit / Reveal, `now ≥ reveal_end` | `clear` (fails the session if too few reveals or no cross) |
+| Commit / Reveal / Clearing, `now ≥ reveal_end`, a revealed order not yet screened | `screen_bid` / `screen_ask` for it (AE-P6 gate check; accounts from the gate PDAs and the buyer's `HolderLink`, `src/gate.ts` `screenGateAccounts`) |
+| Commit / Reveal / Clearing, `now ≥ reveal_end`, every revealed order screened | `clear` over the eligible orders (fails the session if too few eligible reveals or no cross) |
 | Allocating | `allocate` (8 fills per tx) |
 | IssuerRofr, `now ≥ reveal_end + rofr_window` | `close_rofr` |
 | Settling | `settle` for the first unsettled fill (rails `settle_fill` + gate accounts forwarded), then `finish` (rails `finish_session` + print into mark-engine) |
@@ -166,8 +167,8 @@ Refunds after `finish` / `expire` are the rails' own (`refunds`). Seasoning
 merges are `seasoning --mint` (above); bonded keepers cover the SLA.
 `tests/phases.spec.ts` pins the planner to the program's guards and the
 decoder to the program's IDL. **Run on a validator** with the real programs
-by the UI's local demo (`app/scripts/localnet-e2e.mts`, #144): clear,
-allocate, two settles and finish to `Printed`. That run found the `settle`
+by the UI's local demo (`app/scripts/localnet-e2e.mts`, #144): screens,
+clear, allocate, two settles and finish to `Printed`. That run found the `settle`
 step is 1,684 bytes as a plain transaction (rails `settle_fill` + gate
 `settle_check` ≈ 30 accounts; LiteSVM has no packet limit), so settle steps
 go through an address lookup table the crank creates and extends on demand
