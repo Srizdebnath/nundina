@@ -2677,6 +2677,32 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "investor_ids",
+            "docs": [
+              "AE-P6 / AE-P9 (appended, #202): the gate `investor_id` behind each",
+              "order, parallel to `orders` from the first screen that finds one;",
+              "[`NO_INVESTOR`] where none is known. Appending these two fields",
+              "grows `Session`: a session opened by an older build would not decode",
+              "(none exists: devnet has never opened a session)."
+            ],
+            "type": {
+              "vec": {
+                "array": [
+                  "u8",
+                  16
+                ]
+              }
+            }
+          },
+          {
+            "name": "skipped_fills",
+            "docs": [
+              "AE-P2 (appended, #202): bit `i` set ⇔ fill `i` was retired by",
+              "`skip_fill` (it failed the gate at settlement). `MAX_FILLS` ≤ 32."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -2721,7 +2747,8 @@
           {
             "name": "max_cash",
             "docs": [
-              "Per-investor cash cap (micro-USDC)."
+              "Per-investor cash cap (micro-USDC): the rails cap each wallet's",
+              "escrow at commit; `screen_bid` caps the investor across wallets."
             ],
             "type": "u64"
           },

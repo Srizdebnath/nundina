@@ -567,6 +567,7 @@ impl Env {
                     gate_config: self.gate_config(),
                     block_entry: self.block_entry(&owner),
                     seller_lots: self.lots_pda(&owner),
+                    holder_link: self.link_pda(&owner),
                 }
                 .to_account_metas(None),
                 data: aix::ScreenAsk { order_index: index }.data(),
@@ -733,6 +734,35 @@ impl Env {
             data: aix::Settle { fill_index }.data(),
         };
         ix.accounts.extend(forwarded(rails.accounts));
+        self.send(&[ix], &[caller])
+    }
+
+    /// AE-P2: retire fill `fill_index` (buyer → seller) as failing the gate.
+    pub fn skip_fill(
+        &mut self,
+        id: u64,
+        caller: &Keypair,
+        fill_index: u32,
+        buyer: &Pubkey,
+        seller: &Pubkey,
+    ) -> Res {
+        let ix = Instruction {
+            program_id: auction_engine::ID,
+            accounts: aacc::SkipFill {
+                session: auction_pda(id),
+                gate_config: self.gate_config(),
+                gate_policy: self.gate_policy(),
+                seller_block: self.block_entry(seller),
+                buyer_block: self.block_entry(buyer),
+                buyer_link: self.link_pda(buyer),
+                identity_attestation: self.identity_att(buyer),
+                accreditation_attestation: self.accreditation_att(buyer),
+                seller_lots: self.lots_pda(seller),
+                buyer_lots: self.lots_pda(buyer),
+            }
+            .to_account_metas(None),
+            data: aix::SkipFill { fill_index }.data(),
+        };
         self.send(&[ix], &[caller])
     }
 

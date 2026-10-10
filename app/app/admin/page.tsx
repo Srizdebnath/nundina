@@ -152,7 +152,7 @@ async function Admin() {
 
 export default function AdminPage() {
   return (
-    <AccessGuard always what="The admin console">
+    <AccessGuard always what="The admin console" path="/admin">
       <Admin />
     </AccessGuard>
   );

@@ -1,7 +1,7 @@
 # NUNDINA × Crypto World's Fair (Colosseum) — Track Map
 
 > Compiled **25 Sep 2026** from `preresearch/` + the live Colosseum page, the **official rules PDF**, and the Superteam Earn API (all 33 sidetracks read one by one).
-> **Hard deadline: 12 Oct 2026, 11:59 PM PT = 13 Oct 2026, 12:29 PM IST.** That is **~17 days** from today.
+> **Hard deadline: 12 Oct 2026, 11:59 PM PT = 13 Oct 2026, 12:29 PM IST** (06:59 UTC, 13 Oct). The scope below was cut on 25 Sep, ~17 days before it.
 
 ---
 
@@ -25,7 +25,7 @@
 | `credit-math` | ✅ built, tested | Shared crate: u128 math, clearing, pro-rata and waterfall. Every rounding goes against the initiator |
 
 - **v1 go-to-market:** an issuer-sponsored liquidity window, meaning the issuer runs the auction on its own securities as a buyback tool.
-- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#171): new devnet mint `6vt1wHVQ…VKL4`, gated through Token ACL → credit-gate and Squads-owned; supply 1.000000 matched by 1 USDC deposited by hand, nothing backs it by code.** There is no deposit or mint-on-deposit code, no treasury program and no NAV publisher (the SAS attester is live, #122); invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). The treasury is graded **unbacked, process-only** (#173): no venue is chosen or integrated. *Target:* minted 1:1 against deposited USDC, with NAV computed from the sleeve and published through our own SAS attester.
+- **Pilot asset:** NPCS (NUNDINA Pilot Credit Sleeve), a real Token-2022 mint live on devnet. **As built (#171): new devnet mint `6vt1wHVQ…VKL4`, gated through Token ACL → credit-gate and Squads-owned; supply 1.000000 matched by 1 USDC deposited by hand, nothing backs it by code yet.** The code exists: `npcs-treasury` (mint-on-deposit, redeem at the published NAV) is deployed on devnet (`4Bsz…`) but not initialized, because the NPCS mint authority is still the Squads vault and the hand-over (`ops/squads` `propose-treasury`) has not executed; the NAV publisher (`services`) published NAV #1. Until the hand-over, invariant I1 (USDC 1:1) is a process rule, not code ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)). The treasury is graded **unbacked, process-only** (#173): no venue is chosen or integrated. *Target:* minted 1:1 against deposited USDC, with NAV computed from the sleeve and published through our own SAS attester.
 
 Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-Pilot-Rails.md`, `preresearch/research/12-Validation-2026-Reality-Check.md`.
 
@@ -49,7 +49,7 @@ Full detail: `preresearch/architecture/06-Solution-Architecture-v2.md`, `08-SRS-
 
 | Track | Prize | Fit | Why |
 |---|---|---|---|
-| **Solana Ecosystem track** | $100K (10 × $10K) | 🟢 **Primary** | Solana-native: Token-2022 today; Token ACL and SAS integrated in the gate (devnet wiring pending); the treasury is unbacked, process-only |
+| **Solana Ecosystem track** | $100K (10 × $10K) | 🟢 **Primary** | Solana-native: Token-2022, Token ACL and SAS wired on devnet (NPCS thaws only through `credit-gate`); the treasury program is deployed, its hand-over pending |
 | **Grand Champion** | $30K | 🟢 Reach | Novel primitive (queue-claim) aimed at a live $5B+ problem |
 | **Top 20 standout teams** | $15K each ($300K) | 🟢 Realistic target | Scores well on the rules' criteria (see §5) |
 | **Public Goods Award** | $5K | 🟡 Stretch | Only if we pitch the open-source `credit-gate` Gate Program and `credit-math` as reusable compliance infra for any RWA issuer on Solana (the repo is MIT) |
@@ -64,7 +64,7 @@ Submit to each of these on Superteam Earn **in addition to** the Colosseum porta
 | Sidetrack | Prize | Fit | What it needs from us |
 |---|---|---|---|
 | **Superteam India** | $5K USDG (🥇 2.5K / 🥈 1.5K / 🥉 1K) + Superteam India Member role | 🟢 **Must enter** | Colosseum country = India. Judged on ecosystem impact, PMF (clear problem, defined user, early traction) and growth potential. Stack it on top of anything we win globally |
-| **CertiK Security Audit Credits** | $100K in audit credits (10 × $10K) | 🟢 **Strong fit** | They want DeFi/RWA projects handling funds and planning mainnet + a raise. Our SRS already requires a full external audit before mainnet (§11), so this could pay for it. Submission: Colosseum link, repo, **programs to audit + approx LOC** (as built, 2026-10: `payment-rails` ~4.2k lines of Rust, the program holding client cash, plus its ~1.2k-line TS crank; `credit-gate` ~1.4k; `credit-math` ~1.3k), mainnet date, **6–12 month roadmap**, team (full-time?), **fundraising plan**, contact for a scoping call |
+| **CertiK Security Audit Credits** | $100K in audit credits (10 × $10K) | 🟢 **Strong fit** | They want DeFi/RWA projects handling funds and planning mainnet + a raise. Our SRS already requires a full external audit before mainnet (§11), so this could pay for it. Submission: Colosseum link, repo, **programs to audit + approx LOC** (as built, 2026-10-10, `wc -l` over `src/`: `payment-rails` ~5.7k lines of Rust, the program holding client cash, plus its ~2.7k-line TS crank; `credit-gate` ~4.2k; `credit-math` ~1.3k; `auction-engine` ~1.9k; `liquidity-facility` ~1.8k; `queue-claim`, `tranche-engine` ~1.1k each; `mark-engine` ~0.9k; `npcs-treasury` ~0.4k), mainnet date, **6–12 month roadmap**, team (full-time?), **fundraising plan**, contact for a scoping call |
 | **Adevar Labs Pre-Audit** | $20K (5 × $4K pre-audits) | 🟢 **Strong fit** | Solana/Rust submissions only. Judged on codebase complexity, architectural clarity, repo completeness and launch readiness. Requires a short form, a **tweet**, and following @AdevarLabs |
 | **RPC Fast Infrastructure** | ~$10.5K in RPC credits (~$500 per team × 21) | 🟡 Easy add-on | Claim the free Focus plan (mainnet only, Frankfurt), use it, and **post 2–3 times a month about RPC Fast for 2 months**. Low value but low effort |
 | **Solami — live Solana data** | $3K USDG (1.2K / 1K / 500 / 300) | 🟡 Conditional | Solami has to be the actual data path for the indexer (Yellowstone gRPC / webhooks instead of Helius). The app must **run live on mainnet**, with a public repo and a 2–3 min live-mainnet demo. Only worth it if we deploy a mainnet slice |
@@ -107,7 +107,7 @@ The SRS (`08`) is a ~24-week plan that includes a 10-week audit. For the hackath
 | **P0 — must** | `queue-claim`: mint a claim from a redemption request and **sell it in an auction session** | AC-8 (sell path): **the headline demo** | ⚠️ **deployed, not recorded.** A claim sells at 9.50 in a 3-order session in LiteSVM; the next window's fill pays the buyer (`payment-rails/tests-svm/tests/queue.rs`). The NPCS queue is initialized on devnet; the sale follows the first live session |
 | **P1 — should** | `mark-engine` (minimal): publish NAV, Fresh→Stale states, and the auction print feeding the discount curve | AC-2 (simplified) | ✅ live on devnet: NAV #1 = 1.000000 with its inputs document (`ops/engines/nav/`), print source = the auction print PDA. Weekly publications from here (AC-2 needs four) |
 | **P1 — should** | `liquidity-facility`: pledge a claim → USDC advance, plus a demo of "no liquidation on a stale mark" | AC-8 pledge path, part of AC-9 | ⚠️ AC-9 code met in LiteSVM (#139): stale/suspended marks refuse every liquidation step; each ladder rung runs. The claim pledge path lands with `queue-claim` (#138) |
-| **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides | 🗺 roadmap (the cash waterfall alone is built in `payment-rails`) |
+| **P2 — slides** | `tranche-engine` waterfall, full liquidation ladder, holder governor, lot seasoning | Roadmap slides | ⚠️ **built, deployed, no pool.** `tranche-engine` is on devnet (`Cvca…`) with no pool created; its waterfall, three books and loss path run in LiteSVM. The liquidation ladder runs in LiteSVM (#139); the holder governor and lot seasoning are live in `credit-gate` |
 | **UI** | Next.js: one session page (commit/reveal/clearing animation), a portfolio (claims) page, and a gate-rejection view | 3-minute demo video | ⚠️ **built (#144), reads live chain state.** Gate-rejection view and portfolio run against devnet NPCS today (holder H admitted, a stranger rejected with `GateReject::AttestationInvalid` from the real program). #199 adds the issuer ROFR decision, tranche positions, `/admin`, `/data-room` and the private allowlist. The session page runs end to end on a local validator (`app/npm run localnet:e2e`); on devnet with the first live session |
 
 **P0 is not met** (#129). #4 was closed with P0 badges; the substantive
@@ -125,7 +125,7 @@ The pitch must present the ❌ rows as roadmap.
 
 | Criterion | Our answer |
 |---|---|
-| **Functionality / code quality** | Working devnet programs, property-tested `credit-math`, clean Anchor |
+| **Functionality / code quality** | Eight programs with LiteSVM suites against the real `.so` builds, seven on devnet (`liquidity-facility` pending), property-tested `credit-math`. The engines have not run a live session yet: say so, then show the devnet-clone rehearsal |
 | **Potential impact / TAM** | $5B+ trapped behind gates, ~$8B tokenized private credit, 1–20% secondaries discounts (research `12`) |
 | **Novelty** | Queue-claim: a pro-rated redemption request as a tokenized, financeable claim. Nobody has shipped this on any chain |
 | **UX** | Denied redemption → exit or loan in one flow. Institutional dark UI |

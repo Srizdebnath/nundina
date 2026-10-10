@@ -1,5 +1,7 @@
 # Competitive Differentiation — How We Differ From Every Player in This Sector
 
+> **⛔ Superseded (see `00-README.md`; current map in `../research/12`).** Integrations named below as if present — Kamino / Loopscale lending against our tokens, Orca pools for tranche tokens, an issuer SDK — are **roadmap**: no code in this repo calls those protocols. What is built is the mechanism layer (`credit-gate`, `auction-engine`, `mark-engine`, `queue-claim`, `liquidity-facility`, `tranche-engine`, `npcs-treasury`, `payment-rails`).
+
 The sector's players grouped into four buckets — and exactly how we're different from each. No vague "we're better" claims; each difference is structural and verifiable.
 
 ---

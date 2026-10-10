@@ -656,6 +656,23 @@ impl Env {
         }
     }
 
+    /// A participant admitted as one more wallet of investor `investor_id`,
+    /// holding `asset` seasoned units.
+    pub fn party_of(&mut self, investor_id: [u8; 16], usdc: u64, asset: u64) -> Party {
+        let (key, usdc_acct) = self.bidder(usdc);
+        let asset_acct = self.asset_account(&key.pubkey(), asset);
+        self.admit_investor(&key.pubkey(), investor_id, true);
+        if asset > 0 {
+            let now = self.now();
+            self.append_lot_at(&key.pubkey(), asset, now - INVENTORY_AGE);
+        }
+        Party {
+            key,
+            usdc: usdc_acct,
+            asset: asset_acct,
+        }
+    }
+
     /// A participant with USDC and asset accounts the gate has NOT
     /// admitted (no `validate`, no lots).
     pub fn stranger(&mut self, usdc: u64) -> Party {

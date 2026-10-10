@@ -102,6 +102,8 @@ test("the session decoder round-trips the program's IDL layout", () => {
     ],
     fills: [{ buyer: A, seller: B, qty: 8n, rofr: false, settled: true }],
     bump: 254,
+    investor_ids: [new Uint8Array(16).fill(3)],
+    skipped_fills: 0,
   };
   const body = auction.encode({ defined: { name: "Session" } }, value);
   const data = new Uint8Array([...auction.accountDiscriminator("Session"), ...body]);
@@ -111,5 +113,6 @@ test("the session decoder round-trips the program's IDL layout", () => {
   assert.equal(s.fills[0]!.qty, 8n);
   assert.equal(s.params.settle_deadline, 400n);
   assert.equal(s.orders[0]!.screened, true, "AE-P6 fields decode");
+  assert.equal((s.investor_ids as Uint8Array[])[0]![0], 3, "#202 investor ids decode");
   assert.deepEqual(planPhase(s, 300n), { kind: "finish" });
 });

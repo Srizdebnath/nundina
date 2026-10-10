@@ -216,10 +216,19 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <Lots p={p} now={now} />
           <h2>Claims (queue-claim)</h2>
           <Claims p={p} />
+          <p className="small">
+            <Link href={`/queue?wallet=${p.wallet}`}>Request a redemption, attestation status →</Link>
+          </p>
           <h2>Advances (liquidity-facility)</h2>
           <Advances p={p} />
+          <p className="small">
+            <Link href={`/facility?wallet=${p.wallet}`}>Pledge, take an advance, top up, repay →</Link>
+          </p>
           <h2>Tranche positions (tranche-engine)</h2>
           <Tranches p={p} />
+          <p className="small">
+            <Link href="/tranches">Deposit into a pool →</Link> · <Link href="/treasury">USDC → NPCS (treasury) →</Link>
+          </p>
           <h2>Auction orders</h2>
           {p.orders.length === 0 ? (
             <p className="muted small">No orders in any session.</p>

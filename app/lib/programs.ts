@@ -98,6 +98,38 @@ export const pdas = {
   /** The rails' settlement signer: the only caller credit-gate takes `settle_check` from. */
   gateSettle: () => pda(PROGRAMS.rails, ["gate_settle"]),
   engineGrant: (engine: Address) => pda(PROGRAMS.rails, ["engine", A(engine)]),
+  /** A payout destination (`["payout", owner]`): where facility advances may go. */
+  payout: (owner: Address) => pda(PROGRAMS.rails, ["payout", A(owner)]),
+  /** A rails facility fund (`["facility", curator, id]`). */
+  railsFacility: (curator: Address, id: bigint) => pda(PROGRAMS.rails, ["facility", A(curator), u64le(id)]),
+  facilityVault: (facility: Address) => pda(PROGRAMS.rails, ["facility_vault", A(facility)]),
+  advance: (facility: Address, borrower: Address) => pda(PROGRAMS.rails, ["advance", A(facility), A(borrower)]),
+  // credit-gate custody (LF-P5)
+  custodian: (mint: Address, custodian: Address) => pda(PROGRAMS.gate, ["custodian", A(mint), A(custodian)]),
+  /** The holder key a pledge's lot ledger is kept under (`credit_gate::pledge_holder`). */
+  pledgeHolder: (mint: Address, custodian: Address, pledgeRef: Address) =>
+    pda(PROGRAMS.gate, ["pledge", A(mint), A(custodian), A(pledgeRef)]),
   // queue-claim
   queue: (mint: Address) => pda(PROGRAMS.queue, ["queue", A(mint)]),
+  queueRequest: (queue: Address, id: bigint) => pda(PROGRAMS.queue, ["request", A(queue), u64le(id)]),
+  queueNpcsVault: (request: Address) => pda(PROGRAMS.queue, ["npcs", A(request)]),
+  queueSigner: () => pda(PROGRAMS.queue, ["qc_signer"]),
+  // liquidity-facility
+  lfSigner: () => pda(PROGRAMS.facility, ["lf_signer"]),
+  lfConfig: (id: bigint) => pda(PROGRAMS.facility, ["lf_facility", u64le(id)]),
+  position: (config: Address, borrower: Address) => pda(PROGRAMS.facility, ["position", A(config), A(borrower)]),
+  collateral: (position: Address) => pda(PROGRAMS.facility, ["collateral", A(position)]),
+  proceeds: (position: Address) => pda(PROGRAMS.facility, ["proceeds", A(position)]),
+  // tranche-engine
+  teSigner: () => pda(PROGRAMS.tranche, ["te_signer"]),
+  // npcs-treasury
+  treasury: (mint: Address) => pda(PROGRAMS.treasury, ["treasury", A(mint)]),
+  treasuryVault: (treasury: Address) => pda(PROGRAMS.treasury, ["vault", A(treasury)]),
+  treasurySigner: (treasury: Address) => pda(PROGRAMS.treasury, ["treasury_signer", A(treasury)]),
 };
+
+export const ASSOCIATED_TOKEN_PROGRAM = address("ATokenGPvbdGVxr1b2hvZbsjzLKkGSBqZp6GbsJ6VCh7");
+
+/** The associated token account of `owner` for `mint` under `tokenProgram`. */
+export const ata = (owner: Address, mint: Address, tokenProgram: Address) =>
+  pda(ASSOCIATED_TOKEN_PROGRAM, [A(owner), A(tokenProgram), A(mint)]);

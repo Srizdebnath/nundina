@@ -46,8 +46,21 @@
 //!   `settle_rofr_fill`; or declines.
 //! - AE-P8 `settle`: one fill per instruction (crank-loopable,
 //!   permissionless) through rails `settle_fill`.
+//! - AE-P6 investor checks (screen time): the gate's `investor_id` behind
+//!   each order is kept on the session (`investor_ids`). An order whose
+//!   investor already has a live order on the other side is excluded
+//!   (`SelfTrade`: wash trading by investor, not wallet), and a bid that
+//!   takes its investor's escrow across wallets past `max_cash` is excluded
+//!   (`InvestorCapExceeded`; the rails cap one wallet's escrow only).
+//! - AE-P2 partial settlement: `skip_fill` retires a fill that provably
+//!   fails the gate's `settle_check` now (same checks, same accounts), so
+//!   the session still finishes; its print is flagged `partial` and is not
+//!   offered to mark-engine. The failed fill's escrows are refundable.
 //! - AE-P9 `finish`: rails `finish_session`, then the `ClearingPrint` into
-//!   mark-engine `record_print` (signed by the print PDA).
+//!   mark-engine `record_print` (signed by the print PDA). `n_investor_ids`
+//!   counts distinct gate `investor_id`s (ME-P4 / G2), a wallet with no
+//!   known id counting as itself. The `ClearingPrint` event is redacted per
+//!   the market's print policy (C9), like mark-engine's `PrintRecorded`.
 //! - AE-P10 `expire`: past any hard deadline the session fails and every
 //!   escrow is refundable through the rails' permissionless refunds.
 //! - AE-P11 forced-sale sessions: only the venue's forced-sale opener
@@ -63,7 +76,7 @@ use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::{system_program, InstructionData};
 use credit_gate::{
-    BlockEntry, HolderLink, HolderLots, InvestorRecord, MarketConfig, MarketPolicy,
+    BlockEntry, HolderLink, HolderLots, InvestorRecord, LotSource, MarketConfig, MarketPolicy,
     MAX_LOTS as GATE_MAX_LOTS,
 };
 use credit_math::{allocate_pro_rata, find_uniform_clear_price, mul_div, Order as MathOrder};
@@ -397,6 +410,8 @@ pub mod auction_engine {
             .iter()
             .filter(|o| o.side == Side::Sell && o.revealed)
             .count();
+        // AE-P9: the investor behind the bid, once the gate's link names it.
+        let mut investor_id = None;
         let exclusion = 'screen: {
             if credit_gate::screen(&a.gate_config, &a.block_entry)?.is_some() {
                 break 'screen Some(Exclusion::Blocklisted);
@@ -404,6 +419,7 @@ pub mod auction_engine {
             let Some(link) = load_gate::<HolderLink>(&a.holder_link, gate)? else {
                 break 'screen Some(Exclusion::NotAdmitted);
             };
+            investor_id = Some(link.investor_id);
             // The attestations are the ones the admission rests on, so a
             // crank cannot exclude a buyer by passing others.
             require_keys_eq!(
@@ -475,13 +491,14 @@ pub mod auction_engine {
                     a.gate_program.to_account_info(),
                 ],
             )?;
-            None
+            investor_exclusion(&a.session, order_index, link.investor_id)
         };
         finish_screen(
             session_key,
             &mut ctx.accounts.session,
             order_index,
             owner,
+            investor_id,
             exclusion,
         );
         Ok(())
@@ -490,7 +507,9 @@ pub mod auction_engine {
     /// AE-P6 gate check, sell side: screen revealed ask `order_index` —
     /// block-list, and seasoned lots covering the revealed quantity (the
     /// lots only season further before settlement). Permissionless once
-    /// reveals close. A failing ask is excluded, not an error.
+    /// reveals close. A failing ask is excluded, not an error. The seller's
+    /// `HolderLink` (pinned by address; may not exist, e.g. a PDA seller)
+    /// names its `investor_id` for the investor checks and the print.
     pub fn screen_ask(ctx: Context<ScreenAsk>, order_index: u8) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let session_key = ctx.accounts.session.key();
@@ -506,12 +525,21 @@ pub mod auction_engine {
             gate_pda(&[HolderLots::SEED, mint.as_ref(), owner.as_ref()]),
             AuctionError::GateAccounts
         );
+        require_keys_eq!(
+            a.holder_link.key(),
+            gate_pda(&[HolderLink::SEED, mint.as_ref(), owner.as_ref()]),
+            AuctionError::GateAccounts
+        );
         let qty = a.session.orders[usize::from(order_index)].qty;
+        let investor_id =
+            load_gate::<HolderLink>(&a.holder_link, &credit_gate::ID)?.map(|l| l.investor_id);
         let exclusion = if credit_gate::screen(&a.gate_config, &a.block_entry)?.is_some() {
             Some(Exclusion::Blocklisted)
         } else {
             match load_gate::<HolderLots>(&a.seller_lots, &credit_gate::ID)? {
-                Some(lots) if lots.sellable(now)? >= qty => None,
+                Some(lots) if lots.sellable(now)? >= qty => {
+                    investor_id.and_then(|id| investor_exclusion(&a.session, order_index, id))
+                }
                 _ => Some(Exclusion::NotSeasoned),
             }
         };
@@ -520,6 +548,7 @@ pub mod auction_engine {
             &mut ctx.accounts.session,
             order_index,
             owner,
+            investor_id,
             exclusion,
         );
         Ok(())
@@ -827,8 +856,57 @@ pub mod auction_engine {
         Ok(())
     }
 
-    /// AE-P9: every fill settled → rails `finish_session` (unfilled escrow
-    /// refundable at once), then the clearing print into mark-engine.
+    /// AE-P2 partial settlement: retire fill `fill_index` because it fails
+    /// credit-gate's `settle_check` now — the same checks, in the same order,
+    /// over the same gate accounts (block-list both sides; buyer admission
+    /// and SAS attestations through the horizon; the seller's seasoned
+    /// lots; room in the buyer's lot ledger). A fill that would pass is
+    /// refused (`FillSettleable`), so a crank cannot drop a good fill. The
+    /// fill counts as done for `finish`, nothing moves for it, and both
+    /// escrows behind it are refundable once the session finishes; the
+    /// print is flagged `partial` and not offered to mark-engine.
+    /// Permissionless, Settling only.
+    pub fn skip_fill(ctx: Context<SkipFill>, fill_index: u32) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let session_key = ctx.accounts.session.key();
+        let a = &ctx.accounts;
+        require!(a.session.phase == Phase::Settling, AuctionError::WrongPhase);
+        let i = fill_index as usize;
+        let f = *a.session.fills.get(i).ok_or(AuctionError::NoFill)?;
+        require!(!f.settled, AuctionError::FillSettled);
+        let mint = a.session.asset_mint;
+        for (ai, seed, wallet) in [
+            (&a.seller_block, BlockEntry::SEED, &f.seller),
+            (&a.buyer_block, BlockEntry::SEED, &f.buyer),
+            (&a.buyer_link, HolderLink::SEED, &f.buyer),
+            (&a.seller_lots, HolderLots::SEED, &f.seller),
+            (&a.buyer_lots, HolderLots::SEED, &f.buyer),
+        ] {
+            require_keys_eq!(
+                ai.key(),
+                gate_pda(&[seed, mint.as_ref(), wallet.as_ref()]),
+                AuctionError::GateAccounts
+            );
+        }
+        let reason = settle_failure(a, &f, now)?.ok_or(AuctionError::FillSettleable)?;
+        let session = &mut ctx.accounts.session;
+        session.fills[i].settled = true;
+        session.skipped_fills |= 1 << i;
+        emit!(FillSkipped {
+            session: session_key,
+            fill_index,
+            buyer: f.buyer,
+            seller: f.seller,
+            qty: f.qty,
+            reason,
+        });
+        Ok(())
+    }
+
+    /// AE-P9: every fill settled (or skipped) → rails `finish_session`
+    /// (unfilled escrow refundable at once), then the clearing print into
+    /// mark-engine — unless a fill was skipped (partial settlement): that
+    /// print is not mark-eligible and is only evented, flagged `partial`.
     /// Permissionless; the caller pays the print record's rent.
     /// Remaining accounts: rails session, operator.
     pub fn finish<'info>(ctx: Context<'info, Finish<'info>>) -> Result<()> {
@@ -855,46 +933,59 @@ pub mod auction_engine {
             ctx.accounts.venue.operator_bump,
         )?;
 
-        let mut wallets: Vec<Pubkey> = Vec::with_capacity(session.fills.len() * 2);
-        for f in session.fills.iter().filter(|f| f.qty > 0) {
-            for w in [f.buyer, f.seller] {
-                if !wallets.contains(&w) {
-                    wallets.push(w);
-                }
-            }
+        // AE-P9 / ME-P4 (G2): distinct investors, not wallets — one
+        // investor's several admitted wallets count once.
+        let n_investor_ids = distinct_participants(session);
+        let partial = session.skipped_fills != 0;
+        // Volume that actually moved (the cleared volume unless skipped).
+        let volume = session
+            .fills
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| session.skipped_fills & (1 << i) == 0)
+            .try_fold(0u64, |v, (_, f)| v.checked_add(f.qty))
+            .ok_or(AuctionError::MathOverflow)?;
+        let params = ctx.accounts.feed.params;
+        if !partial {
+            let print = PrintInput {
+                session: session_key,
+                price: session.clear_price,
+                volume,
+                n_investor_ids,
+                forced_sale: session.params.forced_sale,
+            };
+            let seeds: &[&[u8]] = &[PRINT_SEED, &[ctx.accounts.venue.print_bump]];
+            mark_engine::cpi::record_print(
+                CpiContext::new_with_signer(
+                    mark_engine::ID,
+                    mark_engine::cpi::accounts::RecordPrint {
+                        feed: ctx.accounts.feed.to_account_info(),
+                        record: ctx.accounts.print_record.to_account_info(),
+                        print_source: ctx.accounts.print_authority.to_account_info(),
+                        payer: ctx.accounts.payer.to_account_info(),
+                        system_program: ctx.accounts.system_program.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                print,
+            )?;
         }
-        let n_investor_ids = wallets.len() as u16;
-        let policy = ctx.accounts.feed.params.print_policy;
-        let print = PrintInput {
-            session: session_key,
-            price: session.clear_price,
-            volume: session.cleared_volume,
-            n_investor_ids,
-            forced_sale: session.params.forced_sale,
-        };
-        let seeds: &[&[u8]] = &[PRINT_SEED, &[ctx.accounts.venue.print_bump]];
-        mark_engine::cpi::record_print(
-            CpiContext::new_with_signer(
-                mark_engine::ID,
-                mark_engine::cpi::accounts::RecordPrint {
-                    feed: ctx.accounts.feed.to_account_info(),
-                    record: ctx.accounts.print_record.to_account_info(),
-                    print_source: ctx.accounts.print_authority.to_account_info(),
-                    payer: ctx.accounts.payer.to_account_info(),
-                    system_program: ctx.accounts.system_program.to_account_info(),
-                },
-                &[seeds],
-            ),
-            print,
-        )?;
+        let (price, disclosed_volume) = disclose(
+            params.print_policy,
+            params.band_bps,
+            session.clear_price,
+            volume,
+        );
         emit!(ClearingPrint {
             session: session_key,
             asset_mint: session.asset_mint,
-            price: session.clear_price,
-            volume: session.cleared_volume,
+            price: price.unwrap_or(0),
+            volume: disclosed_volume.unwrap_or(0),
             n_investor_ids,
             forced_sale: session.params.forced_sale,
-            print_policy_class: policy,
+            print_policy_class: params.print_policy,
+            price_commitment: print_commitment(&session_key, session.clear_price, volume),
+            partial,
         });
         set_phase(session_key, session, Phase::Printed, now);
         Ok(())
@@ -1055,8 +1146,17 @@ fn finish_screen(
     session: &mut Session,
     order_index: u8,
     owner: Pubkey,
+    investor_id: Option<[u8; 16]>,
     exclusion: Option<Exclusion>,
 ) {
+    if let Some(id) = investor_id {
+        // Parallel to `orders` (fixed once screening starts: commits are over).
+        let n = session.orders.len();
+        if session.investor_ids.len() < n {
+            session.investor_ids.resize(n, NO_INVESTOR);
+        }
+        session.investor_ids[usize::from(order_index)] = id;
+    }
     let order = &mut session.orders[usize::from(order_index)];
     order.screened = true;
     order.eligible = exclusion.is_none();
@@ -1066,6 +1166,174 @@ fn finish_screen(
         side: order.side,
         exclusion,
     });
+}
+
+/// No gate `investor_id` known for an order (the gate never issues zero).
+pub const NO_INVESTOR: [u8; 16] = [0; 16];
+
+/// AE-P6 investor checks for order `index`, whose gate `investor_id` is
+/// `id`, against the orders already screened eligible:
+/// - the same investor live on the other side ⇒ `SelfTrade` (a wash trade
+///   across two of one investor's wallets; the gate's own `SelfTrade` only
+///   compares wallets);
+/// - a bid taking the investor's escrowed cash, over all its wallets' live
+///   bids, past `max_cash` ⇒ `InvestorCapExceeded` (AE-P3: the rails cap
+///   each wallet's escrow, not the investor's).
+fn investor_exclusion(session: &Session, index: u8, id: [u8; 16]) -> Option<Exclusion> {
+    let me = &session.orders[usize::from(index)];
+    let mut cash = u128::from(me.escrowed);
+    for (j, o) in session.orders.iter().enumerate() {
+        if j == usize::from(index) || !o.is_live() || session.investor_id(j) != Some(id) {
+            continue;
+        }
+        if o.side != me.side {
+            return Some(Exclusion::SelfTrade);
+        }
+        if o.side == Side::Buy {
+            cash += u128::from(o.escrowed);
+        }
+    }
+    (me.side == Side::Buy && cash > u128::from(session.params.max_cash))
+        .then_some(Exclusion::InvestorCapExceeded)
+}
+
+/// Who traded, for the print's `n_investor_ids`: a wallet's gate
+/// `investor_id` where an order names one, else the wallet itself (the
+/// issuer's ROFR fills, a PDA seller).
+#[derive(PartialEq)]
+enum Participant {
+    Investor([u8; 16]),
+    Wallet(Pubkey),
+}
+
+/// Distinct participants over the fills that moved (ME-P4 / G2).
+fn distinct_participants(session: &Session) -> u16 {
+    let mut seen: Vec<Participant> = Vec::with_capacity(session.fills.len() * 2);
+    for (i, f) in session.fills.iter().enumerate() {
+        if f.qty == 0 || session.skipped_fills & (1 << i) != 0 {
+            continue;
+        }
+        for w in [f.buyer, f.seller] {
+            let p = session
+                .orders
+                .iter()
+                .position(|o| o.owner == w)
+                .and_then(|j| session.investor_id(j))
+                .map_or(Participant::Wallet(w), Participant::Investor);
+            if !seen.contains(&p) {
+                seen.push(p);
+            }
+        }
+    }
+    seen.len() as u16
+}
+
+/// Round `price` down to its band — mark-engine's `band` (ME-P6), so the
+/// event discloses exactly what `PrintRecorded` does.
+fn band(price: u64, band_bps: u64) -> u64 {
+    let width = (u128::from(price) * u128::from(band_bps) / u128::from(BPS)).max(1) as u64;
+    price / width * width
+}
+
+/// C9 / ME-P6: what the `ClearingPrint` event discloses under `policy`
+/// (price, volume) — the same classes as mark-engine's `PrintRecorded`.
+pub fn disclose(
+    policy: PrintPolicy,
+    band_bps: u64,
+    price: u64,
+    volume: u64,
+) -> (Option<u64>, Option<u64>) {
+    match policy {
+        PrintPolicy::Public => (Some(price), Some(volume)),
+        PrintPolicy::Banded => (Some(band(price, band_bps)), Some(volume)),
+        PrintPolicy::AggregateOnly => (None, Some(volume)),
+        PrintPolicy::DataRoom => (None, None),
+    }
+}
+
+/// Domain tag of [`print_commitment`].
+pub const PRINT_COMMITMENT_DOMAIN: &[u8] = b"nundina.auction.print.v1";
+
+/// `sha256(domain ‖ session ‖ price ‖ volume)`: lets a data-room reader
+/// check the exact print it was given against the public event. It binds,
+/// it does not hide — see [`ClearingPrint`].
+pub fn print_commitment(session: &Pubkey, price: u64, volume: u64) -> [u8; 32] {
+    solana_sha256_hasher::hashv(&[
+        PRINT_COMMITMENT_DOMAIN,
+        session.as_ref(),
+        &price.to_le_bytes(),
+        &volume.to_le_bytes(),
+    ])
+    .to_bytes()
+}
+
+/// AE-P2: why fill `f` fails credit-gate's `settle_check` now, or `None`
+/// if it would pass. Mirrors `process_settle_check` step for step over
+/// copies of the ledgers (nothing is written); the accounts are pinned by
+/// the caller.
+fn settle_failure(a: &SkipFill, f: &Fill, now: i64) -> Result<Option<Exclusion>> {
+    let gate = &credit_gate::ID;
+    // 1. Block-list, seller then buyer.
+    if credit_gate::screen(&a.gate_config, &a.seller_block)?.is_some()
+        || credit_gate::screen(&a.gate_config, &a.buyer_block)?.is_some()
+    {
+        return Ok(Some(Exclusion::Blocklisted));
+    }
+    // 2. Buyer admission and attestations (the link's own).
+    let Some(link) = load_gate::<HolderLink>(&a.buyer_link, gate)? else {
+        return Ok(Some(Exclusion::NotAdmitted));
+    };
+    require_keys_eq!(
+        a.identity_attestation.key(),
+        link.identity_attestation,
+        AuctionError::GateAccounts
+    );
+    require_keys_eq!(
+        a.accreditation_attestation.key(),
+        link.accreditation_attestation,
+        AuctionError::GateAccounts
+    );
+    match credit_gate::evaluate(
+        &a.gate_config,
+        &a.gate_policy,
+        &f.buyer,
+        &a.buyer_block,
+        &a.identity_attestation,
+        &a.accreditation_attestation,
+        now,
+    )? {
+        Err(_) => return Ok(Some(Exclusion::AttestationRejected)),
+        Ok(e) if e.identity.investor_id != link.investor_id => {
+            return Ok(Some(Exclusion::InvestorIdChanged))
+        }
+        Ok(_) => {}
+    }
+    // 3. The seller's seasoned lots cover the fill.
+    let seasoned = match load_gate::<HolderLots>(&a.seller_lots, gate)? {
+        Some(mut lots) => lots.debit(f.qty, now).is_ok(),
+        None => false,
+    };
+    if !seasoned {
+        return Ok(Some(Exclusion::NotSeasoned));
+    }
+    // 4. The buyer's ledger takes the new lot.
+    let Some(mut lots) = load_gate::<HolderLots>(&a.buyer_lots, gate)? else {
+        return Ok(Some(Exclusion::NotAdmitted));
+    };
+    if lots
+        .append(
+            f.qty,
+            now,
+            a.gate_config.seasoning_seconds,
+            LotSource::AuctionSettle,
+            false,
+            0,
+        )
+        .is_err()
+    {
+        return Ok(Some(Exclusion::LotLedgerFull));
+    }
+    Ok(None)
 }
 
 /// credit-gate's PDA for `seeds`.
@@ -1308,6 +1576,12 @@ pub enum Exclusion {
     LotLedgerFull,
     /// Seller's seasoned quantity is short of its revealed ask (C2).
     NotSeasoned,
+    /// The order's investor (gate `investor_id`) already has a live order
+    /// on the other side of this session: a wash trade across wallets.
+    SelfTrade,
+    /// The bid takes its investor's escrowed cash, across all of its
+    /// wallets' live bids, past the session's `max_cash` (AE-P3).
+    InvestorCapExceeded,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
@@ -1329,7 +1603,8 @@ pub struct SessionParams {
     pub settle_deadline: i64,
     /// Forfeitable bond per order (micro-USDC).
     pub bond: u64,
-    /// Per-investor cash cap (micro-USDC).
+    /// Per-investor cash cap (micro-USDC): the rails cap each wallet's
+    /// escrow at commit; `screen_bid` caps the investor across wallets.
     pub max_cash: u64,
     /// Fewer revealed orders than this ⇒ Failed (G13).
     pub min_reveals: u8,
@@ -1437,13 +1712,33 @@ pub struct Session {
     #[max_len(MAX_FILLS)]
     pub fills: Vec<Fill>,
     pub bump: u8,
+    /// AE-P6 / AE-P9 (appended, #202): the gate `investor_id` behind each
+    /// order, parallel to `orders` from the first screen that finds one;
+    /// [`NO_INVESTOR`] where none is known. Appending these two fields
+    /// grows `Session`: a session opened by an older build would not decode
+    /// (none exists: devnet has never opened a session).
+    #[max_len(MAX_ORDERS)]
+    pub investor_ids: Vec<[u8; 16]>,
+    /// AE-P2 (appended, #202): bit `i` set ⇔ fill `i` was retired by
+    /// `skip_fill` (it failed the gate at settlement). `MAX_FILLS` ≤ 32.
+    pub skipped_fills: u32,
 }
 
 impl Session {
     pub fn rofr_end(&self) -> i64 {
         self.params.reveal_end + self.params.rofr_window
     }
+
+    /// The gate `investor_id` behind order `index`, if one is known.
+    pub fn investor_id(&self, index: usize) -> Option<[u8; 16]> {
+        self.investor_ids
+            .get(index)
+            .copied()
+            .filter(|id| *id != NO_INVESTOR)
+    }
 }
+
+const _: () = assert!(MAX_FILLS <= 32, "skipped_fills is a u32 bitmap");
 
 // ── accounts ────────────────────────────────────────────────────────────
 
@@ -1585,6 +1880,41 @@ pub struct ScreenAsk<'info> {
     pub block_entry: UncheckedAccount<'info>,
     /// CHECK: the seller's gate `HolderLots`; may not exist.
     pub seller_lots: UncheckedAccount<'info>,
+    /// CHECK: the seller's gate `HolderLink` (address checked in the
+    /// handler); may not exist. Appended (#202): names the investor.
+    pub holder_link: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SkipFill<'info> {
+    #[account(mut, seeds = [SESSION_SEED, session.venue.as_ref(), &session.session_id.to_le_bytes()], bump = session.bump)]
+    pub session: Box<Account<'info, Session>>,
+    #[account(
+        seeds = [MarketConfig::SEED, session.asset_mint.as_ref()],
+        bump = gate_config.bump,
+        seeds::program = credit_gate::ID
+    )]
+    pub gate_config: Box<Account<'info, MarketConfig>>,
+    #[account(
+        seeds = [MarketPolicy::SEED, session.asset_mint.as_ref()],
+        bump = gate_policy.bump,
+        seeds::program = credit_gate::ID
+    )]
+    pub gate_policy: Box<Account<'info, MarketPolicy>>,
+    /// CHECK: the fill seller's gate block entry (address checked in the handler).
+    pub seller_block: UncheckedAccount<'info>,
+    /// CHECK: the fill buyer's gate block entry (address checked in the handler).
+    pub buyer_block: UncheckedAccount<'info>,
+    /// CHECK: the buyer's gate `HolderLink`; may not exist.
+    pub buyer_link: UncheckedAccount<'info>,
+    /// CHECK: the identity attestation named by the link; read by `evaluate`.
+    pub identity_attestation: UncheckedAccount<'info>,
+    /// CHECK: the accreditation attestation named by the link; read by `evaluate`.
+    pub accreditation_attestation: UncheckedAccount<'info>,
+    /// CHECK: the seller's gate `HolderLots`; may not exist.
+    pub seller_lots: UncheckedAccount<'info>,
+    /// CHECK: the buyer's gate `HolderLots`; may not exist.
+    pub buyer_lots: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1755,17 +2085,56 @@ pub struct FillSettled {
     pub price: u64,
 }
 
-/// AE-P9: the session's aggregate print (mark-engine stores its own copy,
-/// disclosed per the market's print policy).
+/// AE-P2: fill `fill_index` failed the gate at settlement and was retired
+/// (`reason` is the first failing check, in `settle_check`'s order).
+#[event]
+pub struct FillSkipped {
+    pub session: Pubkey,
+    pub fill_index: u32,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub qty: u64,
+    pub reason: Exclusion,
+}
+
+/// AE-P9: the session's aggregate print (mark-engine stores its own copy).
+///
+/// C9 / ME-P6: redacted per the market's print policy like mark-engine's
+/// `PrintRecorded`. Public: exact price and volume; Banded: the band
+/// floor; AggregateOnly: volume, price withheld; DataRoom: both withheld.
+/// A withheld value is `0`: the layout stays the pre-#202 one so every
+/// decoder of the event keeps working, and the two fields after
+/// `print_policy_class` are appended. `price_commitment` binds the exact
+/// price and volume for a data-room reader to check what it was given.
+///
+/// Limits, stated plainly: this redacts the venue's *print*, the headline a
+/// front-end or indexer would publish; it does not make the price secret.
+/// Solana state and logs are public, and the clearing price can be
+/// recomputed from: the session account (`clear_price`), the `Cleared`,
+/// `FillSettled` and `RofrExercised` events, the payment-rails fill
+/// receipts and transfer events, the token transfers themselves (gross ÷
+/// quantity), and mark-engine's `PrintRecord` account. The commitment is
+/// not hiding either (a u64 price near NAV is brute-forced at once). A
+/// 506(b) market's confidentiality rests on the front-end and indexer
+/// honouring the print policy, not on chain secrecy.
 #[event]
 pub struct ClearingPrint {
     pub session: Pubkey,
     pub asset_mint: Pubkey,
+    /// Per policy: exact (Public), band floor (Banded), 0 = withheld.
     pub price: u64,
+    /// Volume that settled; 0 = withheld (DataRoom).
     pub volume: u64,
+    /// Distinct gate `investor_id`s across the settled fills (G2).
     pub n_investor_ids: u16,
     pub forced_sale: bool,
     pub print_policy_class: PrintPolicy,
+    /// [`print_commitment`] of the exact price and settled volume
+    /// (appended, #202).
+    pub price_commitment: [u8; 32],
+    /// AE-P2: a fill was skipped at settlement; this print was not offered
+    /// to mark-engine (not mark-eligible).
+    pub partial: bool,
 }
 
 // ── errors (append-only) ────────────────────────────────────────────────
@@ -1830,6 +2199,8 @@ pub enum AuctionError {
     NotRevealed,
     #[msg("order already screened")]
     AlreadyScreened,
+    #[msg("fill passes the gate's settle_check; settle it instead")]
+    FillSettleable,
 }
 
 #[cfg(test)]
@@ -1885,5 +2256,32 @@ mod tests {
         let mut q = p;
         q.min_reveals = 1;
         assert!(q.validate(0).is_err());
+    }
+
+    #[test]
+    fn the_print_event_is_redacted_per_policy() {
+        let (p, v) = (953_210, 10_000_000);
+        assert_eq!(disclose(PrintPolicy::Public, 100, p, v), (Some(p), Some(v)));
+        // A 1% band at 0.95: the floor of a 9,532-wide band.
+        assert_eq!(
+            disclose(PrintPolicy::Banded, 100, p, v),
+            (Some(953_210 / 9_532 * 9_532), Some(v))
+        );
+        assert_eq!(
+            disclose(PrintPolicy::AggregateOnly, 100, p, v),
+            (None, Some(v))
+        );
+        assert_eq!(disclose(PrintPolicy::DataRoom, 100, p, v), (None, None));
+        let s = Pubkey::new_unique();
+        assert_eq!(print_commitment(&s, p, v), print_commitment(&s, p, v));
+        assert_ne!(print_commitment(&s, p, v), print_commitment(&s, p + 1, v));
+        assert_ne!(print_commitment(&s, p, v), print_commitment(&s, p, v + 1));
+    }
+
+    #[test]
+    fn the_band_matches_mark_engine() {
+        // mark-engine's own `banding_and_param_bounds` cases.
+        assert_eq!(band(1_234_567, 100), 1_234_567 / 12_345 * 12_345);
+        assert_eq!(band(5, 100), 5, "width floors at one micro");
     }
 }
