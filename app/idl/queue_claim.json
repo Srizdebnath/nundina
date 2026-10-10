@@ -499,6 +499,95 @@
       ]
     },
     {
+      "name": "init_queue_config",
+      "docs": [
+        "QC-P1 / QC-P3 per-queue settings, in their own PDA so the live",
+        "queue accounts keep their layout. Issuer authority only."
+      ],
+      "discriminator": [
+        99,
+        55,
+        100,
+        8,
+        145,
+        173,
+        239,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  95,
+                  99,
+                  102,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "QueueConfigParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "pledge",
       "docs": [
         "QC-P4: pledge the claim into a liquidity-facility for `amount` USDC.",
@@ -600,11 +689,103 @@
       ]
     },
     {
+      "name": "quote_pv_model",
+      "docs": [
+        "QC-P3 (doc 06 §5): the claim's model value from the published",
+        "[`FillModel`] — `E[fill_t]` from gate %, queue depth and fill",
+        "history over the request's outstanding quantity, each priced at",
+        "the asset's `MARK_PROTECTIVE` and discounted per period by",
+        "`credit_math::pv_of_claim`. Without a published model it fails",
+        "[`QcError::NoFillModel`]: use `quote_pv` (the attested schedule)."
+      ],
+      "discriminator": [
+        91,
+        216,
+        73,
+        76,
+        184,
+        145,
+        145,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  95,
+                  99,
+                  102,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request"
+        },
+        {
+          "name": "asset_feed",
+          "docs": [
+            "The underlying asset's mark-engine feed."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "discount_bps_per_period",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "record_fill",
       "docs": [
         "QC-P4: a real window execution. The issuer pays `fill_qty × price`",
         "USDC into the claim's cash vault (rounded up: the issuer initiates)",
-        "and receives the redeemed NPCS from the request vault."
+        "and receives the redeemed NPCS from the request vault. `price` must",
+        "sit within [`FILL_PRICE_TOLERANCE_BPS`] of the asset feed's",
+        "redemption NAV (doc 09: redemption at published NAV). A",
+        "treasury-backed asset (its mint authority is npcs-treasury's signer)",
+        "redeems through `record_fill_redeem` instead."
       ],
       "discriminator": [
         111,
@@ -707,6 +888,12 @@
         },
         {
           "name": "asset_token_program"
+        },
+        {
+          "name": "asset_feed",
+          "docs": [
+            "The asset's mark-engine feed: the fill price is bound to its NAV."
+          ]
         }
       ],
       "args": [
@@ -716,6 +903,140 @@
         },
         {
           "name": "price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "record_fill_redeem",
+      "docs": [
+        "QC-P4 / doc 09 Path 5 + 8 for a treasury-backed asset (NPCS): the",
+        "window's `fill_qty` burns out of the request vault through",
+        "npcs-treasury `redeem_from`, which pays `fill_qty × NAV_effective`",
+        "USDC straight into the claim's cash vault. No issuer-supplied price:",
+        "the treasury reads the asset feed. The queue authority signs as the",
+        "treasury's issuer authority (they must be the same key)."
+      ],
+      "discriminator": [
+        133,
+        34,
+        40,
+        153,
+        77,
+        93,
+        84,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          },
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true
+        },
+        {
+          "name": "npcs_vault",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "cash_vault",
+          "writable": true,
+          "relations": [
+            "request"
+          ]
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  99,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Issuer: the queue authority and the treasury authority."
+          ],
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        },
+        {
+          "name": "asset_mint",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "asset_feed"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "treasury_vault",
+          "writable": true
+        },
+        {
+          "name": "treasury_signer"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "asset_token_program"
+        },
+        {
+          "name": "treasury_program",
+          "address": "4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_qty",
           "type": "u64"
         }
       ]
@@ -849,6 +1170,41 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "queue_config",
+          "docs": [
+            "= no config (SAS off). Always passed, so it cannot be skipped."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  95,
+                  99,
+                  102,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "attestation",
+          "docs": [
+            "checked in the handler when the config requires it."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -859,6 +1215,90 @@
         {
           "name": "window_date",
           "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "set_fill_model",
+      "docs": [
+        "QC-P3: publish this window's PV model inputs (the issuer authority",
+        "or the queue's attester, the transfer-agent bridge)."
+      ],
+      "discriminator": [
+        148,
+        216,
+        210,
+        93,
+        119,
+        185,
+        178,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  95,
+                  99,
+                  102,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "publisher",
+          "docs": [
+            "The issuer authority or the queue's attester."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "model",
+          "type": {
+            "defined": {
+              "name": "FillModel"
+            }
+          }
         }
       ]
     },
@@ -963,6 +1403,89 @@
         {
           "name": "pledgeable",
           "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_queue_config",
+      "docs": [
+        "Change the QC-P1 settings (issuer authority)."
+      ],
+      "discriminator": [
+        61,
+        231,
+        56,
+        61,
+        191,
+        39,
+        110,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "queue",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue.asset_mint",
+                "account": "Queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  95,
+                  99,
+                  102,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "queue"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "QueueConfigParams"
+            }
+          }
         }
       ]
     },
@@ -1109,6 +1632,19 @@
       ]
     },
     {
+      "name": "QueueConfig",
+      "discriminator": [
+        60,
+        225,
+        7,
+        92,
+        142,
+        69,
+        96,
+        68
+      ]
+    },
+    {
       "name": "Request",
       "discriminator": [
         125,
@@ -1147,6 +1683,19 @@
         195,
         36,
         65
+      ]
+    },
+    {
+      "name": "FillModelSet",
+      "discriminator": [
+        78,
+        16,
+        230,
+        145,
+        58,
+        189,
+        239,
+        182
       ]
     },
     {
@@ -1199,6 +1748,19 @@
         168,
         130,
         112
+      ]
+    },
+    {
+      "name": "QueueConfigSet",
+      "discriminator": [
+        238,
+        225,
+        151,
+        12,
+        56,
+        69,
+        150,
+        218
       ]
     },
     {
@@ -1334,6 +1896,41 @@
       "code": 6015,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority may do this"
+    },
+    {
+      "code": 6016,
+      "name": "FillPriceOffNav",
+      "msg": "fill price deviates from the asset feed's redemption NAV"
+    },
+    {
+      "code": 6017,
+      "name": "UseTreasuryRedeem",
+      "msg": "treasury-backed asset: redeem the fill through record_fill_redeem"
+    },
+    {
+      "code": 6018,
+      "name": "BadRedemptionAttestation",
+      "msg": "missing or invalid SAS redemption_request attestation (QC-P1)"
+    },
+    {
+      "code": 6019,
+      "name": "BadQueueConfig",
+      "msg": "queue config: SAS required without credential, schema and attester"
+    },
+    {
+      "code": 6020,
+      "name": "BadFillModel",
+      "msg": "fill model out of bounds"
+    },
+    {
+      "code": 6021,
+      "name": "NoFillModel",
+      "msg": "no fill model published: quote with quote_pv"
+    },
+    {
+      "code": 6022,
+      "name": "MarkUnavailable",
+      "msg": "no redemption NAV: the asset mark is Stale, Suspended or unpublished"
     }
   ],
   "types": [
@@ -1640,6 +2237,73 @@
       }
     },
     {
+      "name": "FillModel",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "gate_bps",
+            "docs": [
+              "Share of the fund redeemable per window (bps of `fund_supply`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fund_supply",
+            "docs": [
+              "Units outstanding in the fund (base units)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "queue_depth",
+            "docs": [
+              "Units requested across the whole queue, this request included."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fill_history_bps",
+            "docs": [
+              "Historical fill ratio per window (bps; 0 = no history yet)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "periods",
+            "docs": [
+              "Windows valued (1..=`MAX_MODEL_PERIODS`)."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillModelSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue",
+            "type": "pubkey"
+          },
+          {
+            "name": "model",
+            "type": {
+              "defined": {
+                "name": "FillModel"
+              }
+            }
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "FillRecorded",
       "type": {
         "kind": "struct",
@@ -1837,6 +2501,119 @@
           {
             "name": "signer_bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueConfig",
+      "docs": [
+        "Per-queue settings added after the queues went live (#202): its own",
+        "PDA `[\"queue_cfg\", queue]`, so `Queue` keeps its layout. No account =",
+        "every default (SAS off, no PV model)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue",
+            "type": "pubkey"
+          },
+          {
+            "name": "require_sas",
+            "type": "bool"
+          },
+          {
+            "name": "sas_credential",
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_schema",
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_attester",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_model",
+            "docs": [
+              "QC-P3 model inputs (`set_fill_model`)."
+            ],
+            "type": {
+              "defined": {
+                "name": "FillModel"
+              }
+            }
+          },
+          {
+            "name": "model_ts",
+            "docs": [
+              "When the model was published (0 = never)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueConfigParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "require_sas",
+            "docs": [
+              "QC-P1: requests need a SAS `redemption_request` attestation."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "sas_credential",
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_schema",
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_attester",
+            "docs": [
+              "The SAS signer of request attestations (issuer / TA bridge)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueConfigSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue",
+            "type": "pubkey"
+          },
+          {
+            "name": "require_sas",
+            "type": "bool"
+          },
+          {
+            "name": "sas_credential",
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_schema",
+            "type": "pubkey"
+          },
+          {
+            "name": "sas_attester",
+            "type": "pubkey"
           }
         ]
       }

@@ -38,6 +38,48 @@
       "args": []
     },
     {
+      "name": "cancel_pool",
+      "docs": [
+        "TE-P6 (E1): Warehousing → Cancelled, the junior never filled. No",
+        "coupons ran; every holder takes its collateral back with `refund`.",
+        "Authority only, evented with the reason document hash."
+      ],
+      "discriminator": [
+        211,
+        11,
+        27,
+        100,
+        252,
+        115,
+        57,
+        77
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "reason_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "create_pool",
       "docs": [
         "TE-P1: a pool exists only with its indenture hash and waterfall",
@@ -439,10 +481,12 @@
     {
       "name": "exit_junior",
       "docs": [
-        "TE-P5: a junior holder exits `amount` junior units for the pro-rata",
-        "collateral — only if the pool stays at or above its attachment",
-        "floor afterwards (otherwise the exit must be an auction sale to a",
-        "replacement holder)."
+        "TE-P5 / TE-P6 wind-down residual: once the senior is repaid",
+        "(Amortizing or WoundDown, senior principal zero) a junior holder",
+        "redeems `amount` junior units for the pro-rata collateral. While a",
+        "senior is outstanding junior is locked (`JuniorLocked`): never a",
+        "redemption out of the structure. The post-exit subordination check",
+        "stays as the guard."
       ],
       "discriminator": [
         93,
@@ -704,6 +748,168 @@
       ]
     },
     {
+      "name": "refund",
+      "docs": [
+        "TE-P6 refund path of a Cancelled pool: the holder burns `senior`",
+        "and `junior` units and takes their pro-rata share of the collateral",
+        "(principal-weighted, floored)."
+      ],
+      "discriminator": [
+        2,
+        96,
+        183,
+        251,
+        63,
+        208,
+        46,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "senior_mint",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "junior_mint",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "collateral_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "collateral_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "holder",
+          "signer": true
+        },
+        {
+          "name": "holder_senior",
+          "writable": true
+        },
+        {
+          "name": "holder_junior",
+          "writable": true
+        },
+        {
+          "name": "holder_collateral",
+          "writable": true
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tranche_token_program"
+        },
+        {
+          "name": "collateral_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "senior",
+          "type": "u64"
+        },
+        {
+          "name": "junior",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "relock_junior",
+      "docs": [
+        "TE-P2 lock-up: re-freeze a junior account (e.g. the replacement",
+        "holder's, which the session's settlement delivered into).",
+        "Permissionless."
+      ],
+      "discriminator": [
+        126,
+        38,
+        94,
+        245,
+        41,
+        250,
+        135,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "pool"
+        },
+        {
+          "name": "account",
+          "writable": true
+        },
+        {
+          "name": "junior_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tranche_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "set_pool_state",
       "docs": [
         "TE-P6: governed transitions (authority)."
@@ -875,6 +1081,19 @@
         59,
         246
       ]
+    },
+    {
+      "name": "Refunded",
+      "discriminator": [
+        35,
+        103,
+        149,
+        246,
+        196,
+        123,
+        221,
+        99
+      ]
     }
   ],
   "errors": [
@@ -952,6 +1171,11 @@
       "code": 6014,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority may do this"
+    },
+    {
+      "code": 6015,
+      "name": "JuniorLocked",
+      "msg": "junior is locked while a senior is outstanding (TE-P5)"
     }
   ],
   "types": [
@@ -1652,6 +1876,9 @@
           },
           {
             "name": "WoundDown"
+          },
+          {
+            "name": "Cancelled"
           }
         ]
       }
@@ -1745,6 +1972,34 @@
                 32
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Refunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "senior",
+            "type": "u64"
+          },
+          {
+            "name": "junior",
+            "type": "u64"
+          },
+          {
+            "name": "collateral",
+            "type": "u64"
           }
         ]
       }

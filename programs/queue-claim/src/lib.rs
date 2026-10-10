@@ -7,7 +7,9 @@
 //! - QC-P1 `request_redemption` escrows the holder's NPCS in a request
 //!   vault; only the configured attester (the issuer / transfer-agent
 //!   bridge) can `attest` it, with its queue rank and the expected fill
-//!   schedule.
+//!   schedule. A queue whose [`QueueConfig`] sets `require_sas` opens a
+//!   request only against a SAS `redemption_request` attestation naming it
+//!   ([`sas`]); off by default (no config account).
 //! - QC-P2 attestation mints the **claim position token**: a Token-2022
 //!   mint per request, supply 1, decimals 0, mint and freeze authority =
 //!   this program's signer PDA. The holder's token account is frozen
@@ -20,10 +22,15 @@
 //!   mark-engine feed). `quote_pv` computes the claim's model value with
 //!   `credit_math::pv_of_claim` from the attested schedule and the
 //!   underlying asset's `MARK_PROTECTIVE` — what the nav-publisher
-//!   publishes into the claim's feed.
+//!   publishes into the claim's feed. `quote_pv_model` derives the
+//!   expected fills from the published gate %, queue depth and fill
+//!   history instead ([`model`], doc 06 §5); `quote_pv` is the fallback.
 //! - QC-P4 pledge path: `pledge` hands the token to `liquidity-facility`
 //!   for an advance; `record_fill` books each real window execution (cash
-//!   in, NPCS out to the issuer); `sweep_pledged` sends a pledged claim's
+//!   in, NPCS out to the issuer) at a price bound to the asset feed's
+//!   published NAV; for a treasury-backed asset (NPCS) `record_fill_redeem`
+//!   burns the units through npcs-treasury at NAV instead and the treasury
+//!   pays the claim's cash vault (doc 09 Path 5/8); `sweep_pledged` sends a pledged claim's
 //!   proceeds through rails `sweep_proceeds` — facility repayment first,
 //!   then the holder. An unpledged claim's holder `collect`s.
 //! - QC-P5 claims are a separate mint: they never touch the NPCS holder
@@ -44,6 +51,11 @@ use anchor_spl::token_interface::{
 use credit_math::pv::{pv_of_claim, ExpectedFill};
 use mark_engine::Feed;
 
+pub mod model;
+pub mod sas;
+
+pub use model::FillModel;
+
 declare_id!("2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4");
 
 pub const SIGNER_SEED: &[u8] = b"qc_signer";
@@ -53,8 +65,13 @@ pub const NPCS_VAULT_SEED: &[u8] = b"npcs";
 pub const CASH_VAULT_SEED: &[u8] = b"cash";
 pub const CLAIM_MINT_SEED: &[u8] = b"claim_mint";
 pub const CLAIM_ACCOUNT_SEED: &[u8] = b"claim_account";
+pub const QUEUE_CONFIG_SEED: &[u8] = b"queue_cfg";
 /// Expected-fill schedule entries per request.
 pub const MAX_SCHEDULE: usize = 8;
+/// QC-P4: a recorded fill price may deviate from the asset feed's
+/// redemption NAV (`NAV_effective`, Fresh or Warned mark) by at most this.
+pub const FILL_PRICE_TOLERANCE_BPS: u64 = 50;
+const BPS: u64 = 10_000;
 
 pub fn signer_pda() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SIGNER_SEED], &crate::ID)
@@ -92,6 +109,36 @@ pub mod queue_claim {
     ) -> Result<()> {
         require!(qty > 0, QcError::ZeroAmount);
         let now = Clock::get()?.unix_timestamp;
+        // QC-P1: a SAS-gated queue opens only an attested request.
+        if let Some(cfg) = load_config(&ctx.accounts.queue_config)? {
+            if cfg.require_sas {
+                let att = ctx
+                    .accounts
+                    .attestation
+                    .as_ref()
+                    .ok_or(QcError::BadRedemptionAttestation)?;
+                let expected = sas::RedemptionRequestData {
+                    request_id: ctx.accounts.queue.requests,
+                    qty,
+                    window_date,
+                };
+                let data = att.try_borrow_data()?;
+                if let Err(reason) = sas::check_request_attestation(
+                    att.owner,
+                    att.key,
+                    &data,
+                    &cfg.sas_credential,
+                    &cfg.sas_schema,
+                    &cfg.sas_attester,
+                    &ctx.accounts.holder.key(),
+                    &expected,
+                    now,
+                ) {
+                    msg!("redemption attestation rejected: {:?}", reason);
+                    return err!(QcError::BadRedemptionAttestation);
+                }
+            }
+        }
         token_interface::transfer_checked(
             CpiContext::new(
                 ctx.accounts.asset_token_program.key(),
@@ -292,8 +339,13 @@ pub mod queue_claim {
 
     /// QC-P4: a real window execution. The issuer pays `fill_qty × price`
     /// USDC into the claim's cash vault (rounded up: the issuer initiates)
-    /// and receives the redeemed NPCS from the request vault.
+    /// and receives the redeemed NPCS from the request vault. `price` must
+    /// sit within [`FILL_PRICE_TOLERANCE_BPS`] of the asset feed's
+    /// redemption NAV (doc 09: redemption at published NAV). A
+    /// treasury-backed asset (its mint authority is npcs-treasury's signer)
+    /// redeems through `record_fill_redeem` instead.
     pub fn record_fill(ctx: Context<RecordFill>, fill_qty: u64, price: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
         let r = &ctx.accounts.request;
         require!(
             matches!(r.state, ClaimState::Attested | ClaimState::PartiallyFilled),
@@ -302,6 +354,12 @@ pub mod queue_claim {
         require!(fill_qty > 0 && price > 0, QcError::ZeroAmount);
         let left = r.qty - r.filled_qty;
         require!(fill_qty <= left, QcError::OverFill);
+        require!(
+            !treasury_backed(&ctx.accounts.asset_mint),
+            QcError::UseTreasuryRedeem
+        );
+        let nav_price = redemption_price(&ctx.accounts.asset_feed, now)?;
+        require!(within_tolerance(price, nav_price), QcError::FillPriceOffNav);
         let decimals = ctx.accounts.asset_mint.decimals;
         let cash = credit_math::checked_ceil_div(
             u128::from(fill_qty) * u128::from(price),
@@ -338,21 +396,125 @@ pub mod queue_claim {
             fill_qty,
             decimals,
         )?;
-        let r = &mut ctx.accounts.request;
-        r.filled_qty += fill_qty;
-        r.cash_received = r.cash_received.saturating_add(cash);
-        r.state = if r.filled_qty == r.qty {
-            ClaimState::Retired
-        } else {
-            ClaimState::PartiallyFilled
-        };
-        emit!(FillRecorded {
-            request: r.key(),
+        book_fill(&mut ctx.accounts.request, fill_qty, price, cash);
+        Ok(())
+    }
+
+    /// QC-P4 / doc 09 Path 5 + 8 for a treasury-backed asset (NPCS): the
+    /// window's `fill_qty` burns out of the request vault through
+    /// npcs-treasury `redeem_from`, which pays `fill_qty × NAV_effective`
+    /// USDC straight into the claim's cash vault. No issuer-supplied price:
+    /// the treasury reads the asset feed. The queue authority signs as the
+    /// treasury's issuer authority (they must be the same key).
+    pub fn record_fill_redeem(ctx: Context<RecordFillRedeem>, fill_qty: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let r = &ctx.accounts.request;
+        require!(
+            matches!(r.state, ClaimState::Attested | ClaimState::PartiallyFilled),
+            QcError::WrongState
+        );
+        require!(fill_qty > 0, QcError::ZeroAmount);
+        require!(fill_qty <= r.qty - r.filled_qty, QcError::OverFill);
+        let price = redemption_price(&ctx.accounts.asset_feed, now)?;
+        let before = ctx.accounts.cash_vault.amount;
+        let bump = ctx.accounts.queue.signer_bump;
+        let seeds: &[&[u8]] = &[SIGNER_SEED, &[bump]];
+        npcs_treasury::cpi::redeem_from(
+            CpiContext::new_with_signer(
+                ctx.accounts.treasury_program.key(),
+                npcs_treasury::cpi::accounts::RedeemFrom {
+                    treasury: ctx.accounts.treasury.to_account_info(),
+                    vault: ctx.accounts.treasury_vault.to_account_info(),
+                    signer: ctx.accounts.treasury_signer.to_account_info(),
+                    asset_mint: ctx.accounts.asset_mint.to_account_info(),
+                    usdc_mint: ctx.accounts.usdc_mint.to_account_info(),
+                    feed: ctx.accounts.asset_feed.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                    holder: ctx.accounts.signer.to_account_info(),
+                    holder_asset: ctx.accounts.npcs_vault.to_account_info(),
+                    usdc_destination: ctx.accounts.cash_vault.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                    asset_token_program: ctx.accounts.asset_token_program.to_account_info(),
+                },
+                &[seeds],
+            ),
             fill_qty,
-            price,
-            cash,
-            filled_qty: r.filled_qty,
-            state: r.state,
+        )?;
+        ctx.accounts.cash_vault.reload()?;
+        let cash = ctx.accounts.cash_vault.amount.saturating_sub(before);
+        book_fill(&mut ctx.accounts.request, fill_qty, price, cash);
+        Ok(())
+    }
+
+    /// QC-P1 / QC-P3 per-queue settings, in their own PDA so the live
+    /// queue accounts keep their layout. Issuer authority only.
+    pub fn init_queue_config(
+        ctx: Context<InitQueueConfig>,
+        params: QueueConfigParams,
+    ) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        c.queue = ctx.accounts.queue.key();
+        c.bump = ctx.bumps.config;
+        apply_config(c, &params)
+    }
+
+    /// Change the QC-P1 settings (issuer authority).
+    pub fn set_queue_config(ctx: Context<SetQueueConfig>, params: QueueConfigParams) -> Result<()> {
+        apply_config(&mut ctx.accounts.config, &params)
+    }
+
+    /// QC-P3: publish this window's PV model inputs (the issuer authority
+    /// or the queue's attester, the transfer-agent bridge).
+    pub fn set_fill_model(ctx: Context<SetFillModel>, model: FillModel) -> Result<()> {
+        let q = &ctx.accounts.queue;
+        let who = ctx.accounts.publisher.key();
+        require!(
+            who == q.authority || who == q.attester,
+            QcError::NotAttester
+        );
+        require!(model.is_valid(), QcError::BadFillModel);
+        let c = &mut ctx.accounts.config;
+        c.fill_model = model;
+        c.model_ts = Clock::get()?.unix_timestamp;
+        emit!(FillModelSet {
+            queue: q.key(),
+            model,
+            at: c.model_ts,
+        });
+        Ok(())
+    }
+
+    /// QC-P3 (doc 06 §5): the claim's model value from the published
+    /// [`FillModel`] — `E[fill_t]` from gate %, queue depth and fill
+    /// history over the request's outstanding quantity, each priced at
+    /// the asset's `MARK_PROTECTIVE` and discounted per period by
+    /// `credit_math::pv_of_claim`. Without a published model it fails
+    /// [`QcError::NoFillModel`]: use `quote_pv` (the attested schedule).
+    pub fn quote_pv_model(ctx: Context<QuotePvModel>, discount_bps_per_period: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let c = &ctx.accounts.config;
+        require!(c.model_ts > 0, QcError::NoFillModel);
+        let r = &ctx.accounts.request;
+        let feed = &ctx.accounts.asset_feed;
+        let price = u128::from(feed.pico_to_price(feed.mark_protective(now)?)?);
+        let fills: Vec<ExpectedFill> = c
+            .fill_model
+            .expected_fills(r.qty - r.filled_qty)
+            .into_iter()
+            .map(|(period, qty)| ExpectedFill {
+                period,
+                qty_base: u128::from(qty),
+                price_micros: price,
+            })
+            .collect();
+        let pv = pv_of_claim(&fills, discount_bps_per_period).map_err(|_| QcError::MathOverflow)?;
+        let pv = u64::try_from(pv).map_err(|_| QcError::MathOverflow)?;
+        emit!(ClaimPv {
+            request: r.key(),
+            pv,
+            discount_bps_per_period,
+            mark_price: price as u64,
+            at: now,
         });
         Ok(())
     }
@@ -636,6 +798,81 @@ fn pay_out<'info>(
     )
 }
 
+/// Book a window fill on the request (QC-P2 state, QC-P4 cash).
+fn book_fill(r: &mut Account<Request>, fill_qty: u64, price: u64, cash: u64) {
+    r.filled_qty += fill_qty;
+    r.cash_received = r.cash_received.saturating_add(cash);
+    r.state = if r.filled_qty == r.qty {
+        ClaimState::Retired
+    } else {
+        ClaimState::PartiallyFilled
+    };
+    emit!(FillRecorded {
+        request: r.key(),
+        fill_qty,
+        price,
+        cash,
+        filled_qty: r.filled_qty,
+        state: r.state,
+    });
+}
+
+/// The window's redemption price (micro-USDC per whole unit): the asset
+/// feed's `NAV_effective` on a Fresh or Warned mark — the NAV npcs-treasury
+/// redeems at (doc 09 I2). Stale / Suspended: no fills (QC-P2 Frozen).
+fn redemption_price(feed: &Feed, now: i64) -> Result<u64> {
+    require!(feed.allows_liquidation(now), QcError::MarkUnavailable);
+    let nav = feed.nav_effective(now)?;
+    require!(nav > 0, QcError::MarkUnavailable);
+    feed.pico_to_price(nav)
+}
+
+/// `|price − nav| ≤ nav × FILL_PRICE_TOLERANCE_BPS`.
+pub fn within_tolerance(price: u64, nav_price: u64) -> bool {
+    let diff = u128::from(price.abs_diff(nav_price));
+    diff * u128::from(BPS) <= u128::from(nav_price) * u128::from(FILL_PRICE_TOLERANCE_BPS)
+}
+
+/// The asset is treasury-backed NPCS: its mint authority is npcs-treasury's
+/// signer PDA for this mint, so redemption must burn through the treasury.
+pub fn treasury_backed(mint: &InterfaceAccount<Mint>) -> bool {
+    let treasury = npcs_treasury::treasury_pda(&mint.key()).0;
+    let signer = npcs_treasury::signer_pda(&treasury).0;
+    mint.mint_authority == Some(signer).into()
+}
+
+/// The queue's config, if it has one (pinned by seeds in the accounts).
+fn load_config(ai: &UncheckedAccount) -> Result<Option<QueueConfig>> {
+    if ai.owner != &crate::ID || ai.data_is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(QueueConfig::try_deserialize(
+        &mut &ai.try_borrow_data()?[..],
+    )?))
+}
+
+fn apply_config(c: &mut Account<QueueConfig>, p: &QueueConfigParams) -> Result<()> {
+    require!(
+        !p.require_sas
+            || (p.sas_credential != Pubkey::default()
+                && p.sas_schema != Pubkey::default()
+                && p.sas_attester != Pubkey::default()),
+        QcError::BadQueueConfig
+    );
+    c.require_sas = p.require_sas;
+    c.sas_credential = p.sas_credential;
+    c.sas_schema = p.sas_schema;
+    c.sas_attester = p.sas_attester;
+    emit!(QueueConfigSet {
+        queue: c.queue,
+        require_sas: p.require_sas,
+        sas_credential: p.sas_credential,
+        sas_schema: p.sas_schema,
+        sas_attester: p.sas_attester,
+    });
+    Ok(())
+}
+
 // ── state ───────────────────────────────────────────────────────────────
 
 /// QC-P2 states (doc 06 §5). Transferable / Pledgeable are the
@@ -704,6 +941,34 @@ pub struct Request {
     pub bump: u8,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueueConfigParams {
+    /// QC-P1: requests need a SAS `redemption_request` attestation.
+    pub require_sas: bool,
+    pub sas_credential: Pubkey,
+    pub sas_schema: Pubkey,
+    /// The SAS signer of request attestations (issuer / TA bridge).
+    pub sas_attester: Pubkey,
+}
+
+/// Per-queue settings added after the queues went live (#202): its own
+/// PDA `["queue_cfg", queue]`, so `Queue` keeps its layout. No account =
+/// every default (SAS off, no PV model).
+#[account]
+#[derive(InitSpace)]
+pub struct QueueConfig {
+    pub queue: Pubkey,
+    pub require_sas: bool,
+    pub sas_credential: Pubkey,
+    pub sas_schema: Pubkey,
+    pub sas_attester: Pubkey,
+    /// QC-P3 model inputs (`set_fill_model`).
+    pub fill_model: FillModel,
+    /// When the model was published (0 = never).
+    pub model_ts: i64,
+    pub bump: u8,
+}
+
 // ── accounts ────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
@@ -761,6 +1026,13 @@ pub struct RequestRedemption<'info> {
     pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
     pub asset_token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+    /// CHECK: the queue's [`QueueConfig`] address, pinned by seeds; empty
+    /// = no config (SAS off). Always passed, so it cannot be skipped.
+    #[account(seeds = [QUEUE_CONFIG_SEED, queue.key().as_ref()], bump)]
+    pub queue_config: UncheckedAccount<'info>,
+    /// CHECK: QC-P1 SAS `redemption_request` attestation; decoded and
+    /// checked in the handler when the config requires it.
+    pub attestation: Option<UncheckedAccount<'info>>,
 }
 
 #[derive(Accounts)]
@@ -865,6 +1137,92 @@ pub struct RecordFill<'info> {
     pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub asset_token_program: Interface<'info, TokenInterface>,
+    /// The asset's mark-engine feed: the fill price is bound to its NAV.
+    #[account(constraint = asset_feed.asset_mint == queue.asset_mint @ QcError::MintMismatch)]
+    pub asset_feed: Box<Account<'info, Feed>>,
+}
+
+#[derive(Accounts)]
+pub struct RecordFillRedeem<'info> {
+    #[account(seeds = [QUEUE_SEED, queue.asset_mint.as_ref()], bump = queue.bump, has_one = authority @ QcError::NotIssuer)]
+    pub queue: Box<Account<'info, Queue>>,
+    #[account(mut, has_one = queue @ QcError::MintMismatch, has_one = npcs_vault @ QcError::MintMismatch, has_one = cash_vault @ QcError::MintMismatch)]
+    pub request: Box<Account<'info, Request>>,
+    #[account(mut)]
+    pub npcs_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut)]
+    pub cash_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the signer PDA (request-vault owner: consents to the burn).
+    #[account(seeds = [SIGNER_SEED], bump = queue.signer_bump)]
+    pub signer: UncheckedAccount<'info>,
+    /// Issuer: the queue authority and the treasury authority.
+    pub authority: Signer<'info>,
+    #[account(mut, address = queue.asset_mint @ QcError::MintMismatch)]
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(address = queue.usdc_mint @ QcError::MintMismatch)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = asset_feed.asset_mint == queue.asset_mint @ QcError::MintMismatch)]
+    pub asset_feed: Box<Account<'info, Feed>>,
+    /// CHECK: npcs-treasury's treasury for the asset (checked by the treasury).
+    #[account(mut)]
+    pub treasury: UncheckedAccount<'info>,
+    /// CHECK: the treasury's USDC vault (checked by the treasury).
+    #[account(mut)]
+    pub treasury_vault: UncheckedAccount<'info>,
+    /// CHECK: the treasury's signer PDA (checked by the treasury).
+    pub treasury_signer: UncheckedAccount<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub asset_token_program: Interface<'info, TokenInterface>,
+    pub treasury_program: Program<'info, npcs_treasury::program::NpcsTreasury>,
+}
+
+#[derive(Accounts)]
+pub struct InitQueueConfig<'info> {
+    #[account(seeds = [QUEUE_SEED, queue.asset_mint.as_ref()], bump = queue.bump, has_one = authority @ QcError::NotIssuer)]
+    pub queue: Box<Account<'info, Queue>>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + QueueConfig::INIT_SPACE,
+        seeds = [QUEUE_CONFIG_SEED, queue.key().as_ref()],
+        bump
+    )]
+    pub config: Box<Account<'info, QueueConfig>>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetQueueConfig<'info> {
+    #[account(seeds = [QUEUE_SEED, queue.asset_mint.as_ref()], bump = queue.bump, has_one = authority @ QcError::NotIssuer)]
+    pub queue: Box<Account<'info, Queue>>,
+    #[account(mut, seeds = [QUEUE_CONFIG_SEED, queue.key().as_ref()], bump = config.bump)]
+    pub config: Box<Account<'info, QueueConfig>>,
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SetFillModel<'info> {
+    #[account(seeds = [QUEUE_SEED, queue.asset_mint.as_ref()], bump = queue.bump)]
+    pub queue: Box<Account<'info, Queue>>,
+    #[account(mut, seeds = [QUEUE_CONFIG_SEED, queue.key().as_ref()], bump = config.bump)]
+    pub config: Box<Account<'info, QueueConfig>>,
+    /// The issuer authority or the queue's attester.
+    pub publisher: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct QuotePvModel<'info> {
+    #[account(seeds = [QUEUE_SEED, queue.asset_mint.as_ref()], bump = queue.bump)]
+    pub queue: Box<Account<'info, Queue>>,
+    #[account(seeds = [QUEUE_CONFIG_SEED, queue.key().as_ref()], bump = config.bump)]
+    pub config: Box<Account<'info, QueueConfig>>,
+    #[account(has_one = queue @ QcError::MintMismatch)]
+    pub request: Box<Account<'info, Request>>,
+    /// The underlying asset's mark-engine feed.
+    #[account(constraint = asset_feed.asset_mint == queue.asset_mint @ QcError::MintMismatch)]
+    pub asset_feed: Box<Account<'info, Feed>>,
 }
 
 #[derive(Accounts)]
@@ -1038,6 +1396,22 @@ pub struct StateChanged {
     pub state: ClaimState,
 }
 
+#[event]
+pub struct QueueConfigSet {
+    pub queue: Pubkey,
+    pub require_sas: bool,
+    pub sas_credential: Pubkey,
+    pub sas_schema: Pubkey,
+    pub sas_attester: Pubkey,
+}
+
+#[event]
+pub struct FillModelSet {
+    pub queue: Pubkey,
+    pub model: FillModel,
+    pub at: i64,
+}
+
 // ── errors (append-only) ────────────────────────────────────────────────
 
 #[error_code]
@@ -1074,4 +1448,51 @@ pub enum QcError {
     MathOverflow,
     #[msg("Only the program's upgrade authority may do this")]
     NotUpgradeAuthority,
+    #[msg("fill price deviates from the asset feed's redemption NAV")]
+    FillPriceOffNav,
+    #[msg("treasury-backed asset: redeem the fill through record_fill_redeem")]
+    UseTreasuryRedeem,
+    #[msg("missing or invalid SAS redemption_request attestation (QC-P1)")]
+    BadRedemptionAttestation,
+    #[msg("queue config: SAS required without credential, schema and attester")]
+    BadQueueConfig,
+    #[msg("fill model out of bounds")]
+    BadFillModel,
+    #[msg("no fill model published: quote with quote_pv")]
+    NoFillModel,
+    #[msg("no redemption NAV: the asset mark is Stale, Suspended or unpublished")]
+    MarkUnavailable,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fill_price_tolerance_is_fifty_bps_of_nav() {
+        assert!(within_tolerance(1_000_000, 1_000_000));
+        assert!(within_tolerance(1_005_000, 1_000_000));
+        assert!(within_tolerance(995_000, 1_000_000));
+        assert!(!within_tolerance(1_005_001, 1_000_000));
+        assert!(!within_tolerance(994_999, 1_000_000));
+        assert!(!within_tolerance(1, 0));
+        assert!(within_tolerance(0, 0));
+    }
+
+    #[test]
+    fn treasury_signer_is_derived_from_the_mint() {
+        let mint = Pubkey::new_unique();
+        let t = npcs_treasury::treasury_pda(&mint).0;
+        assert_eq!(
+            t,
+            Pubkey::find_program_address(&[b"treasury", mint.as_ref()], &npcs_treasury::ID).0
+        );
+        assert_ne!(npcs_treasury::signer_pda(&t).0, t);
+    }
+
+    #[test]
+    fn config_space_fits_the_model() {
+        // discriminator + queue + flag + 3 keys + model (4×u64 + u32) + ts + bump
+        assert_eq!(QueueConfig::INIT_SPACE, 32 + 1 + 96 + 36 + 8 + 1);
+    }
 }

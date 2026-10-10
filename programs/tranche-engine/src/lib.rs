@@ -8,7 +8,8 @@
 //! - TE-P2 `deposit` takes NPCS collateral, values it at mark-engine's
 //!   `MARK_PROTECTIVE`, and mints senior and junior Token-2022 tranches at
 //!   the pool's attachment point. Junior accounts are frozen (lock-up);
-//!   a junior exit goes through `exit_junior`, checked by TE-P5.
+//!   `relock_junior` (permissionless) re-freezes any junior account a sale
+//!   delivered into.
 //! - TE-P3 three books: `unrealised_mark` (mark moves, `mark`; principal
 //!   untouched), `realised_loss` (`realise_loss` writes principal down
 //!   junior → reserve → senior via `credit_math::apply_loss`) and
@@ -21,10 +22,21 @@
 //!   granted COUPON), every line evented there; this program books the
 //!   reserve and the amortization.
 //! - TE-P5 subordination invariant `junior_nav / total ≥ attachment_min`,
-//!   checked before a junior exit (rejected) and after marks and losses
-//!   (pool → Impaired).
+//!   checked after marks and losses (pool → Impaired). Junior is locked
+//!   while a senior is outstanding: there is no redemption out of the
+//!   structure, so the senior keeps its cover. `exit_junior` is the
+//!   wind-down residual only (senior repaid, Amortizing / WoundDown), with
+//!   the subordination check kept. Decision (#202 TE-P5, doc 06 §632): the
+//!   sale to a replacement holder through an auction session is roadmap,
+//!   not built — a junior holder or the signer PDA can sell only units the
+//!   gate's `settle_check` sees as seasoned lots, and nothing books gate
+//!   lots for tranche-minted junior or pooled collateral yet (the custody
+//!   path liquidity-facility uses, LF-P5, would be needed here too).
 //! - TE-P6 states Warehousing → Active → Standstill / Amortizing →
-//!   Impaired → WoundDown; checked u128 arithmetic throughout.
+//!   Impaired → WoundDown, and Warehousing → Cancelled ("junior never
+//!   filled", E1: `cancel_pool`, holders `refund` pro rata). A wind-down
+//!   sale of the collateral is the issuer's manual procedure until the
+//!   auction path above exists. Checked u128 arithmetic throughout.
 //! - TE-P7 `human_override`: authority only, evented with the hash of the
 //!   off-chain authority document.
 
@@ -453,17 +465,20 @@ pub mod tranche_engine {
         Ok(())
     }
 
-    /// TE-P5: a junior holder exits `amount` junior units for the pro-rata
-    /// collateral — only if the pool stays at or above its attachment
-    /// floor afterwards (otherwise the exit must be an auction sale to a
-    /// replacement holder).
+    /// TE-P5 / TE-P6 wind-down residual: once the senior is repaid
+    /// (Amortizing or WoundDown, senior principal zero) a junior holder
+    /// redeems `amount` junior units for the pro-rata collateral. While a
+    /// senior is outstanding junior is locked (`JuniorLocked`): never a
+    /// redemption out of the structure. The post-exit subordination check
+    /// stays as the guard.
     pub fn exit_junior(ctx: Context<ExitJunior>, amount: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         require!(amount > 0, TeError::ZeroAmount);
         let p = &ctx.accounts.pool;
         require!(
-            matches!(p.state, PoolState::Active | PoolState::Amortizing),
-            TeError::WrongState
+            matches!(p.state, PoolState::Amortizing | PoolState::WoundDown)
+                && p.senior_principal == 0,
+            TeError::JuniorLocked
         );
         let supply = ctx.accounts.junior_mint.supply;
         require!(amount <= supply, TeError::ZeroAmount);
@@ -491,10 +506,11 @@ pub mod tranche_engine {
             )
             .map_err(|_| TeError::MathOverflow)?
         };
-        // Pre-state-change check of the post-exit pool.
+        // Pre-state-change check of the post-exit pool (TE-P5).
         let value_after = value.saturating_sub(principal_out);
         require!(
-            subordination_ok(p.senior_principal, value_after, p.params.attachment_bps),
+            p.senior_principal == 0
+                || subordination_ok(p.senior_principal, value_after, p.params.attachment_bps),
             TeError::SubordinationBreach
         );
         let seeds: &[&[u8]] = &[SIGNER_SEED, &[p.signer_bump]];
@@ -555,6 +571,140 @@ pub mod tranche_engine {
             collateral: qty_out,
         });
         Ok(())
+    }
+
+    /// TE-P6 (E1): Warehousing → Cancelled, the junior never filled. No
+    /// coupons ran; every holder takes its collateral back with `refund`.
+    /// Authority only, evented with the reason document hash.
+    pub fn cancel_pool(ctx: Context<PoolAdmin>, reason_hash: [u8; 32]) -> Result<()> {
+        let p = &mut ctx.accounts.pool;
+        require!(p.state == PoolState::Warehousing, TeError::WrongState);
+        set_state(p, PoolState::Cancelled, reason_hash);
+        Ok(())
+    }
+
+    /// TE-P6 refund path of a Cancelled pool: the holder burns `senior`
+    /// and `junior` units and takes their pro-rata share of the collateral
+    /// (principal-weighted, floored).
+    pub fn refund(ctx: Context<Refund>, senior: u64, junior: u64) -> Result<()> {
+        require!(senior > 0 || junior > 0, TeError::ZeroAmount);
+        let p = &ctx.accounts.pool;
+        require!(p.state == PoolState::Cancelled, TeError::WrongState);
+        let n = |v: u128| u64::try_from(v).map_err(|_| error!(TeError::MathOverflow));
+        let share = |principal: u64, amount: u64, supply: u64| -> Result<u64> {
+            if amount == 0 {
+                return Ok(0);
+            }
+            require!(amount <= supply, TeError::ZeroAmount);
+            n(mul_div(
+                u128::from(principal),
+                u128::from(amount),
+                u128::from(supply),
+            )
+            .map_err(|_| TeError::MathOverflow)?)
+        };
+        let s_out = share(p.senior_principal, senior, ctx.accounts.senior_mint.supply)?;
+        let j_out = share(p.junior_principal, junior, ctx.accounts.junior_mint.supply)?;
+        let total = p.senior_principal + p.junior_principal;
+        let qty_out = refund_collateral(p.collateral_qty, s_out + j_out, total)?;
+        let seeds: &[&[u8]] = &[SIGNER_SEED, &[p.signer_bump]];
+        let tp = ctx.accounts.tranche_token_program.key();
+        for (mint, from, amount, locked) in [
+            (
+                &ctx.accounts.senior_mint,
+                &ctx.accounts.holder_senior,
+                senior,
+                false,
+            ),
+            (
+                &ctx.accounts.junior_mint,
+                &ctx.accounts.holder_junior,
+                junior,
+                true,
+            ),
+        ] {
+            if amount == 0 {
+                continue;
+            }
+            if from.is_frozen() {
+                token_interface::thaw_account(CpiContext::new_with_signer(
+                    tp,
+                    ThawAccount {
+                        account: from.to_account_info(),
+                        mint: mint.to_account_info(),
+                        authority: ctx.accounts.signer.to_account_info(),
+                    },
+                    &[seeds],
+                ))?;
+            }
+            token_interface::burn(
+                CpiContext::new(
+                    tp,
+                    Burn {
+                        mint: mint.to_account_info(),
+                        from: from.to_account_info(),
+                        authority: ctx.accounts.holder.to_account_info(),
+                    },
+                ),
+                amount,
+            )?;
+            if locked {
+                token_interface::freeze_account(CpiContext::new_with_signer(
+                    tp,
+                    FreezeAccount {
+                        account: from.to_account_info(),
+                        mint: mint.to_account_info(),
+                        authority: ctx.accounts.signer.to_account_info(),
+                    },
+                    &[seeds],
+                ))?;
+            }
+        }
+        if qty_out > 0 {
+            token_interface::transfer_checked(
+                CpiContext::new_with_signer(
+                    ctx.accounts.collateral_token_program.key(),
+                    TransferChecked {
+                        from: ctx.accounts.collateral_vault.to_account_info(),
+                        mint: ctx.accounts.collateral_mint.to_account_info(),
+                        to: ctx.accounts.holder_collateral.to_account_info(),
+                        authority: ctx.accounts.signer.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                qty_out,
+                ctx.accounts.collateral_mint.decimals,
+            )?;
+        }
+        let p = &mut ctx.accounts.pool;
+        p.senior_principal -= s_out;
+        p.junior_principal -= j_out;
+        p.collateral_qty -= qty_out;
+        emit!(Refunded {
+            pool: p.key(),
+            holder: ctx.accounts.holder.key(),
+            senior,
+            junior,
+            collateral: qty_out,
+        });
+        Ok(())
+    }
+
+    /// TE-P2 lock-up: re-freeze a junior account (e.g. the replacement
+    /// holder's, which the session's settlement delivered into).
+    /// Permissionless.
+    pub fn relock_junior(ctx: Context<RelockJunior>) -> Result<()> {
+        let p = &ctx.accounts.pool;
+        let seeds: &[&[u8]] = &[SIGNER_SEED, &[p.signer_bump]];
+        require!(!ctx.accounts.account.is_frozen(), TeError::WrongState);
+        lock(
+            &ctx.accounts.account,
+            &ctx.accounts.junior_mint,
+            &ctx.accounts.signer,
+            ctx.accounts.tranche_token_program.key(),
+            seeds,
+            true,
+        )
     }
 
     /// TE-P6: governed transitions (authority).
@@ -620,6 +770,62 @@ pub fn subordination_ok(senior: u64, total: u64, attachment_bps: u64) -> bool {
     u128::from(junior_nav) * u128::from(BPS) >= u128::from(total) * u128::from(attachment_bps)
 }
 
+/// TE-P6 refund: collateral for `principal_out` of `total_principal`,
+/// floored (the refunding holder initiates).
+pub fn refund_collateral(
+    collateral_qty: u64,
+    principal_out: u64,
+    total_principal: u64,
+) -> Result<u64> {
+    if total_principal == 0 {
+        return Ok(0);
+    }
+    require!(principal_out <= total_principal, TeError::MathOverflow);
+    let v = mul_div(
+        u128::from(collateral_qty),
+        u128::from(principal_out),
+        u128::from(total_principal),
+    )
+    .map_err(|_| TeError::MathOverflow)?;
+    u64::try_from(v).map_err(|_| error!(TeError::MathOverflow))
+}
+
+/// Freeze (`frozen`) or thaw a junior account with the signer PDA, if it
+/// is not already in that state.
+fn lock<'info>(
+    account: &InterfaceAccount<'info, TokenAccount>,
+    mint: &InterfaceAccount<'info, Mint>,
+    signer: &UncheckedAccount<'info>,
+    tp: Pubkey,
+    seeds: &[&[u8]],
+    frozen: bool,
+) -> Result<()> {
+    if account.is_frozen() == frozen {
+        return Ok(());
+    }
+    if frozen {
+        token_interface::freeze_account(CpiContext::new_with_signer(
+            tp,
+            FreezeAccount {
+                account: account.to_account_info(),
+                mint: mint.to_account_info(),
+                authority: signer.to_account_info(),
+            },
+            &[seeds],
+        ))
+    } else {
+        token_interface::thaw_account(CpiContext::new_with_signer(
+            tp,
+            ThawAccount {
+                account: account.to_account_info(),
+                mint: mint.to_account_info(),
+                authority: signer.to_account_info(),
+            },
+            &[seeds],
+        ))
+    }
+}
+
 fn set_state(p: &mut Pool, to: PoolState, doc: [u8; 32]) {
     emit!(PoolStateChanged {
         pool_id: p.pool_id,
@@ -652,6 +858,9 @@ pub enum PoolState {
     Amortizing,
     Impaired,
     WoundDown,
+    /// E1: junior never filled; collateral refunded (appended: variant
+    /// indices are wire-stable).
+    Cancelled,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
@@ -896,6 +1105,50 @@ pub struct ExitJunior<'info> {
     pub collateral_token_program: Interface<'info, TokenInterface>,
 }
 
+#[derive(Accounts)]
+pub struct Refund<'info> {
+    #[account(
+        mut,
+        has_one = senior_mint @ TeError::FeedMismatch,
+        has_one = junior_mint @ TeError::FeedMismatch,
+        has_one = collateral_vault @ TeError::FeedMismatch,
+        has_one = collateral_mint @ TeError::FeedMismatch
+    )]
+    pub pool: Box<Account<'info, Pool>>,
+    #[account(mut)]
+    pub senior_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut)]
+    pub junior_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut)]
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub holder: Signer<'info>,
+    #[account(mut, token::mint = senior_mint, token::authority = holder)]
+    pub holder_senior: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = junior_mint, token::authority = holder)]
+    pub holder_junior: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = collateral_mint)]
+    pub holder_collateral: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the signer PDA.
+    #[account(seeds = [SIGNER_SEED], bump = pool.signer_bump)]
+    pub signer: UncheckedAccount<'info>,
+    pub tranche_token_program: Interface<'info, TokenInterface>,
+    pub collateral_token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct RelockJunior<'info> {
+    #[account(has_one = junior_mint @ TeError::FeedMismatch)]
+    pub pool: Box<Account<'info, Pool>>,
+    #[account(mut, token::mint = junior_mint)]
+    pub account: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub junior_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// CHECK: the signer PDA (freeze authority).
+    #[account(seeds = [SIGNER_SEED], bump = pool.signer_bump)]
+    pub signer: UncheckedAccount<'info>,
+    pub tranche_token_program: Interface<'info, TokenInterface>,
+}
+
 // ── events ──────────────────────────────────────────────────────────────
 
 #[event]
@@ -969,6 +1222,15 @@ pub struct JuniorExited {
 }
 
 #[event]
+pub struct Refunded {
+    pub pool: Pubkey,
+    pub holder: Pubkey,
+    pub senior: u64,
+    pub junior: u64,
+    pub collateral: u64,
+}
+
+#[event]
 pub struct PoolStateChanged {
     pub pool_id: u32,
     pub from: PoolState,
@@ -1018,6 +1280,8 @@ pub enum TeError {
     MathOverflow,
     #[msg("Only the program's upgrade authority may do this")]
     NotUpgradeAuthority,
+    #[msg("junior is locked while a senior is outstanding (TE-P5)")]
+    JuniorLocked,
 }
 
 #[cfg(test)]
@@ -1031,6 +1295,24 @@ mod tests {
         // A 25% mark-down wipes the 20% junior: breached.
         assert!(!subordination_ok(80, 75, 2_000));
         assert!(!subordination_ok(0, 0, 2_000));
+    }
+
+    #[test]
+    fn refund_is_pro_rata_and_floored() {
+        // 100 collateral behind 80 + 20 principal: the junior's 20 → 20.
+        assert_eq!(refund_collateral(100, 20, 100).unwrap(), 20);
+        // Marked collateral: 90 units behind 100 principal, 33 out → 29.
+        assert_eq!(refund_collateral(90, 33, 100).unwrap(), 29);
+        assert_eq!(refund_collateral(90, 100, 100).unwrap(), 90);
+        assert_eq!(refund_collateral(90, 0, 0).unwrap(), 0);
+        assert!(refund_collateral(90, 101, 100).is_err());
+    }
+
+    #[test]
+    fn cancelled_is_appended() {
+        // Wire-stable: existing variants keep their indices.
+        assert_eq!(PoolState::WoundDown as u8, 5);
+        assert_eq!(PoolState::Cancelled as u8, 6);
     }
 
     #[test]
