@@ -32,7 +32,7 @@ npcs-treasury = { path = "../../programs/npcs-treasury", features = ["no-entrypo
 credit-math = { path = "../../programs/credit-math" }
 anchor-lang = { version = "=1.1.2" }
 anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022", "token_2022_extensions"] }
-litesvm = "0.16"
+litesvm = "0.17"
 solana-keypair = "3"
 solana-signer = "3"
 solana-transaction = "4"
