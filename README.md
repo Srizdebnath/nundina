@@ -82,6 +82,25 @@ substantive P0 exit (HACKATHON §4) is open:
 | 10 | R5 settles **live NPCS** | ❌ (ready) | R5 ran against a manifest mint (`payment-rails/PHASES.md`). The live-NPCS run is scripted and rehearsed (#145/#172): `payment-rails/crank/scripts/devnet/npcs-dvp.ts` passes end to end on a devnet clone with the exact pending rails build. Squads upgrade #2 is executed (2026-10-07); `--preflight` now waits only on holder H's lot seasoning (2026-10-11 07:53 UTC). The auction-engine version of the same fill (`auction-session.ts`, #200) is rehearsed too |
 | 11 | Auction session + queue-claim sale | ⚠️ | engines live on devnet (#192); a sealed-bid session over NPCS is scripted and rehearsed on a devnet clone with rails #3's build (cleared 0.97 vs NAV 1.00, 2 fills DvP, #200). Runs on devnet after rails #3 (2026-10-09) and H's seasoning (2026-10-11); the queue-claim sale follows on the same venue |
 
+## Live on devnet
+
+Every address below opens in Solana Explorer (devnet). Build hashes, slots
+and upgrade authorities are in [`DEPLOYMENTS.md`](DEPLOYMENTS.md), and
+`bash payment-rails/crank/scripts/devnet/verify.sh` checks the rails row keylessly.
+
+| Program | Address | What it does | State |
+|---|---|---|---|
+| `payment-rails` | [`GdWm…Pocn`](https://explorer.solana.com/address/GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn?cluster=devnet) | USDC cash layer: escrow, DvP, refunds, facility cash, waterfall | upgrade #3 (2026-10-10), Squads vault |
+| `credit-gate` | [`5ycY…X6XX`](https://explorer.solana.com/address/5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX?cluster=devnet) | Token ACL gate program: SAS eligibility, governor, lots, settle_check | 2026-10-04 build; upgrade (LF-P5 custody, #211) pending, Squads vault |
+| `auction-engine` | [`Cw6w…Sod7`](https://explorer.solana.com/address/Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7?cluster=devnet) | sealed-bid uniform-price sessions | 2026-10-07 build; `main` fixes pending upgrade |
+| `mark-engine` | [`79yp…x4LH`](https://explorer.solana.com/address/79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH?cluster=devnet) | NAV feed, staleness states, prints | 2026-10-07 build; NAV #1 published |
+| `queue-claim` | [`2EpA…red4`](https://explorer.solana.com/address/2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4?cluster=devnet) | tokenized redemption-queue claims | 2026-10-07 build; NPCS queue initialized |
+| `tranche-engine` | [`Cvca…cFAS`](https://explorer.solana.com/address/CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS?cluster=devnet) | senior/junior credit-loss waterfall | 2026-10-08 build; no pool yet |
+| `npcs-treasury` | [`4Bsz…ut1y`](https://explorer.solana.com/address/4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y?cluster=devnet) | I1 mint-on-deposit, redeem at NAV | deployed; hand-over (Squads `propose-treasury`) pending |
+| `liquidity-facility` | [`PTNC…S7hY`](https://explorer.solana.com/address/PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY?cluster=devnet) | NAV-collateralized advances + liquidation ladder | **not deployed** (after the credit-gate upgrade) |
+| NPCS mint (Token-2022) | [`6vt1…VKL4`](https://explorer.solana.com/address/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet) | the pilot asset, default-frozen, thaws only through credit-gate | supply 1.000000 |
+| Squads vault | [`8wj1…XLCV`](https://explorer.solana.com/address/8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV?cluster=devnet) | 2-of-2, 48 h timelock: rails + gate upgrade authority, NPCS mint authority | — |
+
 ## Repo structure
 
 ```
