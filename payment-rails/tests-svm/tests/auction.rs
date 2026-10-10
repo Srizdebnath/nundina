@@ -880,3 +880,50 @@ fn ae_p2_a_fill_failing_the_gate_is_skipped_and_the_session_still_finishes() {
     assert_eq!(env.bal(&seller.asset), 5 * UNIT, "unsold units back");
     assert_eq!(env.bal(&b1.asset), 5 * UNIT);
 }
+
+/// CG-P2 never mid-session (#202): the session prices against the mark
+/// taken at `open_session`. A NAV of 0.80 published while it runs does not
+/// move its reserve (0.90 = 1.00 × 90%) or its reference (1.00), and the
+/// book clears where it would have.
+#[test]
+fn cg_p2_a_nav_published_mid_session_does_not_move_its_reserve() {
+    let mut env = Env::new(Tp::Spl);
+    let publisher = env.setup_auction();
+    let seller = env.party(BOND, 10 * UNIT);
+    let b1 = env.party(10 * UNIT + BOND, 0);
+    let b2 = env.party(10 * UNIT + BOND, 0);
+    let b3 = env.party(10 * UNIT + BOND, 0);
+    let crank = env.funded();
+    env.open_auction(1, params(Pubkey::default())).unwrap();
+    let snap = env.auction(1).open_mark;
+    assert!(snap.taken);
+    assert_eq!(snap.nav_effective, NAV_ONE);
+    let orders = [
+        sealed(Side::Sell, 900_000, 10 * UNIT, 1),
+        sealed(Side::Buy, 970_000, 6 * UNIT, 2),
+        sealed(Side::Buy, 950_000, 6 * UNIT, 3),
+        sealed(Side::Buy, 930_000, 4 * UNIT, 4),
+    ];
+    env.commit_ask(1, &seller, &orders[0], 10 * UNIT).unwrap();
+    for (p, o) in [&b1, &b2, &b3].iter().zip(&orders[1..]) {
+        env.commit_bid(1, p, o, 10 * UNIT).expect("commit");
+    }
+    // Mid-session the issuer publishes a 20% markdown.
+    let mint = env.asset_mint;
+    env.set_time(COMMIT_END_A - 10);
+    env.publish_nav(&mint, &publisher, NAV_ONE * 8 / 10)
+        .expect("NAV 0.80");
+    env.set_time(COMMIT_END_A);
+    for (p, o) in [&seller, &b1, &b2, &b3].iter().zip(&orders) {
+        env.reveal(1, p, o).expect("reveal");
+    }
+    env.set_time(REVEAL_END_A);
+    env.clear_auction(1, &crank).expect("clear");
+    let s = env.auction(1);
+    assert_eq!(
+        (s.reserve_price, s.reference_mark),
+        (900_000, 1_000_000),
+        "the open mark, not the 0.80 published mid-session"
+    );
+    assert_eq!(s.clear_price, 950_000);
+}
