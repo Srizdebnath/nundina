@@ -79,8 +79,12 @@ X 0.6 / Y 0.4 NPCS, printed, refunds, reconciliation clean, evidence 41 events
 in 15 transactions, transfer proof 2/2. That run is the evidence #145 / #172
 ask for once it happens on devnet itself.
 
-**NPCS backing → npcs-treasury (#148): program deployed, hand-over not yet
-proposed.** npcs-treasury's `initialize` makes its caller the treasury
+**NPCS backing → npcs-treasury (#148): hand-over proposed (Squads #5),
+executable from 2026-10-13 08:19:53 UTC.** Treasury PDA
+`DdbMcM2VAjFaJ5PVgHTaHmHsa1vuwzb9bfduUjRNoijJ`, signer
+`Hwp9W1HAzBVBKE3ygiQP4BeYyGkXQ8cEejogYxzShUxk`, treasury USDC vault
+`Hho3d6VKpbXY3sN48m76Xed4ivHvrn8aWkQp9CV9CfEL`; until execution the mint
+authority stays with the Squads vault and the sleeve holds the backing. npcs-treasury's `initialize` makes its caller the treasury
 authority once the mint authority is its signer PDA, so the hand-over is one
 Squads vault transaction (`ops/squads` `propose-treasury`): the NPCS mint
 authority vault → treasury signer PDA, `initialize` with the vault as
@@ -89,8 +93,7 @@ authority, the 1.000000 USDC backing sleeve `B78W…NKAz` → the treasury vault
 the backing is enforced. Tested end to end against the real Squads program on
 a local validator (`ops/squads/test-localnet.sh`: an under-funded sleeve is
 refused; after execution `deposit` mints 1:1 and `verify` checks the mint
-authority, the treasury authority and I1). The devnet proposal needs an
-operator to run it:
+authority, the treasury authority and I1). Proposed on devnet on 2026-10-11 (#5) with:
 
 ```bash
 cd ops/squads && CLUSTER=devnet PAYER=~/.config/solana/turbine-devnet.json KEYS_DIR=~/.config/nundina/squads-devnet \
@@ -215,6 +218,7 @@ cd token && CLUSTER=devnet npm run verify
   | 5 | `payment-rails` upgrade to the build that CPIs the new gate (`CREDIT_GATE_ID` = `5ycY…X6XX`, #172) | — | vault-signed BPF `Upgrade` | ✅ 2026-10-07 · `2YDQ1kVN…uoojSRhCMiJW` (proposal #2, buffer `FqAJ…d5U` = build `b7681924…fbec`, approved 2026-10-04; buffer rent refunded to `9WH1`). `payment-rails/crank/scripts/devnet/verify.sh` passes against the new row in `payment-rails/DEPLOYMENTS.md` |
   | 6 | `payment-rails` upgrade to main (`GrantEngine`/`SetEngineRoles` #181, `MAX_FEE_BPS = 0` #185) | — | vault-signed BPF `Upgrade` | ✅ 2026-10-10 · `2MrwkqUcwT1VzNNS2fNonTdwkLZd7DrvhcErZh5Gwfxic3HeS7JDQCLkNPbg51tMZFNr7LNUindg2YCfpBLdaYBW` (slot 509621918): proposal #3, buffer `FwMUAaQKT6sR6cHApjCRM1UHHfAibJ5feY4wCYV1y1GE` = build `7c84150a…5b2787`, ProgramData extended +32056 B first; registry row above |
   | 7 | `credit-gate` upgrade to main (`aba6d5e`: LF-P5 custody module, market compliance tail #211) | — | vault-signed BPF `Upgrade` | 🕒 proposal #4 created + approved by both members 2026-10-11 07:55 UTC (`5hLtg351…1jKsw3Be`); buffer `5XBXDGMAwPnoobrypF8tF8CQaM9PmbH2KB5hB77CUdW` = build `9cb35c85586fef4f9342f6e2524b2cfcc2ae5837e2b956ff0f34ebd571632459` (861800 B), authority = vault; ProgramData extended +187088 B first (`3cdk6QacT9Bx…`, paid by `9WH1`). **Executable from 2026-10-13 07:55:39 UTC:** `CLUSTER=devnet PAYER=… KEYS_DIR=… npx tsx migrate.ts execute-upgrade 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX`, then the credit-gate registry row, `programs/credit-gate/scripts/verify.sh`, and the facility signer's custodian registration |
+  | 8 | NPCS mint authority → npcs-treasury signer `Hwp9…hUxk`; `initialize` (authority = vault); 1.000000 USDC sleeve `B78W…NKAz` → treasury vault `Hho3…CfEL`; metadata `status` → backing enforced (#148) | vault | treasury signer PDA | 🕒 proposal #5 created + approved by both members 2026-10-11 08:19 UTC (`3rNU8sow…DETkKzcH`). **Executable from 2026-10-13 08:19:53 UTC:** `CLUSTER=devnet PAYER=… KEYS_DIR=… npx tsx migrate.ts execute-treasury`, then `migrate.ts verify` and the nav-publisher source → `treasury:DdbMcM2VAjFaJ5PVgHTaHmHsa1vuwzb9bfduUjRNoijJ` |
 
   **Custody caveat (devnet only):** both member keys were generated on one
   machine (`~/.config/nundina/squads-devnet/`, mode 600, outside the repo).

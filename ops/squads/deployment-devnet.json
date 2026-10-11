@@ -82,5 +82,22 @@
         "d3eDws6iPnfMsXwvJE8XZ5Zsy8JihQkSPHssHy8XqjNFn9rzsm1TCyjVzkiYtTcRZ2Jx7fPu9fxmHo1zuNuTSjF"
       ]
     }
-  ]
+  ],
+  "treasury": {
+    "program": "4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y",
+    "mint": "6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4",
+    "treasury": "DdbMcM2VAjFaJ5PVgHTaHmHsa1vuwzb9bfduUjRNoijJ",
+    "signer": "Hwp9W1HAzBVBKE3ygiQP4BeYyGkXQ8cEejogYxzShUxk",
+    "vault": "Hho3d6VKpbXY3sN48m76Xed4ivHvrn8aWkQp9CV9CfEL",
+    "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    "sleeve": "B78WTdsY4MYhAvT757xtdb6KZ61pkBTPzKCtohK3NKAz",
+    "amount": "1000000",
+    "status": "IN FORCE: USDC 1:1 backing enforced on-chain by npcs-treasury 4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y (mint only on deposit; I1 supply == vault USDC checked at every mint and burn); thaw/freeze through Token ACL to credit-gate; permanent-delegate and metadata authority = Squads 2-of-2 vault",
+    "transactionIndex": "5",
+    "proposeSignature": "3rNU8sow2LmyWxYcpsVuuxNwDioE1svi2gxAfz583zf3SKadpMj3GUFrjK2WvmtmyWkuUQ3DAq7nm8dUDETkKzcH",
+    "approvals": [
+      "2r25DDxY5oAjQKcmrbKr9C8kgEndzwj2K1CRuUXokZ4nS4U5z8xtxAawf4YGtwpEkkutxdzK4ZkaP35K9CPv5As7",
+      "4HR8fWBDkWFueQ9txXDrt1RuWAyTYUDrMpEhGJUqhtvP8T51VkaZibxBi6zGWfrk88LC4DJCGKwyHeeWfXWArcKq"
+    ]
+  }
 }
