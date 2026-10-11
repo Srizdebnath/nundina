@@ -36,7 +36,7 @@ not yet proposed (`DEPLOYMENTS.md`).
 | CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ⚠️ the suite passes in a local mirror of `ci.yml` + `docs.yml`; GitHub Actions jobs are failing on billing (no job runs) | `.github/workflows/ci.yml` |
 | SAS attester (credential + 3 schemas) | ✅ **live devnet** (#122) | `ops/gate/deployment-devnet.json` · `npm run sas -- verify` |
 | Token ACL wiring of NPCS | ✅ devnet (#171): new mint `6vt1wHVQ…VKL4` thaws only through credit-gate; mint/delegate/metadata authority = Squads vault | `ops/gate/`, `token/` |
-| Engines: `auction-engine`, `mark-engine`, `queue-claim` (#192), `tranche-engine`, `npcs-treasury` (#200) | ✅ **deployed on devnet**; venue, NPCS feed (NAV #1 = 1.000000), print source and queue wired. `liquidity-facility` built, not deployed (SOL; needs a rails grant after #3). The first live session (`payment-rails/crank/scripts/devnet/auction-session.ts`) is rehearsed on a devnet clone and waits on rails #3 and H's seasoning (2026-10-11) | `DEPLOYMENTS.md` § Engines |
+| Engines: `auction-engine`, `mark-engine`, `queue-claim` (#192), `tranche-engine`, `npcs-treasury` (#200) | ✅ **deployed on devnet**; venue, NPCS feed (NAV #1 = 1.000000), print source and queue wired. `liquidity-facility` deployed 2026-10-11; usable with NPCS after the credit-gate custody upgrade. The first live session (`payment-rails/crank/scripts/devnet/auction-session.ts`) is rehearsed on a devnet clone and waits on rails #3 and H's seasoning (2026-10-11) | `DEPLOYMENTS.md` § Engines |
 
 ### Programs: as built vs roadmap
 
@@ -51,7 +51,7 @@ All have code, tests and IDLs; the table says which are on devnet.
 | `auction-engine` | ✅ | ✅ | ✅ unit + LiteSVM (real rails, gate, SAS, mark) | ✅ phase crank + `crank run` (#149, #141) | **live devnet** (#192); first session after rails #3 |
 | `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | **live devnet** (#192); NAV #1 published by `services` nav-publisher |
 | `queue-claim` | ✅ | ✅ | ✅ LiteSVM: sell path through `auction-engine`, pledge path through `liquidity-facility` | — | **live devnet** (#192); NPCS queue initialized |
-| `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps | LF-P1..P6 on `main` (#139); not deployed (after rails #3) |
+| `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps | **live devnet** (2026-10-11); NPCS pledges wait for the credit-gate custody upgrade |
 | `tranche-engine` | ✅ | ✅ | ✅ unit + LiteSVM (waterfall through rails) | ✅ `crank distribute` (#141) | **live devnet** (#200); no pool yet |
 
 Per-AC grades: [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
@@ -97,7 +97,7 @@ and upgrade authorities are in [`DEPLOYMENTS.md`](DEPLOYMENTS.md), and
 | `queue-claim` | [`2EpA…red4`](https://explorer.solana.com/address/2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4?cluster=devnet) | tokenized redemption-queue claims | 2026-10-07 build; NPCS queue initialized |
 | `tranche-engine` | [`Cvca…cFAS`](https://explorer.solana.com/address/CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS?cluster=devnet) | senior/junior credit-loss waterfall | 2026-10-08 build; no pool yet |
 | `npcs-treasury` | [`4Bsz…ut1y`](https://explorer.solana.com/address/4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y?cluster=devnet) | I1 mint-on-deposit, redeem at NAV | deployed; hand-over (Squads `propose-treasury`) pending |
-| `liquidity-facility` | [`PTNC…S7hY`](https://explorer.solana.com/address/PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY?cluster=devnet) | NAV-collateralized advances + liquidation ladder | **not deployed** (after the credit-gate upgrade) |
+| `liquidity-facility` | [`PTNC…S7hY`](https://explorer.solana.com/address/PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY?cluster=devnet) | NAV-collateralized advances + liquidation ladder | deployed 2026-10-11 (`9WH1`); no facility opened until the credit-gate custody upgrade |
 | NPCS mint (Token-2022) | [`6vt1…VKL4`](https://explorer.solana.com/address/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet) | the pilot asset, default-frozen, thaws only through credit-gate | supply 1.000000 |
 | Squads vault | [`8wj1…XLCV`](https://explorer.solana.com/address/8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV?cluster=devnet) | 2-of-2, 48 h timelock: rails + gate upgrade authority, NPCS mint authority | — |
 

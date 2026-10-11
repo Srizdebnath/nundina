@@ -141,7 +141,7 @@ Redemption is a burn at the published NAV, with the sleeve paying out; the invar
 
 ## 4.5 Built versus deployed
 
-Seven of the eight programs are deployed to devnet; `liquidity-facility` is built but not deployed; none are on mainnet. Every row in the registry is devnet only (`DEPLOYMENTS.md:14-22`).
+All eight programs are deployed to devnet (`liquidity-facility` since 2026-10-11); none are on mainnet. Every row in the registry is devnet only (`DEPLOYMENTS.md:14-22`).
 
 | Program | Repo path | Devnet state |
 |---|---|---|
@@ -152,7 +152,7 @@ Seven of the eight programs are deployed to devnet; `liquidity-facility` is buil
 | `queue-claim` | `programs/queue-claim/` | live (`DEPLOYMENTS.md:20`) |
 | `npcs-treasury` | `programs/npcs-treasury/` | live (`DEPLOYMENTS.md:21`) |
 | `tranche-engine` | `programs/tranche-engine/` | live, no pool yet (`DEPLOYMENTS.md:22`) |
-| `liquidity-facility` | `programs/liquidity-facility/` | built, **not deployed** (`README.md:39`, `:54`) |
+| `liquidity-facility` | `programs/liquidity-facility/` | deployed on devnet 2026-10-11; NPCS pledges after the credit-gate custody upgrade (`DEPLOYMENTS.md`) |
 
 The off-chain services are built but not hosted, and no Helius webhook or Supabase project is provisioned (`services/README.md:18-37`). The pilot asset is live: NPCS `6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4`, supply `1.000000` against 1 USDC (`DEPLOYMENTS.md:120`). NUNDINA is not audited, and this chapter makes no APY, TVL, or yield claim.
 
