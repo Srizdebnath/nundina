@@ -1,6 +1,6 @@
 # Chapter 10 — Tranching, Treasury & Math
 
-NUNDINA's tranching layer is `tranche-engine` (`programs/tranche-engine`), an SPV-configured senior/junior engine over NPCS collateral; the treasury layer is `npcs-treasury` (`programs/npcs-treasury`), the I1 mint-on-deposit path; and both rest on `credit-math` (`programs/credit-math`), the `no_std` fixed-point crate. This chapter describes the three-book accounting model exactly as coded, the treasury's I1 ledger, and the shared numerical core — its units, rounding direction, conservation laws, and documented NAV math. NUNDINA is a devnet-only pilot: 7 of 8 programs are on devnet, `liquidity-facility` is built but not deployed, 0 are on mainnet ([deployment & governance](/docs/12-deployment-governance-ops)), and nothing here is audited.
+NUNDINA's tranching layer is `tranche-engine` (`programs/tranche-engine`), an SPV-configured senior/junior engine over NPCS collateral; the treasury layer is `npcs-treasury` (`programs/npcs-treasury`), the I1 mint-on-deposit path; and both rest on `credit-math` (`programs/credit-math`), the `no_std` fixed-point crate. This chapter describes the three-book accounting model exactly as coded, the treasury's I1 ledger, and the shared numerical core — its units, rounding direction, conservation laws, and documented NAV math. NUNDINA is a devnet-only pilot: all 8 programs are on devnet, 0 are on mainnet ([deployment & governance](/docs/12-deployment-governance-ops)), and nothing here is audited.
 
 ## 10.1 tranche-engine — senior/junior over NPCS
 

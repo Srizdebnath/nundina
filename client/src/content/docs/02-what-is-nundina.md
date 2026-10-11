@@ -196,10 +196,10 @@ NUNDINA is a **devnet-only pilot**, and the documentation here follows that
 reality: devnet facts only in the present tense, no mainnet claims, and no APY,
 TVL, or LP-yield claims. The substantive status is:
 
-- **Seven programs are deployed on devnet; `liquidity-facility` is built but not
-  deployed; none is on mainnet** (`README.md:43-55`). Deployed
-  engines on devnet are `auction-engine`, `mark-engine`, `queue-claim`,
-  `tranche-engine`, and `npcs-treasury`, alongside `payment-rails` and
+- **All eight programs are deployed on devnet; none is on mainnet**
+  (`DEPLOYMENTS.md`). Deployed engines on devnet are `auction-engine`,
+  `mark-engine`, `queue-claim`, `tranche-engine`, `npcs-treasury` and
+  `liquidity-facility` (2026-10-11), alongside `payment-rails` and
   `credit-gate` (`DEPLOYMENTS.md:14-22`).
 - **The pilot asset is NPCS**, a Token-2022 mint live on devnet at
   `6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4`, 6dp, frozen-by-default, gated

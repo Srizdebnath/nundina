@@ -56,7 +56,7 @@ Because the token stays route-clean, a priced credit position can become collate
 
 ### 1.4.3 Feasibility, honestly stated
 
-The feasibility verdict is that the hard parts — native compliance, fast settlement, lending rails — are already live, and the two missing mechanisms are exactly what NUNDINA builds (`03-Feasibility-and-Compliance.md:110`). The counterweight is that this is a devnet pilot: `8/8` programs have code, tests and IDLs; `7/8` are deployed on devnet; `liquidity-facility` is built but not deployed; `0/8` are on mainnet-beta (`STATUS.md:31`–`:34`). It is not audited, and this chapter makes no APY, TVL, or yield claim.
+The feasibility verdict is that the hard parts — native compliance, fast settlement, lending rails — are already live, and the two missing mechanisms are exactly what NUNDINA builds (`03-Feasibility-and-Compliance.md:110`). The counterweight is that this is a devnet pilot: `8/8` programs have code, tests and IDLs and all `8/8` are deployed on devnet (`liquidity-facility` since 2026-10-11, `DEPLOYMENTS.md`); `0/8` are on mainnet-beta. It is not audited, and this chapter makes no APY, TVL, or yield claim.
 
 ## 1.5 Problem → response
 
@@ -69,7 +69,7 @@ The feasibility verdict is that the hard parts — native compliance, fast settl
 | **C2** per-lot Rule 144 seasoning (`05:88`) | S1 | Per-holder, per-lot PDA ledger | `credit-gate` live devnet (#170) (`README.md:32`) |
 | **C4** 12(g) holder-count (`05:90`) | S1 | Holder governor aggregating wallets to investor IDs | `credit-gate` live devnet (#170) (`README.md:32`) |
 | **D1** hooks break composability (`05:112`) | S1 | Token ACL (sRFC37) as compliance core | live devnet (#171) (`README.md:38`) |
-| **F8** liquidating permissioned collateral (`05:162`) | S1 | Liquidation *is* a forced-sale auction | `liquidity-facility` built, **not deployed** (`README.md:39`) |
+| **F8** liquidating permissioned collateral (`05:162`) | S1 | Liquidation *is* a forced-sale auction | `liquidity-facility` deployed on devnet; NPCS pledges wait for the credit-gate custody upgrade (`DEPLOYMENTS.md`) |
 | **K1/H1** issuer consent is a hard veto (`05:193`, `:240`) | S1 | Issuer-sponsored window; pay the issuer to say yes | unresolved (see Open questions) |
 
 ```mermaid
@@ -85,7 +85,7 @@ flowchart LR
 
 ## 1.6 Scope of the claim
 
-Everything above describes a devnet-only pilot. `credit-gate`, the NPCS mint `6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4` (supply 1.000000), `payment-rails`, `mark-engine`, `auction-engine`, `queue-claim`, `npcs-treasury` and `tranche-engine` are live or initialized on devnet; the `liquidity-facility` is not deployed; there is no live auction session, live queue-claim sale, treasury-enforced mint path, or mainnet pilot (`STATUS.md:9`–`:24`, `:31`–`:34`). Governance is Squads v4 2-of-2 behind a 48h timelock (`DEPLOYMENTS.md:208`). Market figures quoted here — Apollo's 17%, the +$4.3B quarterly surge, the SEC's 2026-09-17 order, Midas's $50M Series A + $40M facility (`12-Validation-2026-Reality-Check.md:16`) — are third-party facts attributed and dated; they are not NUNDINA's metrics.
+Everything above describes a devnet-only pilot. `credit-gate`, the NPCS mint `6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4` (supply 1.000000), `payment-rails`, `mark-engine`, `auction-engine`, `queue-claim`, `npcs-treasury`, `tranche-engine` and `liquidity-facility` are live or initialized on devnet; there is no live auction session, live queue-claim sale, treasury-enforced mint path, or mainnet pilot (`STATUS.md:9`–`:24`, `:31`–`:34`). Governance is Squads v4 2-of-2 behind a 48h timelock (`DEPLOYMENTS.md:208`). Market figures quoted here — Apollo's 17%, the +$4.3B quarterly surge, the SEC's 2026-09-17 order, Midas's $50M Series A + $40M facility (`12-Validation-2026-Reality-Check.md:16`) — are third-party facts attributed and dated; they are not NUNDINA's metrics.
 
 ## Open questions
 

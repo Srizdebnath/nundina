@@ -11,7 +11,7 @@ export type Source = { label: string; href?: string; date?: string };
 
 /* ── NUNDINA on devnet (info.md §8) ── */
 
-export const PROGRAMS_DEVNET = 7;
+export const PROGRAMS_DEVNET = 8;
 export const PROGRAMS_TOTAL = 8;
 export const PROGRAMS_MAINNET = 0;
 
