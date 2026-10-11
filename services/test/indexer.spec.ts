@@ -1,5 +1,5 @@
 // The indexer against real transactions: a local demo run (validator with
-// the real programs; app/scripts/localnet.sh + localnet:e2e + a crank-runner
+// the real programs; client/scripts/localnet.sh + localnet:e2e + a crank-runner
 // tick) captured by test/capture-localnet.ts. PGlite = real Postgres.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

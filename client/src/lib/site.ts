@@ -6,8 +6,7 @@
 
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "/app";
 export const REPO_URL = "https://github.com/Srizdebnath/nundina";
-export const DEVNET_RPC_URL =
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+export { RPC_URL as DEVNET_RPC_URL } from "@/lib/programs";
 
 export const PILOT_DISCLAIMER = "PILOT-DEMO-ASSET — NOT AN OFFER";
 

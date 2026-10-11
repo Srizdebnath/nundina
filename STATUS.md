@@ -239,4 +239,4 @@ current deployment registry and source:
 - Current implementation summary: `README.md`
 - Deployment evidence: `DEPLOYMENTS.md`
 - Services status: `services/README.md`
-- UI status: `app/README.md`
+- UI status: `client/README.md`

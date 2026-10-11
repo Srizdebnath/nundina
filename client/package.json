@@ -6,9 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint --max-warnings=0 .",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "sync-idl": "for p in auction_engine credit_gate mark_engine queue_claim liquidity_facility tranche_engine npcs_treasury; do cp ../target/idl/$p.json src/idl/; done && cp ../payment-rails/target/idl/payment_rails.json src/idl/",
+    "localnet": "bash scripts/localnet.sh",
+    "localnet:e2e": "NEXT_PUBLIC_CLUSTER=localnet tsx --tsconfig tsconfig.json scripts/localnet-e2e.mts",
+    "access:e2e": "tsx --tsconfig tsconfig.json scripts/access-e2e.mts"
   },
   "dependencies": {
+    "@solana/kit": "^8.4.0",
+    "@solana/wallet-standard-features": "^1.5.0",
+    "@wallet-standard/app": "^1.1.1",
+    "@wallet-standard/base": "^1.1.1",
     "mermaid": "^12.1.0",
     "next": "16.4.0",
     "react": "19.3.0",
@@ -24,6 +34,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

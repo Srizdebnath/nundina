@@ -9,7 +9,7 @@
 | `legal` | `b60205` | Doc 07 changes — **never resolves a counsel gate in a PR** |
 | `research` | `5319e7` | Doc 12 / new market evidence |
 | `onchain` | `0e8a16` | `programs/**` (Anchor/Rust) |
-| `web` | `fbca04` | `app/**` (Next.js) |
+| `web` | `fbca04` | `client/**` (Next.js) |
 | `ci` | `e99695` | Workflows, repo config |
 | `dependencies` | `0366d6` | Dependabot PRs |
 | `blocked-on-counsel` | `d93f0b` | Waiting on a Q1–Q20 gate — exempt from stale bot |

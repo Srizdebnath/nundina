@@ -5,6 +5,8 @@
  * market facts are independent, cited, and labelled as such.
  */
 
+import { explorer, NPCS_MINT } from "@/lib/programs";
+
 export type Source = { label: string; href?: string; date?: string };
 
 /* ── NUNDINA on devnet (info.md §8) ── */
@@ -54,14 +56,13 @@ export const TELEMETRY: TelemetryMetric[] = [
 export const NPCS = {
   name: "NUNDINA Pilot Credit Sleeve",
   symbol: "NPCS",
-  mint: "6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4",
+  mint: NPCS_MINT as string,
   nav: "1.000000",
   supply: "1.000000",
   decimals: 6,
   holderCap: 8,
   seasoningDays: 7,
-  explorer:
-    "https://explorer.solana.com/address/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet",
+  explorer: explorer("address", NPCS_MINT),
 };
 
 export const shortAddress = (addr: string) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;

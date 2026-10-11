@@ -167,7 +167,7 @@ Refunds after `finish` / `expire` are the rails' own (`refunds`). Seasoning
 merges are `seasoning --mint` (above); bonded keepers cover the SLA.
 `tests/phases.spec.ts` pins the planner to the program's guards and the
 decoder to the program's IDL. **Run on a validator** with the real programs
-by the UI's local demo (`app/scripts/localnet-e2e.mts`, #144): screens,
+by the UI's local demo (`client/scripts/localnet-e2e.mts`, #144): screens,
 clear, allocate, two settles and finish to `Printed`. That run found the `settle`
 step is 1,684 bytes as a plain transaction (rails `settle_fill` + gate
 `settle_check` ≈ 30 accounts; LiteSVM has no packet limit), so settle steps
@@ -209,7 +209,7 @@ the session, the CashSession, the mark feed (NAV, `model_version`,
 `inputs_hash`, state) and the print; and a manifest carrying both
 SHA-256s, signed. `verify-export` checks the snapshot hash as well.
 
-Verified on a local validator with the real programs (`app/scripts/localnet.sh`).
+Verified on a local validator with the real programs (`client/scripts/localnet.sh`).
 One `run --once` tick refunded 9 escrows across two printed sessions,
 merged 2 seasoned ledgers and paid a coupon period. A session bundle came out at
 16 transactions and 39 events, with both fills proven under AE-P8.

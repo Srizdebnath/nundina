@@ -10,9 +10,9 @@ updates:
       - "dependencies"
     open-pull-requests-limit: 5
 
-  # P0 scaffold: app/ landed (doc 08 §12)
+  # The Next.js site + app deployed to nundina.xyz
   - package-ecosystem: "npm"
-    directory: "/app"
+    directory: "/client"
     schedule:
       interval: "weekly"
     labels:

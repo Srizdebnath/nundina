@@ -27,8 +27,8 @@ target/
 .anchor_generated/
 .solana/
 test-ledger/
-# UI demo cluster state + throwaway wallets (app/scripts/localnet.sh)
-app/.localnet/
+# UI demo cluster state + throwaway wallets (client/scripts/localnet.sh)
+client/.localnet/
 # services local database (pglite)
 services/.data/
 .deps/

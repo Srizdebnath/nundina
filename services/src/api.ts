@@ -1,7 +1,7 @@
 /**
  * api (SRS 08 §6): read-only JSON over the indexer's tables. No write
  * routes: every user action is a wallet-signed transaction built
- * client-side (the UI does this, `app/lib/tx.ts`); the server never
+ * client-side (the UI does this, `client/src/lib/tx.ts`); the server never
  * custodies or signs (ME-4).
  *
  *   GET /health                      cursors + row counts

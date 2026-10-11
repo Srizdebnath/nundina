@@ -1,5 +1,5 @@
 /**
- * One-off: snapshot the raw transactions of a local demo run (app/scripts/
+ * One-off: snapshot the raw transactions of a local demo run (client/scripts/
  * localnet.sh + `npm run localnet:e2e` + a crank-runner tick) as indexer
  * test input. Real program logs, not hand-written ones.
  *

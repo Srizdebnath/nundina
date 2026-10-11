@@ -28,7 +28,7 @@ script or app code:
     including the permissionless refund instructions.
   - `programs/` — `credit-gate` and `credit-math`.
   - `token/scripts/` — the NPCS mint initialisation and verification scripts.
-  - `app/` — the Next.js app.
+  - `client/` — the Next.js site and app (nundina.xyz).
   - `preresearch/` — design flaws count; this is a securities-infrastructure design.
   - Key custody and deployment procedures documented in this repo
     (`DEPLOYMENTS.md`, `payment-rails/README.md` § Keys, `token/runbook.md`).
