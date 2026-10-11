@@ -12,7 +12,7 @@ import { fromHex, hex } from "@/lib/borsh";
 import { explorer } from "@/lib/programs";
 import { gross, parseUnits } from "@/lib/session";
 import { getTokenHoldings } from "@/lib/rpc";
-import { commitBidIx, commitment, revealIx } from "@/lib/tx";
+import { commitAskIx, commitBidIx, commitment, revealIx } from "@/lib/tx";
 import { useWallet } from "@/lib/wallet";
 
 interface Preimage {
@@ -44,8 +44,13 @@ export function SessionActions(props: {
   bond: string;
   maxCash: string;
   orders: { owner: string; revealed: boolean }[];
+  /** Sell side — commit_ask escrows the asset itself plus the bond. */
+  assetMint: string;
+  usdcTokenProgram: string;
+  assetTokenProgram: string;
 }) {
   const { account, send } = useWallet();
+  const [side, setSide] = useState<"Buy" | "Sell">("Buy");
   const [limit, setLimit] = useState("0.95");
   const [qty, setQty] = useState("1");
   const [busy, setBusy] = useState(false);
@@ -80,18 +85,48 @@ export function SessionActions(props: {
     run(async () => {
       const l = parseUnits(limit, 6);
       const q = parseUnits(qty, props.assetDecimals);
-      const cash = gross(q, l, props.assetDecimals);
-      if (cash > BigInt(props.maxCash)) throw new Error(`cash ${cash} exceeds the per-investor cap ${props.maxCash}`);
       const holdings = await getTokenHoldings(account);
       const usdc = holdings.filter((h) => h.mint === props.usdcMint).sort((a, b) => (a.amount > b.amount ? -1 : 1))[0];
-      if (!usdc) throw new Error("no USDC token account for the session's settlement mint");
-      if (usdc.amount < cash + BigInt(props.bond)) throw new Error("not enough USDC for the escrow plus the bond");
+      const asset = holdings.filter((h) => h.mint === props.assetMint).sort((a, b) => (a.amount > b.amount ? -1 : 1))[0];
+      const bond = BigInt(props.bond);
       const nonce = crypto.getRandomValues(new Uint8Array(32));
-      const pre: Preimage = { side: "Buy", limit: l.toString(), qty: q.toString(), nonce: hex(nonce) };
+      const pre: Preimage = { side, limit: l.toString(), qty: q.toString(), nonce: hex(nonce) };
+      const c = await commitment(side, l, q, nonce, account);
+
+      if (side === "Sell") {
+        if (!asset) throw new Error(`no ${props.assetMint.slice(0, 6)}… token account — you hold none to sell`);
+        if (asset.frozen) throw new Error("your asset account is frozen — the credit gate has not admitted you, or your lots are still seasoning");
+        if (asset.amount < q) throw new Error(`you hold ${asset.amount} units, the ask is ${q}`);
+        if (!usdc) throw new Error("no USDC account — the bond is USDC");
+        if (usdc.amount < bond) throw new Error(`not enough USDC for the ${Number(bond) / 1e6} bond`);
+        // Persist before sending: a committed order without its preimage cannot be revealed.
+        localStorage.setItem(key(props.session, account), JSON.stringify(pre));
+        setStored(pre);
+        const ix = await commitAskIx(
+          {
+            session: address(props.session),
+            railsSession: address(props.railsSession),
+            owner: account,
+            usdcMint: address(props.usdcMint),
+            assetMint: address(props.assetMint),
+            ownerUsdc: usdc.account,
+            ownerAsset: asset.account,
+            usdcTokenProgram: address(props.usdcTokenProgram),
+            assetTokenProgram: address(props.assetTokenProgram),
+          },
+          c,
+          q,
+        );
+        return send([ix]);
+      }
+
+      const cash = gross(q, l, props.assetDecimals);
+      if (cash > BigInt(props.maxCash)) throw new Error(`cash ${cash} exceeds the per-investor cap ${props.maxCash}`);
+      if (!usdc) throw new Error("no USDC token account for the session's settlement mint");
+      if (usdc.amount < cash + bond) throw new Error("not enough USDC for the escrow plus the bond");
       // Persist before sending: a committed order without its preimage cannot be revealed.
       localStorage.setItem(key(props.session, account), JSON.stringify(pre));
       setStored(pre);
-      const c = await commitment("Buy", l, q, nonce, account);
       const ix = await commitBidIx(
         {
           session: address(props.session),
@@ -105,7 +140,7 @@ export function SessionActions(props: {
         cash,
       );
       return send([ix]);
-    }, "Sealed bid committed. Keep the preimage until you reveal.");
+    }, "Sealed order committed. Keep the preimage until you reveal.");
 
   const reveal = (p: Preimage) =>
     run(async () => {
@@ -140,6 +175,13 @@ export function SessionActions(props: {
           }}
         >
           <label>
+            side
+            <select value={side} onChange={(e) => setSide(e.target.value as "Buy" | "Sell")}>
+              <option value="Buy">buy — escrows USDC</option>
+              <option value="Sell">sell — escrows units</option>
+            </select>
+          </label>
+          <label>
             limit (USDC / unit)
             <input value={limit} onChange={(e) => setLimit(e.target.value)} size={10} />
           </label>
@@ -147,8 +189,13 @@ export function SessionActions(props: {
             quantity (units)
             <input value={qty} onChange={(e) => setQty(e.target.value)} size={10} />
           </label>
-          <button disabled={busy}>commit sealed bid</button>
-          <span className="small muted">escrows limit × qty plus a bond of {Number(props.bond) / 1e6} USDC in payment-rails</span>
+          <button disabled={busy}>commit sealed {side.toLowerCase()}</button>
+          <span className="small muted">
+            {side === "Buy"
+              ? `escrows limit × qty plus a bond of ${Number(props.bond) / 1e6} USDC`
+              : `escrows the units plus a bond of ${Number(props.bond) / 1e6} USDC`}{" "}
+            in payment-rails, at commit — not at settlement
+          </span>
         </form>
       )}
       {inCommit && myOrder && <p className="small">Your order is committed and sealed. Reveal opens when the commit window closes.</p>}

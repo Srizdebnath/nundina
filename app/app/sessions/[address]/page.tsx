@@ -6,10 +6,13 @@ import { AutoRefresh, Countdown } from "@/components/client";
 import { ClearingChart } from "@/components/ClearingChart";
 import { SessionActions } from "@/components/SessionActions";
 import { RofrActions } from "@/components/RofrActions";
+import { CrankPanel } from "@/components/CrankPanel";
 import { hex, type Struct } from "@/lib/borsh";
 import { chainNow } from "@/lib/rpc";
 import { clockPhase, curves, fmt6, loadSession, navToPrice, PHASES, type SessionView } from "@/lib/session";
 import { disclose, enumName, type PrintPolicy } from "@/lib/prints";
+import { gateStatus } from "@/lib/gate";
+import { TOKEN_2022_PROGRAM, TOKEN_PROGRAM } from "@/lib/programs";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +61,24 @@ export default async function SessionPage({ params }: { params: Promise<{ addres
   const discountBps = nav && s.clearPrice > 0n ? Number(((nav - s.clearPrice) * 10_000n) / nav) : null;
   const unit = 10n ** BigInt(s.assetDecimals);
   const usdcMint = (s.rails?.usdc_mint as string | undefined) ?? "";
+
+  // Gate market + each order owner's `investor_id`, resolved once on the server
+  // so the crank can build `screen_bid` and `settle` without a client round-trip
+  // per order. Missing ids are simply absent from the map; the crank then refuses
+  // that step with a readable error instead of failing on chain.
+  const owners = [...new Set(s.orders.map((o) => o.owner))];
+  const statuses = await Promise.all(owners.map((o) => gateStatus(s.assetMint, o)));
+  const first = statuses.find((g) => g.market);
+  const gateInfo = {
+    credential: (first?.market?.policy.credential as string) ?? "",
+    identitySchema: (first?.market?.config.identity_schema as string) ?? "",
+    accreditationSchema: (first?.market?.config.accreditation_schema as string) ?? "",
+    investorIds: Object.fromEntries(
+      statuses
+        .filter((g) => g.identity.parsed?.investorId)
+        .map((g) => [g.wallet, Buffer.from(g.identity.parsed!.investorId as Uint8Array).toString("hex")]),
+    ),
+  };
   const live = s.phase !== "Printed" && s.phase !== "Failed";
   return (
     <main className="wrap">
@@ -116,7 +137,47 @@ export default async function SessionPage({ params }: { params: Promise<{ addres
         bond={String(p.bond as bigint)}
         maxCash={String(p.max_cash as bigint)}
         orders={s.orders.map((o) => ({ owner: o.owner, revealed: o.revealed }))}
+        assetMint={s.assetMint}
+        usdcTokenProgram={(s.rails?.usdc_token_program as string) ?? TOKEN_PROGRAM}
+        assetTokenProgram={TOKEN_2022_PROGRAM}
       />
+
+      {s.rails && gateInfo.credential && (
+        <CrankPanel
+          session={s.address}
+          railsSession={s.railsSession}
+          feed={s.feed}
+          assetMint={s.assetMint}
+          usdcMint={usdcMint}
+          phase={s.phase}
+          assetDecimals={s.assetDecimals}
+          commitEnd={commitEnd}
+          revealEnd={revealEnd}
+          settleDeadline={deadline}
+          now={now}
+          clearPrice={String(s.clearPrice)}
+          orders={s.orders.map((o) => ({
+            owner: o.owner,
+            side: o.side,
+            revealed: o.revealed,
+            screened: o.screened,
+            eligible: o.eligible,
+          }))}
+          fills={s.fills.map((f, i) => ({
+            index: i,
+            buyer: f.buyer,
+            seller: f.seller,
+            qty: String(f.qty),
+            settled: f.settled,
+          }))}
+          feeReceiver={s.rails.fee_receiver as string}
+          reserve={s.rails.reserve as string}
+          buyerTokenProgram={s.rails.usdc_token_program as string}
+          assetTokenProgram={TOKEN_2022_PROGRAM}
+          printAuthority={(first?.market?.config.gate_config_authority as string) ?? ""}
+          gate={gateInfo}
+        />
+      )}
 
       <h2>Order book</h2>
       <table className="t">

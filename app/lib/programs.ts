@@ -1,9 +1,14 @@
 /**
- * Program ids, codecs and PDAs. Ids come from the IDLs (`declare_id!`), so
- * they are the ids the programs were built with; the cluster and the NPCS
- * mint come from the environment (see `.env.example`).
+ * Program ids, codecs and PDAs.
+ *
+ * Ids resolve through `lib/addresses.ts` — the single deployment manifest. Each
+ * entry prefers the manifest and falls back to the id declared in the IDL
+ * (`declare_id!`), so the app reads the chain correctly whether or not the
+ * manifest has been swapped in yet. The cluster and the NPCS mint can also come
+ * from the environment (see `.env.example`).
  */
 import { getAddressEncoder, getProgramDerivedAddress, address, type Address } from "@solana/kit";
+import { resolve } from "./addresses";
 import auctionIdl from "@/idl/auction_engine.json";
 import gateIdl from "@/idl/credit_gate.json";
 import markIdl from "@/idl/mark_engine.json";
@@ -26,17 +31,17 @@ export const codecs = {
 };
 
 export const PROGRAMS = {
-  auction: address(auctionIdl.address),
-  gate: address(gateIdl.address),
-  mark: address(markIdl.address),
-  queue: address(queueIdl.address),
-  facility: address(facilityIdl.address),
-  tranche: address(trancheIdl.address),
-  treasury: address(treasuryIdl.address),
-  rails: address(railsIdl.address),
+  auction: resolve("auction", address(auctionIdl.address)),
+  gate: resolve("gate", address(gateIdl.address)),
+  mark: resolve("mark", address(markIdl.address)),
+  queue: resolve("queue", address(queueIdl.address)),
+  facility: resolve("facility", address(facilityIdl.address)),
+  tranche: resolve("tranche", address(trancheIdl.address)),
+  treasury: resolve("treasury", address(treasuryIdl.address)),
+  rails: resolve("rails", address(railsIdl.address)),
 } as const;
 
-export const SAS_PROGRAM = address("22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG");
+export const SAS_PROGRAM = resolve("sas", address("22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG"));
 export const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 export const TOKEN_PROGRAM = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const TOKEN_2022_PROGRAM = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -45,9 +50,9 @@ export const CLUSTER = process.env.NEXT_PUBLIC_CLUSTER ?? "devnet";
 export const RPC_URL =
   process.env.NEXT_PUBLIC_RPC_URL ??
   (CLUSTER === "localnet" ? "http://127.0.0.1:8899" : "https://api.devnet.solana.com");
-/** NPCS devnet mint (`token/deployment-devnet.json`, #171). */
+/** NPCS pilot mint — `token/deployment-devnet.json`, or the deployment manifest. */
 export const NPCS_MINT = address(
-  process.env.NEXT_PUBLIC_NPCS_MINT ?? "6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4",
+  process.env.NEXT_PUBLIC_NPCS_MINT ?? resolve("npcsMint", address("6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4")),
 );
 
 export function explorer(kind: "address" | "tx", id: string): string {

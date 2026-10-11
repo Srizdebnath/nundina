@@ -4,8 +4,8 @@ import Link from "next/link";
 import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
 import { WalletButton } from "@/components/client";
-import { AccessGuard } from "@/components/AccessGuard";
 import { SignOut } from "@/components/AccessGate";
+import { DeploymentBanner } from "@/components/DeploymentBanner";
 import { viewer } from "@/lib/access";
 import { CLUSTER, RPC_URL } from "@/lib/programs";
 
@@ -46,7 +46,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <WalletButton />
           </nav>
           <Suspense>
-            <AccessGuard>{children}</AccessGuard>
+            {/* Read is public. Only /admin and /data-room carry their own
+                `AccessGuard always` — see those pages. Writes always require a
+                connected wallet, signed client-side; the server never signs. */}
+            <DeploymentBanner />
+            {children}
           </Suspense>
         </WalletProvider>
       </body>
