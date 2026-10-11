@@ -2,7 +2,7 @@
  * IDL-driven Borsh decoding for every nundina program the UI reads.
  *
  * Accounts and events are decoded with the program's own anchor IDL
- * (`app/idl/*.json`, synced from `anchor build` with `npm run sync-idl`), so
+ * (`client/src/idl/*.json`, synced from `anchor build` with `npm run sync-idl`), so
  * the UI cannot drift from the on-chain layout without `npm test` failing.
  *
  * Values: u64/i64/u128/i128 are `bigint`, u8–u32 are `number`, pubkeys are

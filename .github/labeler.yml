@@ -40,5 +40,5 @@ onchain:
 web:
   - changed-files:
       - any-glob-to-any-file:
-          - "app/**"
+          - "client/**"
           - "web/**"

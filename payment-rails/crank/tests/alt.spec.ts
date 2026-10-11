@@ -1,7 +1,7 @@
 // Lookup tables for wide crank steps: the auction `settle` (rails
 // settle_fill + gate settle_check, ~30 accounts) is over the packet limit as
 // a plain v0 transaction. The table instructions are hand-encoded, so pin
-// their layout and the PDA; the end-to-end run is app/scripts/localnet-e2e.mts.
+// their layout and the PDA; the end-to-end run is client/scripts/localnet-e2e.mts.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {

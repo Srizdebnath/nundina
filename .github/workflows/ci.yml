@@ -134,20 +134,20 @@ jobs:
           done
           [ "$found" = 1 ] || { echo "::error::no build.rs credit_gate.so found"; exit 1; }
 
-  app:
-    name: app — lint · typecheck · build
+  client:
+    name: client — lint · typecheck · test · build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: app
+        working-directory: client
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: client/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck

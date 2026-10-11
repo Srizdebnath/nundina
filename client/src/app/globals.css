@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ── Design tokens (ported from the frontend/index.html Tailwind config) ── */
-@theme {
+@theme static {
   --color-obsidian-950: #050507;
   --color-obsidian-900: #08080a;
   --color-obsidian-850: #0e0f13;

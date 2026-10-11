@@ -1,6 +1,6 @@
 /**
  * The programs the services read, with their IDLs. One copy of the IDLs
- * lives in `app/idl/` (synced from `anchor build`, drift-checked by the app's
+ * lives in `client/src/idl/` (synced from `anchor build`, drift-checked by the app's
  * tests); the services read the same files.
  */
 import { readFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { address, type Address } from "@solana/kit";
 import { Codec, type Idl } from "./codec.ts";
 
 const load = (name: string) =>
-  new Codec(JSON.parse(readFileSync(new URL(`../../app/idl/${name}.json`, import.meta.url), "utf8")) as Idl);
+  new Codec(JSON.parse(readFileSync(new URL(`../../client/src/idl/${name}.json`, import.meta.url), "utf8")) as Idl);
 
 export const PROGRAMS = {
   "payment-rails": load("payment_rails"),

@@ -4,7 +4,7 @@ Context for AI agents (Copilot coding agent, Codebuff, or humans pairing with ei
 
 ## What this repo is
 
-NUNDINA is a private-credit secondary-market protocol on Solana: a pricing, queue and risk-transfer engine for gated, NAV-priced credit. It is in the **pilot build**: the corpus under `preresearch/` is the design source of truth, and code is landing against `preresearch/architecture/08-SRS-Pilot-Rails.md`. **Live on devnet:** `payment-rails/` (the USDC cash layer — escrow, refunds, DvP cash leg, facility, waterfall; ~4k lines of Anchor Rust, its own Cargo/Anchor workspace, plus a TypeScript crank under `payment-rails/crank/`), the `programs/credit-gate` skeleton (config anchor only) and the NPCS mint (`token/`). `programs/credit-math` is the shared math crate. The engines (auction, mark, queue-claim, facility, tranche) and the off-chain services are not built yet; `app/` is a shell. Check `README.md` § Build status and `DEPLOYMENTS.md` before stating what exists.
+NUNDINA is a private-credit secondary-market protocol on Solana: a pricing, queue and risk-transfer engine for gated, NAV-priced credit. It is in the **pilot build**: the corpus under `preresearch/` is the design source of truth, and code is landing against `preresearch/architecture/08-SRS-Pilot-Rails.md`. **Live on devnet:** `payment-rails/` (the USDC cash layer — escrow, refunds, DvP cash leg, facility, waterfall; ~4k lines of Anchor Rust, its own Cargo/Anchor workspace, plus a TypeScript crank under `payment-rails/crank/`), the `programs/credit-gate` skeleton (config anchor only) and the NPCS mint (`token/`). `programs/credit-math` is the shared math crate. `client/` is the Next.js site and dApp served at nundina.xyz. Check `README.md` § Build status and `DEPLOYMENTS.md` before stating what exists.
 
 ## Repo map
 
@@ -39,9 +39,9 @@ NUNDINA is a private-credit secondary-market protocol on Solana: a pricing, queu
 - Code comments and docs use US spelling; product docs use en-dashes and the existing voice (dry, adversarial, concrete).
 - Commits: imperative subject ≤ 72 chars, blank line, motivation body.
 
-## Working on the pilot (when `programs/` and `app/` exist)
+## Working on the pilot
 
 - Anchor (Rust) programs under `programs/`, shared math in `credit-math` crate: u128 intermediates, **round against the initiator**.
-- Next.js 16 app under `app/` (App Router, RSC-first, TypeScript strict, Tailwind + shadcn/ui).
+- Next.js 16 site + dApp under `client/` (App Router, RSC-first, Cache Components, TypeScript strict, Tailwind v4). Deployment addresses come from `client/.env`, never from source.
 - UI reads from the indexer (Postgres), never assembles write transactions server-side — the wallet signs everything client-side.
 - Every acceptance scenario AC-1…AC-12 in doc `08` maps to an E2E test. Don't mark an AC done without its test passing on devnet staging.

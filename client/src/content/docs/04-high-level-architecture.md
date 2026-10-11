@@ -57,7 +57,7 @@ The design is deliberately minimal. `06-Solution-Architecture-v2.md` lists what 
 | Programs | `programs/` and `payment-rails/programs/payment-rails/` | The eight programs plus the `credit-math` crate (`Cargo.toml:1-16`). `payment-rails` is its own workspace (`payment-rails/README.md:155-186`). |
 | Services | `services/` | Indexer, read API, NAV publisher, treasury agent (`services/README.md:9-16`). |
 | Crank & evidence | `payment-rails/crank/` | Crank-runner (phases, refunds, seasoning, distribution) and the session evidence exporter (`services/README.md:15-16`). |
-| Apps | `app/` | Next.js 16 (App Router); every page reads the cluster at request time, no backend or cache (`app/README.md:1-8`). |
+| Apps | `client/` | Next.js 16 (App Router); every page reads the cluster at request time, no backend or cache (`client/README.md:1-8`). |
 | Ops | `ops/gate/`, `ops/squads/`, `ops/engines/` | Gate onboarding, Squads authority migration, engine wiring (`README.md:114-115`). |
 
 A note on the word "protocol": the docs' own program inventory is **seven programs plus one crate** — `auction-engine`, `mark-engine`, `queue-claim`, `liquidity-facility`, `tranche-engine`, `credit-gate`, `payment-rails`, and the shared `credit-math` crate (`preresearch/architecture/06-Solution-Architecture-v2.md:44-52`); the repository adds `npcs-treasury` as an eighth deployable program (`Cargo.toml:14-15`).

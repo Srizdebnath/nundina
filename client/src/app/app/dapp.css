@@ -1,0 +1,139 @@
+/*
+ * dApp styles (SRS 08 §7: institutional, numeric precision, no degen styling),
+ * in the site's obsidian/gold palette. Everything is scoped under `.dapp` so
+ * the marketing pages keep their Tailwind look.
+ */
+.dapp {
+  --bg: var(--color-obsidian-900);
+  --bg-deep: var(--color-obsidian-950);
+  --panel: var(--color-obsidian-850);
+  --panel-hi: var(--color-obsidian-800);
+  --line: rgba(220, 192, 147, 0.14);
+  --line-hi: rgba(220, 192, 147, 0.32);
+  --text: var(--color-gold-200);
+  --muted: #9c917c;
+  --accent: var(--color-gold-400);
+  --warn: #e8b04a;
+  --ok: #5cc49a;
+  --bad: #e5675f;
+  --mono: var(--ff-space-mono), ui-monospace, monospace;
+
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(1200px 500px at 50% -200px, rgba(239, 210, 156, 0.06), transparent), var(--bg);
+  color: var(--text);
+  font-family: var(--ff-jakarta), system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.dapp a { color: var(--accent); text-decoration: none; }
+.dapp a:hover { color: var(--color-gold-100); text-decoration: underline; text-underline-offset: 3px; }
+.dapp code, .dapp .mono, .dapp table.t, .dapp .stat .v, .dapp .mono-addr, .dapp pre { font-family: var(--mono); }
+.dapp code { font-size: 0.92em; background: var(--panel-hi); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.dapp b, .dapp strong { color: var(--color-gold-100); font-weight: 600; }
+
+/* ── shell ───────────────────────────────────────────────────────────── */
+.dapp .app-header { position: sticky; top: 0; z-index: 40; background: rgba(5, 5, 7, 0.88); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.dapp .app-bar { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 12px 20px; }
+.dapp .brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--ff-cinzel), serif; font-weight: 700; letter-spacing: 0.22em; color: var(--color-gold-100); }
+.dapp .brand:hover { text-decoration: none; color: var(--color-gold-300); }
+.dapp .spacer { flex: 1; }
+.dapp .pill.cluster { display: inline-flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: 0.12em; }
+.dapp .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dapp .viewer { display: inline-flex; align-items: center; gap: 6px; }
+.dapp .app-tabs { max-width: 1200px; margin: 0 auto; display: flex; gap: 2px; padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
+.dapp .app-tabs::-webkit-scrollbar { display: none; }
+.dapp .app-tabs a { white-space: nowrap; padding: 10px 12px; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid transparent; }
+.dapp .app-tabs a:hover { color: var(--color-gold-100); text-decoration: none; }
+.dapp .app-tabs a[aria-current="page"] { color: var(--color-gold-100); border-bottom-color: var(--accent); }
+.dapp .app-footer { max-width: 1200px; width: 100%; margin: auto auto 0; padding: 24px 20px 32px; border-top: 1px solid var(--line); text-align: center; }
+
+/* ── page content ────────────────────────────────────────────────────── */
+.dapp .wrap { max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px 20px 56px; }
+.dapp .label { color: var(--warn); letter-spacing: 0.2em; font-size: 10px; margin: 0; font-family: var(--mono); }
+.dapp .muted { color: var(--muted); }
+.dapp .ok { color: var(--ok); }
+.dapp .bad { color: var(--bad); }
+.dapp .warn { color: var(--warn); }
+.dapp .small { font-size: 12px; }
+.dapp p { margin: 8px 0; line-height: 1.55; }
+
+.dapp h1 { font-family: var(--ff-cormorant), Georgia, serif; font-size: 34px; font-weight: 500; color: var(--color-gold-100); margin: 12px 0 6px; line-height: 1.15; }
+.dapp h2 { font-family: var(--ff-cinzel), serif; font-size: 13px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; margin: 32px 0 12px; color: var(--color-gold-300); }
+.dapp h3 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; color: var(--color-gold-200); }
+.dapp ul, .dapp ol { padding-left: 20px; list-style: revert; }
+.dapp li { margin: 4px 0; }
+
+.dapp .panel { display: block; background: linear-gradient(180deg, var(--panel), var(--bg-deep)); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; color: var(--text); transition: border-color 0.2s; }
+.dapp a.panel:hover { border-color: var(--line-hi); text-decoration: none; }
+.dapp .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.dapp .stat .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; }
+.dapp .stat .v { font-size: 18px; margin-top: 6px; color: var(--color-gold-100); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* tables scroll sideways instead of breaking the layout on phones */
+.dapp table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; display: block; overflow-x: auto; }
+.dapp table.t > tbody, .dapp table.t > thead { display: table; width: 100%; border-collapse: collapse; }
+.dapp table.t th { text-align: left; color: var(--muted); font-weight: 400; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; border-bottom: 1px solid var(--line-hi); white-space: nowrap; }
+.dapp table.t td { padding: 8px; border-top: 1px solid var(--line); vertical-align: top; }
+.dapp table.t tr:hover td { background: rgba(239, 210, 156, 0.03); }
+.dapp table.t td.r, .dapp table.t th.r { text-align: right; }
+
+.dapp .phases { display: flex; gap: 4px; flex-wrap: wrap; }
+.dapp .phase { padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.dapp .phase.done { color: var(--text); border-color: var(--line-hi); }
+.dapp .phase.now { color: var(--bg-deep); background: var(--accent); border-color: var(--accent); }
+.dapp .phase.fail { color: var(--bg-deep); background: var(--bad); border-color: var(--bad); }
+
+.dapp .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; border: 1px solid var(--line-hi); color: var(--text); font-family: var(--mono); }
+.dapp .pill.ok { border-color: var(--ok); color: var(--ok); }
+.dapp .pill.bad { border-color: var(--bad); color: var(--bad); }
+
+.dapp .verdict { padding: 16px; border-radius: 6px; border: 1px solid; margin-top: 12px; }
+.dapp .verdict.ok { border-color: var(--ok); background: rgba(92, 196, 154, 0.07); }
+.dapp .verdict.bad { border-color: var(--bad); background: rgba(229, 103, 95, 0.07); }
+.dapp .verdict .head { font-size: 17px; font-weight: 600; }
+
+/* ── controls ────────────────────────────────────────────────────────── */
+.dapp input, .dapp select, .dapp button, .dapp textarea { font-family: var(--mono); font-size: 12.5px; }
+.dapp input, .dapp select, .dapp textarea { background: var(--bg-deep); color: var(--text); border: 1px solid var(--line-hi); border-radius: 4px; padding: 8px 10px; max-width: 100%; }
+.dapp input:focus, .dapp select:focus, .dapp textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(239, 210, 156, 0.12); }
+.dapp button { background: linear-gradient(135deg, #fff3d6 0%, #f0cd8d 60%, #c59759 100%); color: var(--color-obsidian-950); font-weight: 700; border: 0; border-radius: 4px; padding: 8px 14px; cursor: pointer; letter-spacing: 0.04em; transition: filter 0.15s, transform 0.15s; }
+.dapp button:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+.dapp button.ghost { background: transparent; border: 1px solid var(--line-hi); color: var(--text); font-weight: 400; }
+.dapp button.ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--color-gold-100); }
+.dapp button:disabled { opacity: 0.5; cursor: not-allowed; }
+.dapp button:focus-visible, .dapp a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dapp form.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+.dapp form.row label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); min-width: 0; }
+
+.dapp pre.logs { font-size: 11px; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; background: var(--bg-deep); padding: 10px; border: 1px solid var(--line); border-radius: 4px; }
+.dapp .mono-addr { font-size: 12px; word-break: break-all; }
+
+/* ── wallet ──────────────────────────────────────────────────────────── */
+.dapp .wallet-chip { display: inline-flex; align-items: center; gap: 6px; }
+.dapp .wallet-chip img { border-radius: 4px; }
+.dapp .modal-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dapp .modal { width: 100%; max-width: 420px; background: var(--panel); border: 1px solid var(--line-hi); border-radius: 10px; padding: 20px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+.dapp .modal-head { display: flex; align-items: center; justify-content: space-between; }
+.dapp .modal-head h2 { margin: 0; }
+.dapp .wallet-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.dapp .wallet-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; background: var(--bg-deep); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-weight: 400; text-align: left; transform: none; }
+.dapp .wallet-row:hover:not(:disabled) { border-color: var(--accent); filter: none; transform: none; text-decoration: none; color: var(--text); }
+.dapp .wallet-row img { border-radius: 6px; }
+.dapp .wallet-name { flex: 1; font-family: var(--ff-jakarta), system-ui, sans-serif; font-size: 14px; color: var(--color-gold-100); }
+.dapp .wallet-icon { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-hi); border: 1px solid var(--line-hi); color: var(--accent); font-weight: 700; }
+
+/* ── loading ─────────────────────────────────────────────────────────── */
+.dapp .skeleton { background: linear-gradient(90deg, var(--panel) 0%, var(--panel-hi) 50%, var(--panel) 100%); background-size: 200% 100%; animation: dapp-shimmer 1.4s ease-in-out infinite; border-radius: 4px; }
+@keyframes dapp-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .dapp .skeleton { animation: none; } }
+
+@media (max-width: 640px) {
+  .dapp .app-bar { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
+  .dapp .brand span { display: none; }
+  .dapp .wrap { padding: 18px 14px 48px; }
+  .dapp h1 { font-size: 28px; }
+  .dapp form.row input { width: 100%; }
+  .dapp form.row label { width: 100%; }
+}

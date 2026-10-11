@@ -73,7 +73,7 @@ lines and attributes each `Program data:` line to the program on top of the stac
 (`sha256("event:FillSettled")`) in one transaction while the engine CPIs the rails
 (`services/src/logs.ts:1-11`); the indexer test asserts the two decode with
 different layouts (`services/test/indexer.spec.ts:34-41`). Decoding is driven by
-the programs' own Anchor IDLs loaded from `app/idl/*.json`
+the programs' own Anchor IDLs loaded from `client/src/idl/*.json`
 (`services/src/programs.ts:10-27`), with `Codec.decodeAccount`/`decodeType` and
 `prefixed` discriminator matching in `services/src/codec.ts:146-197`. Bytes that
 match a discriminator but not the IDL layout — an older deployment, such as
