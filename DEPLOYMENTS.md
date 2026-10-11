@@ -20,6 +20,7 @@ to match.
 | queue-claim v0.1.0 (QC-P1..P5: redemption queue claims; #138) | devnet | `2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4` | 508552133 | `5AgmEw858PeSYaYu2CaP3TckFRMPnH8ngBMxX1jo425KNTbmytkWyYbSpnadmyUCUzGxKGrhGGoQUSLP1sLZosBe` | `960d3e745ff5ffc8cdac09d23d10ac2e62538eed59e0b144bc0b20d32ba531a7` | `9WH1…2uDZ` (as above) |
 | npcs-treasury v0.1.0 (I1 mint-on-deposit / redeem; #148) | devnet | `4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y` | 508779613 | `3p93oRn2iThavs6MpzKZ8qGzQHxLgMDEcGM2bvno7ER2oYN3E7wKF6nT2QxeEr8311BdKrwnEsYXAy7Rb27DhFY7` | `b387d3c1d656bd997b8fb2f4acd8f30396b09b3453da85817296d528e6c78027` | `9WH1…2uDZ` (as above; on-chain dump == local build) |
 | tranche-engine v0.1.0 (TE-P1..P7: senior/junior pools, three-book waterfall; #140) | devnet | `CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS` | 508808253 | `4SDXWe8YSwkdVwpyAdpw3hDQGLWe4kjAu4UZEFRpQynsmZK4iwVGdamV8xowpWLnmLCYdqUMGX5EnBdFvRdtRs5Z` | `445d725b032d52c24caff7199f3615adba5ddeb1c6d34f135a0fa0703e235bde` | `9WH1…2uDZ` (as above; on-chain dump == local build). No pool yet: `create_pool` is per pool id and its coupons need a rails `ROLE_COUPON` grant (after upgrade #3) |
+| liquidity-facility v0.1.0 (LF-P1..P6: advances, health, stale-mark guard, liquidation ladder; LF-P5 custody moves; #139, #205) | devnet | `PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY` | 509828983 | `3LhShXuBFAq8eLjqTd96YzLd3KMPX1k3nrbD1Jd9CPDHMz4wpKhnWXJct1tZFo7425D7eWRHcLaWFQWakzhFP8qW` | `b9e657c62afd49e4bef41f97976453df7e452d742bbf537e5bd103be8519acf4` | `9WH1…2uDZ` (as above; build of `main` `aba6d5e`, on-chain dump == local build). Deployed 2026-10-11 ahead of the credit-gate custody upgrade: `open_facility` accepts only the upgrade authority, and NPCS pledges are refused by the live gate until that upgrade lands and the facility signer is registered as a custodian. No facility opened yet |
 
 **Superseded credit-gate deployment (#146, #170).** The P0 skeleton at
 `7yREa5V3ttjmwQ5dDv1DhThBzywgE5knJJuEAxppQa9c` (slot 503888002, build
@@ -57,9 +58,11 @@ Published by `services` `npm run svc -- nav` (#141), weekly from here on.
 build now has `GrantEngine`; `auction-session.ts` grants the auction
 operator PDA `ROLE_SESSIONS` as its step 0. `--preflight` on 2026-10-10
 reports one blocker only: H's lot seasoning (sellable from
-2026-10-11 07:53 UTC). Not deployed yet: liquidity-facility (~4.4 SOL);
-on `main` it moves gate lots through credit-gate's custody module
-(LF-P5), so it goes up after the credit-gate upgrade that carries it.
+2026-10-11 07:53 UTC). liquidity-facility was deployed on 2026-10-11 (row
+above). On `main` it moves gate lots through credit-gate's custody module
+(LF-P5), so it is used only after the credit-gate upgrade that carries it
+(buffer `5XBXDGMAwPnoobrypF8tF8CQaM9PmbH2KB5hB77CUdW`, Squads proposal + 48h)
+and after its signer PDA is registered as an NPCS custodian.
 
 **First live session: runbook.** `payment-rails/crank/scripts/devnet/auction-session.ts`
 runs one sealed-bid auction-engine session over the live NPCS mint end to end

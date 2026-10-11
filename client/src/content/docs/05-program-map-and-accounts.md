@@ -1,9 +1,9 @@
 # Chapter 5 — Program Map & Accounts
 
 NUNDINA's on-chain surface is eight Anchor programs plus one shared Rust crate,
-`credit-math`. Seven of the eight programs are deployed on devnet,
-`liquidity-facility` is built but not deployed, and none is on mainnet
-(STATUS.md:32-34). The programs split cleanly along one rule: a program owns the
+`credit-math`. All eight programs are deployed on devnet (`liquidity-facility`
+since 2026-10-11), and none is on mainnet
+(`DEPLOYMENTS.md`). The programs split cleanly along one rule: a program owns the
 *semantics* of a mechanism (phases, checks, state machines), while
 `payment-rails` moves the money and `credit-gate` decides who may hold
 (auction-engine/src/lib.rs:4-8). This chapter maps the whole set — purpose,
@@ -19,7 +19,7 @@ flows.
 | `credit-gate` | `programs/credit-gate` | Compliance at activation and transfer: SAS attestations, holder governor, lot ledger, block-list | Deployed (devnet) — STATUS.md:82 |
 | `auction-engine` | `programs/auction-engine` | Sealed-bid, uniform-price batch auction sessions | Deployed, venue live (devnet) — STATUS.md:84 |
 | `mark-engine` | `programs/mark-engine` | NAV feeds, mark states, auction prints, `MARK_PROTECTIVE` | Deployed, feed live (devnet) — STATUS.md:85 |
-| `liquidity-facility` | `programs/liquidity-facility` | Advances against pledged collateral, health checks, liquidation ladder | Built, **not deployed** — STATUS.md:33,87 |
+| `liquidity-facility` | `programs/liquidity-facility` | Advances against pledged collateral, health checks, liquidation ladder | Deployed on devnet 2026-10-11 — `DEPLOYMENTS.md` |
 | `queue-claim` | `programs/queue-claim` | Tokenized redemption-queue positions | Deployed, queue initialized (devnet) — STATUS.md:86 |
 | `tranche-engine` | `programs/tranche-engine` | SPV-configured senior/junior tranching | Deployed, no pool (devnet) — STATUS.md:88 |
 | `npcs-treasury` | `programs/npcs-treasury` | NPCS backing (invariant I1), mint-on-deposit / redeem | Deployed, no treasury state (devnet) — STATUS.md:89 |
@@ -103,8 +103,7 @@ The engine owns advance/liquidation semantics; `payment-rails` moves the cash an
 (liquidity-facility/src/lib.rs:76-629): `open_facility` (LF-P2), `pledge_and_advance`
 (LF-P1), `add_collateral`, `check_health` (LF-P3), `start_liquidation` (LF-P4),
 `ladder_buy`, `pass_step`, `open_forced_sale`/`list_forced_sale`/`reveal_forced_sale`/
-`settle_forced_sale` (LF-P5), `release`. It is **built but not deployed**
-(STATUS.md:33,87); see [queue and liquidity](/docs/09-queue-and-liquidity).
+`settle_forced_sale` (LF-P5), `release`. It is deployed on devnet on 2026-10-11 (`DEPLOYMENTS.md`); NPCS pledges wait for the credit-gate custody upgrade and the facility signer's custodian registration; see [queue and liquidity](/docs/09-queue-and-liquidity).
 
 ### 5.2.6 queue-claim — tokenized redemption positions
 

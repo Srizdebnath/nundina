@@ -1,6 +1,6 @@
 # Chapter 9 — Queue & Liquidity
 
-NUNDINA's two illiquidity primitives answer the same question from opposite ends: what can a holder *do* with a position the fund will not redeem today? `queue-claim` turns the denied residual of a redemption request into a dated, priceable, transferable claim; `liquidity-facility` borrows against such positions and, when a borrower defaults, runs a gated liquidation ladder ending in a workout rather than a dump. Both are devnet-only work: `queue-claim` is deployed but has no live request, claim, sale, or pledge (`STATUS.md:65`), and `liquidity-facility` is **built but not deployed** (`STATUS.md:66`, `:87`). This chapter covers the mechanism, the exact instructions and account layouts in source, and the line between what is live on devnet and what is only designed. It makes no yield, TVL, or audit claim.
+NUNDINA's two illiquidity primitives answer the same question from opposite ends: what can a holder *do* with a position the fund will not redeem today? `queue-claim` turns the denied residual of a redemption request into a dated, priceable, transferable claim; `liquidity-facility` borrows against such positions and, when a borrower defaults, runs a gated liquidation ladder ending in a workout rather than a dump. Both are devnet-only work: `queue-claim` is deployed but has no live request, claim, sale, or pledge (`STATUS.md:65`), and `liquidity-facility` is deployed on devnet on 2026-10-11 (`DEPLOYMENTS.md`); NPCS pledges wait for the credit-gate custody upgrade and the facility signer's custodian registration. This chapter covers the mechanism, the exact instructions and account layouts in source, and the line between what is live on devnet and what is only designed. It makes no yield, TVL, or audit claim.
 
 ## 9.1 The redemption queue: `queue-claim`
 
@@ -53,9 +53,9 @@ Past `grace_seconds` and still breached, `start_liquidation` enters `IssuerRofr`
 
 Every sale routes proceeds through `apply_proceeds`: the rails advance is repaid first, the surplus goes to the borrower, and any remaining debt is booked as a **non-recourse shortfall** (`lib.rs:786`–`:844`, `:30`). `release` returns collateral once the rails advance is closed (`lib.rs:629`–`:662`). The whole ladder was exercised locally in an `ADMIN_DRILL` (`STATUS.md:107`).
 
-### 9.2.4 Status: built, not deployed
+### 9.2.4 Status: deployed, not yet in use
 
-This is the chapter's most important boundary. `liquidity-facility` has complete code through LF-P6 with unit tests (`lib.rs:1361`–`:1401`), but it is **0 of 8 on mainnet and absent from devnet**: only 7 of 8 programs are deployed on devnet, and `liquidity-facility` is the one that is not (`STATUS.md:33`–`:34`). DEPLOYMENTS lists it under "Not deployed yet," pending a rails `ROLE_FACILITY` grant and roughly 3.5 SOL once upgrade #3 refunds its rent (`DEPLOYMENTS.md:61`–`:63`). Its local proof is real-program execution on synthetic accounts and clocks, not live-devnet evidence (`STATUS.md:73`–`:75`). AC-9 is graded Partial for exactly this reason (`STATUS.md:107`).
+This is the chapter's most important boundary. `liquidity-facility` has complete code through LF-P6 with unit tests (`lib.rs:1361`–`:1401`), and it was deployed on devnet on 2026-10-11 at `PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY` (`DEPLOYMENTS.md`). No facility is open yet: `open_facility` accepts only the upgrade authority, and NPCS pledges are refused by the live gate until the credit-gate custody upgrade (LF-P5) lands via Squads and the facility signer is registered as an NPCS custodian. It is not on mainnet. Its local proof is real-program execution on synthetic accounts and clocks, not live-devnet evidence (`STATUS.md:73`–`:75`). AC-9 is graded Partial for exactly this reason (`STATUS.md:107`).
 
 ```mermaid
 flowchart LR
@@ -77,8 +77,8 @@ flowchart LR
 | Claim token, issuer consent | QC-P2 | `queue-claim` · `attest`, `set_flags` | `lib.rs:133`, `:183` | local/LiteSVM only (`STATUS.md:106`) |
 | Claim PV / own market | QC-P3 | `queue-claim` · `quote_pv` | `lib.rs:481` | local only (`08-SRS-Pilot-Rails.md:50`) |
 | Claim pledge / fills / sweep | QC-P4 | `queue-claim` · `pledge`, `record_fill`, `sweep_pledged` | `lib.rs:231`, `:294`, `:385` | local only (`STATUS.md:106`) |
-| Advance at protective mark | LF-P1 | `liquidity-facility` · `pledge_and_advance` | `programs/liquidity-facility/src/lib.rs:137` | **not deployed** (`DEPLOYMENTS.md:63`) |
-| Facility fund via rails | LF-P2 | `liquidity-facility` · `open_facility` | `lib.rs:76` | **not deployed** |
+| Advance at protective mark | LF-P1 | `liquidity-facility` · `pledge_and_advance` | `programs/liquidity-facility/src/lib.rs:137` | deployed, no facility open (`DEPLOYMENTS.md`) |
+| Facility fund via rails | LF-P2 | `liquidity-facility` · `open_facility` | `lib.rs:76` | deployed, no facility open |
 | Health / maintenance LTV | LF-P3 | `liquidity-facility` · `check_health`, `add_collateral` | `lib.rs:246`, `:214` | local ladder (`STATUS.md:107`) |
 | No-liquidation-on-stale-mark | LF-P4 | `liquidity-facility` · `allows_liquidation` guards | `lib.rs:283`, `:310`, `:424` | local, tested Stale/Suspended (`08-SRS-Pilot-Rails.md:64`) |
 | Liquidation ladder | LF-P5 | `liquidity-facility` · `start_liquidation` → `settle_forced_sale` | `lib.rs:279`–`:625` | local `ADMIN_DRILL` (`STATUS.md:107`) |
