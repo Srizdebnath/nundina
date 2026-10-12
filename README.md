@@ -1,13 +1,21 @@
-# NUNDINA
+<p align="center">
+  <img src="client/src/app/icon.png" alt="NUNDINA logo" width="140">
+</p>
 
-**The pricing, queue and risk-transfer engine for gated, NAV-priced private credit on Solana.**
+<h1 align="center">NUNDINA Finance</h1>
+
+<p align="center">
+  <strong>The pricing, queue and risk-transfer engine for gated, NAV-priced private credit on Solana.</strong>
+</p>
+
+<p align="center">
+  <a href="https://nundina.xyz">nundina.xyz</a> · Solana devnet (all eight programs live) · MIT License
+</p>
 
 NUNDINA is not a venue and not an AMM. It is the mechanism that tells a
 quarterly-marked, redemption-gated credit position what it is worth, and that
 turns a denied redemption request into a claim that can be priced, sold or
 financed.
-
-Website and application: [nundina.xyz](https://nundina.xyz) · Network: Solana devnet (all eight programs live) · License: MIT
 
 ---
 
