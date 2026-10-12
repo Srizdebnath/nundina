@@ -1,180 +1,510 @@
 # NUNDINA
 
-> **The pricing, queue & risk-transfer engine for gated, NAV-priced private credit — on Solana.**
-> Not a venue. Not an AMM. The mechanism that tells a quarterly-marked, gated credit position what it's worth — and turns a denied redemption request into a priceable, financeable claim.
+**The pricing, queue and risk-transfer engine for gated, NAV-priced private credit on Solana.**
 
-[![Status](https://img.shields.io/badge/status-building_P1-blue)](preresearch/)
-[![Phase](https://img.shields.io/badge/P0-open-orange)](#p0-exit-criteria)
-[![Token](https://img.shields.io/badge/NPCS-live_on_devnet-8A2BE2)](token/)
-[![Docs](https://img.shields.io/badge/docs-10_files_~200KB-success)](preresearch/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+NUNDINA is not a venue and not an AMM. It is the mechanism that tells a
+quarterly-marked, redemption-gated credit position what it is worth, and that
+turns a denied redemption request into a claim that can be priced, sold or
+financed.
+
+Website and application: [nundina.xyz](https://nundina.xyz) · Network: Solana devnet (all eight programs live) · License: MIT
 
 ---
 
-## The one-paragraph version
+## Contents
 
-Tokenized private credit funds (ACRED, STAC, ONyc, SCOPE…) are locked, gated at ~5% per quarter, and NAV-priced only quarterly by the manager itself. In 2026 the gate crisis became the market's defining event — Apollo capped redemptions at 17% of NAV requested vs. a 5% cap; $5B+ sits trapped. NUNDINA is designing and building the mechanism nobody else has built. This paragraph is the **target architecture**; the table below says what exists today: a **sealed-bid uniform-price batch auction** that manufactures an arms-length price where a passive AMM would bleed to adverse selection, a **mark engine** that makes stale appraisals usable, a **queue-claim** that tokenizes denied redemption requests, a **liquidity facility** that can actually liquidate permissioned collateral, a **credit-loss tranching waterfall**, and a **compliance gate** (Token ACL / sRFC37) enforcing per-lot Rule 144 seasoning, holder caps, and jurisdiction policy at account activation.
+1. [The problem](#the-problem)
+2. [Why it matters now](#why-it-matters-now)
+3. [The solution](#the-solution)
+4. [Why we are building this](#why-we-are-building-this)
+5. [Architecture](#architecture)
+6. [Deployed contracts (devnet)](#deployed-contracts-devnet)
+7. [Verify the deployment yourself](#verify-the-deployment-yourself)
+8. [Current status](#current-status)
+9. [Roadmap](#roadmap)
+10. [Repo structure](#repo-structure)
+11. [Build and run locally](#build-and-run-locally)
+12. [Documentation](#documentation)
+13. [Security, disclaimer and license](#security-disclaimer-and-license)
 
-## Build status — real, on devnet
+---
 
-Everything marked ✅ below is real and independently checkable. Nothing is
-mocked, and nothing is claimed that isn't built. The pilot asset is a real,
-self-issued Token-2022 mint, but its USDC backing is maintained by process
-today, not enforced on-chain ([`token/TOKENOMICS.md` §0](token/TOKENOMICS.md)).
-`npcs-treasury`, which enforces it, is deployed on devnet; the mint authority
-moves to it through a Squads vault proposal that is scripted and tested but
-not yet proposed (`DEPLOYMENTS.md`).
+## The problem
 
-| Component | Status | Where to verify |
+Private credit is moving on-chain. Tokenized credit funds such as ACRED, STAC,
+ONyc and SCOPE now sit on Solana, but the token wrapper has not changed the
+economics of the underlying fund. Each of these positions has three
+properties that make it illiquid:
+
+| Property | What it means for a holder |
+|---|---|
+| **Redemption gates** | Funds typically allow redemptions of about 5% of NAV per quarter. When requests exceed the cap, every request is pro-rated and the remainder waits for the next window. |
+| **Stale, self-reported NAV** | The manager marks the fund itself, usually once a quarter. Between marks there is no independent price, so nobody can say what a position is worth today. |
+| **Permissioned transfer** | Only eligible, attested investors may hold the token. It cannot be sold on an open DEX, and a lender that takes it as collateral cannot liquidate it there either. |
+
+The result is a large pool of capital with no exit and no price. A holder who
+needs liquidity has two options: wait in a queue of unknown length, or sell
+off-market to a buyer they have to find themselves, at a price nobody can
+check.
+
+Existing on-chain infrastructure does not solve this. Permissioned AMM pools
+(Orca, Uniswap), issuer venues (Securitize with Jump and Jupiter) and
+tranching protocols (Exponent) all shipped in 2026, and all of them are
+**venues**. A passive liquidity pool quoting against a stale NAV is picked off
+by anyone who knows more about the underlying loans than the last mark does.
+Lending markets (Kamino, Loopscale) accept tokenized credit as collateral but
+have no way to liquidate gated collateral when a loan goes bad.
+
+## Why it matters now
+
+- **The gate crisis became the defining event of 2026 for private credit.**
+  Apollo received redemption requests of about 17% of NAV against a 5% cap.
+  More than $5B of investor capital is waiting in redemption queues across
+  the largest funds.
+- **Tokenized private credit is scaling on Solana.** Kamino's RWA markets and
+  Loopscale hold most of the ACRED minted on Solana as collateral. OnRe's
+  ONyc has passed $300M AUM. Midas raised a $50M Series A plus a $40M
+  liquidity facility for instant liquidity on tokenized funds, which shows
+  that liquidity for these assets is a fundable business.
+- **The compliance rails now exist.** Token-2022, Token ACL (sRFC37) with
+  default-frozen accounts and permissionless thaw, and the Solana Attestation
+  Service (SAS) are live. For the first time, investor eligibility can be
+  enforced on-chain without a transfer hook on every transfer.
+
+The venue layer is getting crowded. The layer underneath it, which prices the
+asset, makes the queue tradable and makes the collateral liquidatable, is
+empty.
+
+## The solution
+
+NUNDINA is a set of eight Solana programs that together provide price
+discovery, queue liquidity and risk transfer for gated credit tokens.
+
+| Component | What it does |
+|---|---|
+| **Sealed-bid batch auction** (`auction-engine`) | Periodic, uniform-price auctions: commit (sealed hash plus escrowed cash) → reveal → clear → pro-rata at the margin → issuer right of first refusal → atomic delivery-versus-payment. There is no passive LP, so there is nothing to pick off. Each session produces an arm's-length clearing price. |
+| **Mark engine** (`mark-engine`) | Turns a stale NAV into a usable mark. It ingests the manager NAV and auction prints, moves through Fresh / Warned / Stale / Suspended states, and applies bounded haircuts. It never allows a liquidation on a stale mark. |
+| **Queue claim** (`queue-claim`) | The new primitive. A pro-rated redemption request becomes a tokenized claim that can be sold in an auction or pledged as collateral. When the fund pays the window, the claim holder is paid. |
+| **Liquidity facility** (`liquidity-facility`) | NAV-collateralized advances with a defined liquidation ladder: issuer right of first refusal → backstop bidder → forced-sale auction → workout. This is how permissioned collateral is actually liquidated. |
+| **Tranche engine** (`tranche-engine`) | Senior/junior credit-loss tranching with separate mark, realised-loss and recovery books, and a coupon waterfall. |
+| **Compliance gate** (`credit-gate`) | A Token ACL (sRFC37) gate program that reads SAS attestations. It enforces investor eligibility, per-lot Rule 144 seasoning, a holder cap and jurisdiction policy **when an account is activated**, so transfers after activation cost nothing extra. |
+| **Payment rails** (`payment-rails`) | The USDC cash layer under every engine: per-order escrow and bonds, refunds that anyone can trigger and that cannot be paused, the DvP cash leg, facility cash and the coupon waterfall. |
+| **Pilot asset treasury** (`npcs-treasury`) | Mints the pilot token NPCS only against deposited USDC (1:1) and redeems at the published NAV. |
+| **Shared math** (`credit-math`) | One fixed-point crate for NAV, clearing, pro-rata, waterfall and present value. Every rounding goes against the party that initiates the action. CI requires 100% line and branch coverage. |
+
+**Go-to-market (v1): the issuer-sponsored liquidity window.** The issuer runs
+an auction on its own securities, as a buyback and price-discovery tool. The
+issuer opens each session and keeps its right of first refusal. NUNDINA takes
+**no per-trade fee** (enforced on-chain: `MAX_FEE_BPS = 0`).
+
+## Why we are building this
+
+- **Be the mechanism, not the venue.** Venues are commoditizing. Pricing,
+  queue liquidity and risk transfer are the parts nobody has built, and every
+  venue, issuer and lender needs them.
+- **Never put a passive LP in front of a stale NAV.** A batch auction gathers
+  every buyer and seller at one moment and clears them at one price. That
+  removes the information advantage that drains passive liquidity.
+- **The queue is the asset.** A pro-rated redemption request is a dated,
+  priceable, financeable claim. No chain has tokenized it until now.
+- **Compliance at account activation, not at transfer.** Token ACL plus SAS
+  gives issuers the control they need without making every hop through a
+  wallet, lending market or route pay for a compliance check.
+- **Make gated credit usable as collateral.** Once a position has an
+  independent price and a defined liquidation path, lenders such as Kamino
+  can accept it with confidence, and holders can borrow against it instead of
+  waiting in a queue.
+
+---
+
+## Architecture
+
+### System overview
+
+```mermaid
+flowchart TB
+    subgraph Participants
+        INV[Investors and market makers<br/>Phantom / Backpack wallets]
+        ISS[Issuer / transfer agent]
+        LEND[Lenders and backstop bidders]
+    end
+
+    subgraph OffChain[Off-chain services]
+        APP[nundina.xyz<br/>Next.js dApp]
+        NAVP[NAV publisher]
+        CRANK[Crank runner<br/>phases, refunds, settlement]
+        IDX[Indexer, API,<br/>evidence exporter]
+    end
+
+    subgraph Compliance[Compliance layer]
+        SAS[(Solana Attestation<br/>Service)]
+        ACL[Token ACL<br/>sRFC37]
+        GATE[credit-gate]
+    end
+
+    subgraph Engines[NUNDINA engines]
+        AUC[auction-engine]
+        MARK[mark-engine]
+        QC[queue-claim]
+        FAC[liquidity-facility]
+        TR[tranche-engine]
+    end
+
+    subgraph Cash[Cash and asset layer]
+        RAILS[payment-rails<br/>USDC escrow, DvP, waterfall]
+        TREAS[npcs-treasury]
+        NPCS[(NPCS<br/>Token-2022 mint)]
+        USDC[(USDC)]
+    end
+
+    MATH[[credit-math<br/>shared fixed-point library]]
+    SQ[Squads v4 2-of-2 vault<br/>48 h timelock]
+
+    INV --> APP
+    ISS --> APP
+    LEND --> APP
+    APP --> AUC
+    APP --> QC
+    APP --> FAC
+
+    SAS --> GATE
+    ACL -->|thaw / freeze| NPCS
+    ACL --> GATE
+
+    AUC -->|per-order eligibility| GATE
+    AUC -->|reserve floor| MARK
+    AUC -->|clearing print| MARK
+    AUC -->|escrow and DvP| RAILS
+    QC -->|sell in a session| AUC
+    QC -->|pledge| FAC
+    FAC -->|protective mark| MARK
+    FAC -->|forced-sale session| AUC
+    FAC -->|advances and sweeps| RAILS
+    TR -->|coupon waterfall| RAILS
+    RAILS -->|settle_check| GATE
+    TREAS -->|mint 1:1 on deposit| NPCS
+    RAILS --> USDC
+    TREAS --> USDC
+
+    NAVP -->|publish_nav| MARK
+    CRANK --> AUC
+    CRANK --> RAILS
+    IDX -.reads.-> Engines
+
+    MATH -.linked into.-> Engines
+    MATH -.linked into.-> RAILS
+    SQ -.upgrade authority.-> RAILS
+    SQ -.upgrade authority.-> GATE
+    SQ -.mint authority.-> NPCS
+```
+
+### One auction session, end to end
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Seller (holder)
+    participant B as Buyers / market makers
+    participant AE as auction-engine
+    participant CG as credit-gate
+    participant ME as mark-engine
+    participant PR as payment-rails
+
+    AE->>ME: open_session: read the mark (reserve floor)
+    S->>AE: commit sealed ask (asset escrowed)
+    B->>AE: commit sealed bids
+    AE->>PR: escrow USDC and bonds
+    S->>AE: reveal
+    B->>AE: reveal
+    AE->>CG: check each order's eligibility
+    Note over AE: ineligible orders are excluded<br/>and their volume reallocated
+    AE->>AE: uniform-price clear, pro-rata at the margin
+    AE->>PR: settle_fill (one fill per instruction, atomic DvP)
+    PR->>CG: settle_check (seasoning, holder cap)
+    AE->>ME: record the clearing print
+    PR-->>B: refund unfilled cash and bonds (anyone can trigger)
+```
+
+### Design principles
+
+- **Atomic settlement.** Each fill moves the asset and the cash in one
+  instruction, or neither moves.
+- **Refunds cannot be paused.** Anyone can trigger a refund of escrowed cash
+  once a session fails or expires. No admin key can block it.
+- **No liquidation on a stale mark.** The facility checks the mark state
+  before any liquidation step.
+- **Upgrade authority under multisig.** `payment-rails`, `credit-gate` and the
+  NPCS mint authorities are held by a Squads v4 2-of-2 vault with a 48-hour
+  timelock on devnet.
+- **Every deployment is verifiable.** Program IDs, build hashes, slots and
+  upgrade authorities are recorded in [`DEPLOYMENTS.md`](DEPLOYMENTS.md) and
+  checked by keyless scripts.
+
+---
+
+## Deployed contracts (devnet)
+
+All addresses below were confirmed on Solana devnet on 2026-10-12. Build
+SHA-256 hashes, deploy slots, signatures and upgrade authorities are recorded
+in [`DEPLOYMENTS.md`](DEPLOYMENTS.md) and
+[`payment-rails/DEPLOYMENTS.md`](payment-rails/DEPLOYMENTS.md).
+
+### Programs
+
+| Program | Program ID | Verify |
 |---|---|---|
-| **`payment-rails`**: the USDC cash layer. Escrow and bonds (AE-P3/P4), permissionless never-pausable refunds (AE-P10), atomic one-fill DvP (AE-P8), issuer ROFR (AE-P7), facility funding, advances, interest and sweep (LF-P2/P6), exact-conservation cash waterfall (TE-P4) | ✅ **live devnet** · LiteSVM suite + kill-the-crank drill on a real validator. Squads upgrade #2 executed 2026-10-07; #3 (`GrantEngine`, fee cap 0) approved, executable 2026-10-09 20:43 UTC. The engines below drive it by CPI | [`payment-rails/`](payment-rails/) · `bash payment-rails/crank/scripts/devnet/verify.sh` |
-| `credit-math`: shared fixed-point crate (NAV, clearing, pro-rata, waterfall, PV, prudential floor) | ✅ built · unit + property suites · CI gates 100% line + branch coverage. **Wired:** clearing + pro-rata (`auction-engine`), haircuts (`mark-engine`), PV (`queue-claim`), waterfall, loss and accrual (`tranche-engine`), advance-rate bound (`liquidity-facility`), mul/div (`payment-rails`); `balance_after` and `fee_accrual_per_period` have no program caller | `cargo test --workspace` |
-| `credit-gate`: sRFC37 Gate Program | ✅ **on `main` (CG-P1..P7):** SAS attestation read (CG-P6), holder governor (CG-P4), block-list (CG-P5), lot ledger (CG-P3), `validate` + Token ACL `can_thaw`/`can_freeze` hooks (CG-P1), all against the **real** SAS and Token ACL programs in LiteSVM and on a validator. ✅ **live devnet** at `5ycY…X6XX` (#170), upgrade authority = Squads vault; NPCS thaws only through it (#171) | `DEPLOYMENTS.md` |
-| **NPCS**: the pilot asset (Token-2022, frozen-by-default, TLV metadata) | ✅ **mint live devnet** (`6vt1…VKL4`, #171) · gated by credit-gate through Token ACL; mint, permanent-delegate and metadata authority = Squads vault. Backing by process until the `npcs-treasury` hand-over | [`token/`](token/) · `DEPLOYMENTS.md` |
-| Off-chain services (#141) | ✅ built, not hosted: indexer (Postgres, RPC backfill + Helius webhooks), read API, NAV publisher (`credit-math` arithmetic, `publish_nav`), treasury agent (I1 check), crank-runner (phases · refunds · seasoning · distribution), session evidence bundles. Verified on a local validator with the real programs and against devnet (gate history indexed; sleeve BACKED; NAV dry run 1.000000). No Supabase/Helius project provisioned | [`services/`](services/README.md) · `payment-rails/crank/` |
-| Next.js 16 app (#144) | ✅ the three demo screens, read live from the cluster: **session** (phase clock, sealed → revealed book, clearing curves vs reserve and NAV, fills settled DvP, print; wallet commit + reveal), **portfolio** (NPCS, lots with seasoning countdown, claims, advances, orders), **gate check** (simulates credit-gate's real `validate` and shows its typed `GateReject` with the inputs it read). Plus (#199) the issuer ROFR decision, tranche positions, `/admin` (authority map from the chain; actions signed by the holding key or exported as a Squads proposal), `/data-room` (prints by disclosure class) and the private allowlist (wallet-signed sign-in + credit-gate admission; `access:e2e` passes on devnet). Full session flow end to end on a local validator (`npm run localnet:e2e`); on devnet once the first live session runs | [`client/`](client/README.md) |
-| CI (fmt · clippy `-D warnings` · tests · LiteSVM · IDL drift · drill · coverage · app lint + build), every job a required check | ⚠️ the suite passes in a local mirror of `ci.yml` + `docs.yml`; GitHub Actions jobs are failing on billing (no job runs) | `.github/workflows/ci.yml` |
-| SAS attester (credential + 3 schemas) | ✅ **live devnet** (#122) | `ops/gate/deployment-devnet.json` · `npm run sas -- verify` |
-| Token ACL wiring of NPCS | ✅ devnet (#171): new mint `6vt1wHVQ…VKL4` thaws only through credit-gate; mint/delegate/metadata authority = Squads vault | `ops/gate/`, `token/` |
-| Engines: `auction-engine`, `mark-engine`, `queue-claim` (#192), `tranche-engine`, `npcs-treasury` (#200) | ✅ **deployed on devnet**; venue, NPCS feed (NAV #1 = 1.000000), print source and queue wired. `liquidity-facility` deployed 2026-10-11; usable with NPCS after the credit-gate custody upgrade. The first live session (`payment-rails/crank/scripts/devnet/auction-session.ts`) is rehearsed on a devnet clone and waits on rails #3 and H's seasoning (2026-10-11) | `DEPLOYMENTS.md` § Engines |
+| `payment-rails` | `GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn` | [Solana Explorer](https://explorer.solana.com/address/GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn?cluster=devnet) · [Solscan](https://solscan.io/account/GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn?cluster=devnet) |
+| `credit-gate` | `5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX` | [Solana Explorer](https://explorer.solana.com/address/5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX?cluster=devnet) · [Solscan](https://solscan.io/account/5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX?cluster=devnet) |
+| `auction-engine` | `Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7` | [Solana Explorer](https://explorer.solana.com/address/Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7?cluster=devnet) · [Solscan](https://solscan.io/account/Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7?cluster=devnet) |
+| `mark-engine` | `79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH` | [Solana Explorer](https://explorer.solana.com/address/79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH?cluster=devnet) · [Solscan](https://solscan.io/account/79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH?cluster=devnet) |
+| `queue-claim` | `2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4` | [Solana Explorer](https://explorer.solana.com/address/2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4?cluster=devnet) · [Solscan](https://solscan.io/account/2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4?cluster=devnet) |
+| `liquidity-facility` | `PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY` | [Solana Explorer](https://explorer.solana.com/address/PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY?cluster=devnet) · [Solscan](https://solscan.io/account/PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY?cluster=devnet) |
+| `tranche-engine` | `CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS` | [Solana Explorer](https://explorer.solana.com/address/CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS?cluster=devnet) · [Solscan](https://solscan.io/account/CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS?cluster=devnet) |
+| `npcs-treasury` | `4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y` | [Solana Explorer](https://explorer.solana.com/address/4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y?cluster=devnet) · [Solscan](https://solscan.io/account/4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y?cluster=devnet) |
 
-### Programs: as built vs roadmap
+### Asset, governance and protocol accounts
 
-Seven programs are named in the design (SRS 08 §4), plus `npcs-treasury`.
-All have code, tests and IDLs; the table says which are on devnet.
+| Account | Address | Verify |
+|---|---|---|
+| NPCS pilot asset (Token-2022 mint, default-frozen) | `6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4` | [Solana Explorer](https://explorer.solana.com/address/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet) · [Solscan](https://solscan.io/token/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet) |
+| Squads v4 multisig (2-of-2, 48 h timelock) | `CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7` | [Solana Explorer](https://explorer.solana.com/address/CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7?cluster=devnet) · [Solscan](https://solscan.io/account/CHiMWD3q1eHZ8sfUCPzQPp9UWDQ7x2K75notiq1B39z7?cluster=devnet) |
+| Squads vault (upgrade and mint authority) | `8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV` | [Solana Explorer](https://explorer.solana.com/address/8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV?cluster=devnet) · [Solscan](https://solscan.io/account/8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV?cluster=devnet) |
+| Token ACL MintConfig for NPCS (freeze authority → `credit-gate`) | `3AccB1giyy9Jcc9GZXJKKEqLyNHdY1SPcw1jreX9NRDS` | [Solana Explorer](https://explorer.solana.com/address/3AccB1giyy9Jcc9GZXJKKEqLyNHdY1SPcw1jreX9NRDS?cluster=devnet) · [Solscan](https://solscan.io/account/3AccB1giyy9Jcc9GZXJKKEqLyNHdY1SPcw1jreX9NRDS?cluster=devnet) |
+| SAS credential `nundina` | `7H1P4RLB9VhsrSHwqtxJJsMC5wMtF9T7HUN6EUovhfxV` | [Solana Explorer](https://explorer.solana.com/address/7H1P4RLB9VhsrSHwqtxJJsMC5wMtF9T7HUN6EUovhfxV?cluster=devnet) · [Solscan](https://solscan.io/account/7H1P4RLB9VhsrSHwqtxJJsMC5wMtF9T7HUN6EUovhfxV?cluster=devnet) |
+| `payment-rails` config | `HxQznN6P3NjKBkyi3UGz1ePJjop76mHNiWP9kFtKKYyc` | [Solana Explorer](https://explorer.solana.com/address/HxQznN6P3NjKBkyi3UGz1ePJjop76mHNiWP9kFtKKYyc?cluster=devnet) · [Solscan](https://solscan.io/account/HxQznN6P3NjKBkyi3UGz1ePJjop76mHNiWP9kFtKKYyc?cluster=devnet) |
+| `mark-engine` NAV feed (NPCS) | `7b39TtCi6jLRFbNGSUU7tydefjWqc3w2jf5btdcQjT2k` | [Solana Explorer](https://explorer.solana.com/address/7b39TtCi6jLRFbNGSUU7tydefjWqc3w2jf5btdcQjT2k?cluster=devnet) · [Solscan](https://solscan.io/account/7b39TtCi6jLRFbNGSUU7tydefjWqc3w2jf5btdcQjT2k?cluster=devnet) |
+| `auction-engine` venue | `B6bnWtdFecb3ByMSi5uuKDhXojgbL3xdfEAspH3vmQ3j` | [Solana Explorer](https://explorer.solana.com/address/B6bnWtdFecb3ByMSi5uuKDhXojgbL3xdfEAspH3vmQ3j?cluster=devnet) · [Solscan](https://solscan.io/account/B6bnWtdFecb3ByMSi5uuKDhXojgbL3xdfEAspH3vmQ3j?cluster=devnet) |
+| `queue-claim` queue (NPCS) | `8HFKR5FkxMYcCgYqgvvPaPErQMsR4ccXjbHFkDyYavAK` | [Solana Explorer](https://explorer.solana.com/address/8HFKR5FkxMYcCgYqgvvPaPErQMsR4ccXjbHFkDyYavAK?cluster=devnet) · [Solscan](https://solscan.io/account/8HFKR5FkxMYcCgYqgvvPaPErQMsR4ccXjbHFkDyYavAK?cluster=devnet) |
 
-| Program | Crate | IDL | Tests | Crank | State |
-|---|---|---|---|---|---|
-| `payment-rails` | ✅ | ✅ | ✅ LiteSVM + drill | ✅ | live devnet |
-| `credit-gate` | ✅ | ✅ | ✅ LiteSVM + real SAS/Token ACL | — | live devnet `5ycY…X6XX` (#170), Squads-held |
-| `credit-math` (crate) | ✅ | n/a | ✅ unit + property | n/a | built; 14 of 16 public functions called by programs |
-| `auction-engine` | ✅ | ✅ | ✅ unit + LiteSVM (real rails, gate, SAS, mark) | ✅ phase crank + `crank run` (#149, #141) | **live devnet** (#192); first session after rails #3 |
-| `mark-engine` | ✅ | ✅ | ✅ unit + LiteSVM | — | **live devnet** (#192); NAV #1 published by `services` nav-publisher |
-| `queue-claim` | ✅ | ✅ | ✅ LiteSVM: sell path through `auction-engine`, pledge path through `liquidity-facility` | — | **live devnet** (#192); NPCS queue initialized |
-| `liquidity-facility` | ✅ | ✅ | ✅ unit + LiteSVM (full ladder through auction + rails) | ⚠️ permissionless steps | **live devnet** (2026-10-11); NPCS pledges wait for the credit-gate custody upgrade |
-| `tranche-engine` | ✅ | ✅ | ✅ unit + LiteSVM (waterfall through rails) | ✅ `crank distribute` (#141) | **live devnet** (#200); no pool yet |
+### Third-party programs NUNDINA integrates with
 
-Per-AC grades: [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md#11--as-built-grade-2026-10).
+| Program | Address |
+|---|---|
+| Solana Attestation Service | [`22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG`](https://explorer.solana.com/address/22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG?cluster=devnet) |
+| Token ACL (sRFC37) | [`TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP`](https://explorer.solana.com/address/TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP?cluster=devnet) |
+| Squads v4 | [`SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf`](https://explorer.solana.com/address/SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf?cluster=devnet) |
+| Circle devnet USDC (settlement mint) | [`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`](https://explorer.solana.com/address/4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU?cluster=devnet) |
 
-### P0 exit criteria
+No program is deployed on mainnet-beta yet. Mainnet deployment follows the
+external audit (see [Roadmap](#roadmap)).
 
-P0 (#4) was closed with three criteria unmet, and it is **open** again here (#129). Re-baselined in #100: each row
-says what is true, and the unmet ones are deferred to P1 explicitly rather
-than badged complete.
+---
 
-| # | Criterion (#4) | State | Evidence / deferral |
-|---|---|---|---|
-| 1 | `services/` (nav-publisher, crank-runner, indexer, evidence-exporter) | ⚠️ built, not hosted | [`services/README.md`](services/README.md): indexer, API, nav-publisher, treasury agent, crank-runner, evidence exporter built and tested (#191); no host (#141) |
-| 2 | `credit-math` skeleton with property tests running | ✅ | CI `credit-math — coverage` gates 100% lines + branches |
-| 3 | CI: anchor build + test; fmt/clippy; app lint | ✅ | `.github/workflows/ci.yml`: every job is a required check on `main`; `app — lint · typecheck · build` |
-| 4 | Squads 2-of-2 authority created; key ceremony + storage runbook | ✅ runbook · **Squads 2-of-2 live on devnet** (48h timelock) holding the `payment-rails` and `credit-gate` upgrade authorities and the NPCS mint, delegate and metadata authorities; vault-signed upgrades #2 (executed) and #3 (approved). The engines stay on the deploy key until after the demo | `ops/squads/`, `DEPLOYMENTS.md` § Squads (#126) |
-| 5 | Verifiable builds; program-ID registry | ⚠️ registry ✅ · `anchor build --verifiable` **deferred to P1** | `DEPLOYMENTS.md` + keyless `verify.sh`; pinned toolchains, SHA-256-verified CLI installs and a lockfile-drift check on every SBF build (#98); deployed `.so` files published as release assets (#99). No deterministic (docker) build yet |
-| 6 | Helius (dev) + Supabase (dev) provisioned | ⏭ **deferred to P1** | not provisioned; nothing in the repo references them ([`services/README.md`](services/README.md)) |
-| 7 | Dependabot `npm` entries | ✅ | `.github/dependabot.yml`: npm ×3, cargo ×4, github-actions |
+## Verify the deployment yourself
 
-**The P0 *story* is not met either (#129).** Beyond the #4 checklist, the
-substantive P0 exit (HACKATHON §4) is open:
+None of these checks needs a private key.
 
-| # | P0 exit | State | Blocker |
-|---|---|---|---|
-| 8 | An investor thaws **through** `credit-gate` (Token ACL) | ✅ | devnet (#170/#171): NPCS freeze authority = Token ACL → credit-gate `5ycY…`; holder H's account was thawed through the gate, a stranger gets `AttestationInvalid` (`/gate`) |
-| 9 | SAS attestation read by the gate | ✅ | credential + schemas live on devnet (`ops/gate/deployment-devnet.json`); CG-P6 read tested against the real SAS program (#122) |
-| 10 | R5 settles **live NPCS** | ❌ (ready) | R5 ran against a manifest mint (`payment-rails/PHASES.md`). The live-NPCS run is scripted and rehearsed (#145/#172): `payment-rails/crank/scripts/devnet/npcs-dvp.ts` passes end to end on a devnet clone with the exact pending rails build. Squads upgrade #2 is executed (2026-10-07); `--preflight` now waits only on holder H's lot seasoning (2026-10-11 07:53 UTC). The auction-engine version of the same fill (`auction-session.ts`, #200) is rehearsed too |
-| 11 | Auction session + queue-claim sale | ⚠️ | engines live on devnet (#192); a sealed-bid session over NPCS is scripted and rehearsed on a devnet clone with rails #3's build (cleared 0.97 vs NAV 1.00, 2 fills DvP, #200). Runs on devnet after rails #3 (2026-10-09) and H's seasoning (2026-10-11); the queue-claim sale follows on the same venue |
+```bash
+# 1. Program metadata: upgrade authority, last deployed slot, data length
+solana program show 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX -u devnet
 
-## Live on devnet
+# 2. Bytecode integrity: the dump must hash to the Build SHA-256 in DEPLOYMENTS.md
+solana program dump 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX gate.so -u devnet
+sha256sum gate.so
 
-Every address below opens in Solana Explorer (devnet). Build hashes, slots
-and upgrade authorities are in [`DEPLOYMENTS.md`](DEPLOYMENTS.md), and
-`bash payment-rails/crank/scripts/devnet/verify.sh` checks the rails row keylessly.
+# 3. payment-rails: source id, genesis hash, build SHA-256, upgrade authority
+#    and slot, all checked against the registry; fails closed on any mismatch
+bash payment-rails/crank/scripts/devnet/verify.sh
 
-| Program | Address | What it does | State |
-|---|---|---|---|
-| `payment-rails` | [`GdWm…Pocn`](https://explorer.solana.com/address/GdWmRivxe1k76apQB7EgJ4yBq8Fi3Lw25E8V3XosPocn?cluster=devnet) | USDC cash layer: escrow, DvP, refunds, facility cash, waterfall | upgrade #3 (2026-10-10), Squads vault |
-| `credit-gate` | [`5ycY…X6XX`](https://explorer.solana.com/address/5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX?cluster=devnet) | Token ACL gate program: SAS eligibility, governor, lots, settle_check | 2026-10-04 build; upgrade (LF-P5 custody, #211) pending, Squads vault |
-| `auction-engine` | [`Cw6w…Sod7`](https://explorer.solana.com/address/Cw6wNpVJUaofUDZewG8sDKZu3nnHga4GaJJvKn7rSod7?cluster=devnet) | sealed-bid uniform-price sessions | 2026-10-07 build; `main` fixes pending upgrade |
-| `mark-engine` | [`79yp…x4LH`](https://explorer.solana.com/address/79ypVjMMCDbmxYWaXTTgxz9jidjncoJAhHQC6e13x4LH?cluster=devnet) | NAV feed, staleness states, prints | 2026-10-07 build; NAV #1 published |
-| `queue-claim` | [`2EpA…red4`](https://explorer.solana.com/address/2EpAnJkvw6FH8j97k7WRE72E7oyarZpf7t2TYa26red4?cluster=devnet) | tokenized redemption-queue claims | 2026-10-07 build; NPCS queue initialized |
-| `tranche-engine` | [`Cvca…cFAS`](https://explorer.solana.com/address/CvcaeyuPu7SrFJ91WniJfBhUbQBkb8QQVL9fyK4wcFAS?cluster=devnet) | senior/junior credit-loss waterfall | 2026-10-08 build; no pool yet |
-| `npcs-treasury` | [`4Bsz…ut1y`](https://explorer.solana.com/address/4BszRuAP4Gp7vdyu9MjE28gV8YTNtJZSRJRMQHdMut1y?cluster=devnet) | I1 mint-on-deposit, redeem at NAV | deployed; hand-over (Squads `propose-treasury`) pending |
-| `liquidity-facility` | [`PTNC…S7hY`](https://explorer.solana.com/address/PTNCoDA5WTbAN5RARzUA19Yr3qJYBzwwH63RPFKS7hY?cluster=devnet) | NAV-collateralized advances + liquidation ladder | deployed 2026-10-11 (`9WH1`); no facility opened until the credit-gate custody upgrade |
-| NPCS mint (Token-2022) | [`6vt1…VKL4`](https://explorer.solana.com/address/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet) | the pilot asset, default-frozen, thaws only through credit-gate | supply 1.000000 |
-| Squads vault | [`8wj1…XLCV`](https://explorer.solana.com/address/8wj1EfUyfNvBaMhxBd2iuyC7RLQh9oW2AAQdNRzdXLCV?cluster=devnet) | 2-of-2, 48 h timelock: rails + gate upgrade authority, NPCS mint authority | — |
+# 4. credit-gate: the same checks, plus whether this checkout builds the live binary
+bash programs/credit-gate/scripts/verify.sh
+
+# 5. The NPCS mint: full extension manifest and provenance
+cd token && npm install && CLUSTER=devnet npm run verify
+
+# 6. The Squads migration record and the SAS credential and schemas
+cd ops/squads && npm ci && npx tsx migrate.ts verify
+cd ops/gate && npm ci && npm run sas -- verify
+```
+
+---
+
+## Current status
+
+As of 2026-10-12.
+
+| Area | Status |
+|---|---|
+| Programs | All eight programs have code, IDLs and tests, and all eight are deployed on devnet. |
+| Testing | Unit and property tests; LiteSVM integration suites that run against the real SAS, Token ACL and Squads programs; a "kill-the-crank" drill on a real validator; fuzz targets for the cash math; 100% line and branch coverage on `credit-math`. |
+| Compliance | Live on devnet. NPCS accounts are frozen by default and thaw only through `credit-gate` via Token ACL. An attested holder is admitted; a wallet without an attestation is rejected with a typed error. |
+| Cash layer | `payment-rails` is live and under the Squads vault (three upgrades executed through 2-of-2 proposals). A full commit → settle → payout run with DvP fills, refunds and a clean reconciliation is recorded on devnet in [`payment-rails/DEPLOYMENTS.md`](payment-rails/DEPLOYMENTS.md). |
+| Engines | Venue, NAV feed (NAV #1 = 1.000000 USDC published), print source and redemption queue are initialized on devnet. A full sealed-bid session over NPCS is scripted and has passed on a clone of devnet (cleared at 0.97 against NAV 1.00, two DvP fills, clean reconciliation). |
+| Governance | Squads proposal #4 (`credit-gate` custody upgrade) and #5 (NPCS mint authority handed to `npcs-treasury`, so backing is enforced by code) are approved and become executable on 2026-10-13 after the 48-hour timelock. |
+| Application | [nundina.xyz](https://nundina.xyz): auction session view (phase clock, sealed and revealed book, clearing curve, fills), portfolio (lots with seasoning countdown, claims, advances), gate check, issuer ROFR decisions, tranche positions, admin authority map and data room, all reading the chain live. |
+| Off-chain services | Indexer, read API, NAV publisher, treasury agent, crank runner and evidence exporter are built and tested; not yet hosted. |
+| Audit | Scope written ([`10-Audit-Scope-P7.md`](preresearch/architecture/10-Audit-Scope-P7.md)); no external audit performed yet. |
+
+A detailed, per-requirement audit of what is built is in [`STATUS.md`](STATUS.md)
+and [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md).
+
+---
+
+## Roadmap
+
+### Phase 1: Devnet completion (October 2026)
+
+- Execute Squads proposals #4 and #5: the `credit-gate` custody module goes
+  live and NPCS backing becomes enforced on-chain by `npcs-treasury`.
+- Register the facility signer as an NPCS custodian and open the first
+  liquidity facility.
+- Run the first live sealed-bid auction session and the first queue-claim
+  sale on devnet, with signed evidence bundles.
+- Move the engine upgrade authorities into the Squads vault.
+- Host the off-chain services (indexer, NAV publisher, crank runner).
+
+### Phase 2: Security and legal readiness (Q4 2026)
+
+- Full external audit of the programs that hold or move client cash
+  (`payment-rails`, `credit-gate`), followed by the engines. Every critical
+  and high finding fixed and re-reviewed; the report published.
+- Engage securities counsel on the open questions in the
+  [counsel engagement brief](preresearch/architecture/11-Counsel-Engagement-Brief.md)
+  (resale exemptions, Rule 144 mechanics, holder counting).
+- Reproducible (verifiable) builds for every program.
+
+### Phase 3: Market maker onboarding (Q4 2026 – Q1 2027)
+
+The auction only works if there is depth on both sides of every session.
+NUNDINA will onboard professional market makers and credit desks as
+recurring participants:
+
+- **Session bidders**: attested market makers commit sealed bids in every
+  scheduled window, giving sellers a reliable floor of demand.
+- **Backstop bidders**: committed buyers on the liquidation ladder of the
+  liquidity facility, who bid on collateral before any forced-sale auction.
+- **Junior capital**: credit funds that take the first-loss tranche in
+  `tranche-engine` pools.
+- Onboarding through the same SAS attestation and `credit-gate` admission
+  path as every other participant, with dedicated API and crank tooling for
+  automated bidding.
+
+### Phase 4: Ecosystem partnerships (in discussion)
+
+NUNDINA is in active discussions with two Solana ecosystem partners. No
+agreement has been signed; the scope below is what is under discussion.
+
+- **OnRe**: the leading candidate for the first issuer-sponsored liquidity
+  window. ONyc already publishes NAV attestations and is oriented toward
+  liquidity, which makes it a natural first asset for a sealed-bid window and
+  a tokenized redemption queue.
+- **Kamino**: integration on two fronts. First, routing liquidity-facility
+  collateral and advances to Kamino markets where they can host the position,
+  with NUNDINA's facility as the venue of last resort. Second, using Kamino's
+  USDC supply vault as the yield-bearing backing sleeve for NPCS and future
+  pilot assets. In both cases NUNDINA supplies what Kamino's RWA markets lack
+  today: an independent mark and a defined liquidation path for gated
+  collateral.
+
+### Phase 5: Mainnet pilot (2027)
+
+- Deploy to mainnet-beta under a Squads 2-of-2 held on two separate hardware
+  wallets.
+- Re-run all twelve acceptance scenarios of the
+  [pilot specification](preresearch/architecture/08-SRS-Pilot-Rails.md) on
+  mainnet with real USDC, recorded and reproducible.
+- First issuer-sponsored window with a live issuer.
+
+### Beyond the pilot
+
+- **v2, partner ATS**: a registered broker-dealer / ATS operates the venue for
+  investor-to-investor flow, and NUNDINA licenses the engine.
+- **v3, structured and offshore**: tranche SPVs, an externally funded
+  facility, and a separate Reg S offshore book.
+
+---
 
 ## Repo structure
 
 ```
 nundina/
-├── token/                    ← THE ASSET: NPCS pilot token (docs, scripts, params, runbook)
-│   ├── README.md             ← overview + live mint facts + verify how-to
-│   ├── ARCHITECTURE.md       ← mint anatomy, creation sequence, movement topology (mermaid)
-│   ├── TOKENOMICS.md         ← the three invariants + the exact math (mermaid)
-│   ├── runbook.md            ← ops procedures + verified Token-2022 mechanics
-│   ├── params.toml           ← every parameter, single source of truth
-│   ├── scripts/init-mint.ts  ← creates the mint (exact extension manifest)
-│   ├── scripts/verify.ts     ← asserts manifest + provenance on a live mint
-│   └── keys/                 ← gitignored keypairs + deployment records
-├── programs/                 ← Anchor workspace (solana programs + shared math)
-│   ├── credit-gate/          ← Gate Program for Token ACL (sRFC37) — audit-scope-critical
-│   ├── mark-engine/          ← NAV feeds, mark states, prints, MARK_PROTECTIVE (#137)
-│   ├── auction-engine/       ← sealed-bid uniform-price sessions over payment-rails (#136)
-│   ├── liquidity-facility/   ← advances at MARK_PROTECTIVE + liquidation ladder (#139)
-│   ├── queue-claim/          ← redemption-queue claims: sell or pledge (#138)
-│   ├── tranche-engine/       ← senior/junior tranching, three-book accounting (#140)
-│   ├── npcs-treasury/        ← I1 mint-on-deposit treasury: the only NPCS mint path (#148)
-│   └── credit-math/          ← shared fixed-point arithmetic — every money path routes here
-├── payment-rails/            ← USDC money layer: escrow, DvP cash leg, payouts (own workspace; live on devnet)
-│   ├── programs/payment-rails/ ← the Anchor program — audit-scope-critical
-│   ├── tests-svm/            ← LiteSVM integration tests (own workspace + lockfile)
-│   ├── fuzz/                 ← fuzz targets for the cash math (cargo-fuzz; stable smoke in CI)
-│   ├── crank/                ← settlement/refund crank, reconciliation ledger, evidence export (TS)
-│   └── DEPLOYMENTS.md        ← payment-rails deployment registry
-├── client/                   ← Next.js 16 site + dApp (nundina.xyz; /app/* reads the chain live)
-├── ops/gate/                 ← credit-gate onboarding: SAS credential/schemas/attestations, Token ACL wiring (#122)
-├── ops/squads/               ← Squads v4 2-of-2 authority migration + record (#126)
-├── services/                 ← off-chain services: indexer, API, NAV publisher, treasury agent, crank-runner (#141; not hosted)
-├── preresearch/              ← the research corpus that justifies every design decision
-│   ├── architecture/         ← 00 index · 05 problem register · 06 solution · 07 legal · 08 SRS · 09 asset spec
-│   └── research/             ← 12 · dated market evidence (2026 reality check)
-├── DEPLOYMENTS.md            ← official registry: every program + mint, independently verifiable
-└── Anchor.toml               ← workspace config (anchor 1.1.2 · solana 2.3.0)
+├── programs/                 ← Anchor workspace: seven programs + shared math
+│   ├── credit-gate/          ← Token ACL (sRFC37) gate program, reads SAS attestations
+│   ├── auction-engine/       ← sealed-bid uniform-price sessions over payment-rails
+│   ├── mark-engine/          ← NAV feed, mark states, prints, protective mark
+│   ├── queue-claim/          ← tokenized redemption-queue claims: sell or pledge
+│   ├── liquidity-facility/   ← NAV-collateralized advances + liquidation ladder
+│   ├── tranche-engine/       ← senior/junior tranching, three-book accounting
+│   ├── npcs-treasury/        ← mint-on-deposit treasury for the pilot asset
+│   └── credit-math/          ← shared fixed-point arithmetic
+├── payment-rails/            ← USDC cash layer (own Anchor workspace)
+│   ├── programs/payment-rails/ ← the Anchor program
+│   ├── tests-svm/            ← LiteSVM integration tests for the rails and every engine
+│   ├── fuzz/                 ← fuzz targets for the cash math
+│   ├── crank/                ← settlement / refund crank, devnet scripts, evidence export
+│   └── DEPLOYMENTS.md        ← payment-rails deployment history
+├── client/                   ← Next.js 16 site and dApp (nundina.xyz)
+├── services/                 ← indexer, API, NAV publisher, treasury agent, crank runner
+├── token/                    ← NPCS pilot asset: docs, parameters, mint and verify scripts
+├── ops/
+│   ├── gate/                 ← SAS credential, schemas, attestations; Token ACL wiring
+│   ├── squads/               ← Squads v4 2-of-2 authority migration and record
+│   └── engines/              ← engine operations records (NAV inputs)
+├── preresearch/              ← research corpus behind every design decision
+│   ├── architecture/         ← problem register, solution architecture, legal, SRS, audit scope
+│   └── research/             ← dated market evidence
+├── DEPLOYMENTS.md            ← official deployment registry
+├── STATUS.md                 ← as-built audit against the specification
+├── HACKATHON.md              ← hackathon track map
+└── Anchor.toml               ← workspace config (anchor 1.1.2, solana 2.3.0)
 ```
 
-## Verify it yourself
+---
+
+## Build and run locally
+
+Toolchain: Rust 1.98.1 (pinned in `rust-toolchain.toml`), anchor-cli 1.1.2,
+solana-cli 2.3.0, Node.js 24.
 
 ```bash
-# the shared math crate — unit + property tests
+# Programs (root workspace) and their tests
+anchor build
 cargo test --workspace
 
-# the live NPCS token on devnet — full manifest + provenance audit
-cd token && npm install && CLUSTER=devnet npm run verify
+# Cash layer and the LiteSVM integration suites
+cd payment-rails && anchor build
+cd tests-svm && cargo test
 
-# the deployed credit-gate program
-solana program show 5ycYLKQjrbwxQ6VQLUSkQZXwLMn1zEeJ6f5ogFYzX6XX -u devnet
+# Web application
+cd client && npm ci && npm run dev        # http://localhost:3000
 
-# the live payment-rails program: keyless, read-only; checks source id,
-# genesis, build SHA-256, upgrade authority and slot against the registry
-bash payment-rails/crank/scripts/devnet/verify.sh
+# Full auction session on a local validator, with the real programs
+cd client && npm run localnet             # starts the validator with program state
+npm run localnet:e2e                      # in a second terminal
+
+# Off-chain services
+cd services && npm ci && npm test
 ```
 
-## Reading order for a newcomer
+---
 
-1. [`token/TOKENOMICS.md`](token/TOKENOMICS.md) — what NPCS is and the three invariants (15 min)
-2. [`token/ARCHITECTURE.md`](token/ARCHITECTURE.md) — how the token is built on Solana (15 min)
-3. [`preresearch/research/12-Validation-2026-Reality-Check.md`](preresearch/research/12-Validation-2026-Reality-Check.md) — why now, with dated evidence
-4. [`preresearch/architecture/05-Problem-Register.md`](preresearch/architecture/05-Problem-Register.md) — what kills this, ranked
-5. [`preresearch/architecture/06-Solution-Architecture-v2.md`](preresearch/architecture/06-Solution-Architecture-v2.md) — the six-program design
-6. [`preresearch/architecture/08-SRS-Pilot-Rails.md`](preresearch/architecture/08-SRS-Pilot-Rails.md) — the build spec (12 acceptance scenarios)
+## Documentation
 
-All diagrams are Mermaid — they render natively on GitHub.
+| Document | Purpose |
+|---|---|
+| [`client/src/content/docs/`](client/src/content/docs/) | Protocol documentation, also published at nundina.xyz/docs |
+| [`preresearch/research/12-Validation-2026-Reality-Check.md`](preresearch/research/12-Validation-2026-Reality-Check.md) | Market evidence: why now |
+| [`preresearch/architecture/05-Problem-Register.md`](preresearch/architecture/05-Problem-Register.md) | Ranked register of what could stop the project |
+| [`preresearch/architecture/06-Solution-Architecture-v2.md`](preresearch/architecture/06-Solution-Architecture-v2.md) | Full solution architecture |
+| [`preresearch/architecture/07-Legal-Topology-and-Compliance.md`](preresearch/architecture/07-Legal-Topology-and-Compliance.md) | Legal topology and compliance design |
+| [`preresearch/architecture/08-SRS-Pilot-Rails.md`](preresearch/architecture/08-SRS-Pilot-Rails.md) | Pilot specification and the twelve acceptance scenarios |
+| [`token/TOKENOMICS.md`](token/TOKENOMICS.md) | NPCS pilot asset and its invariants |
+| [`payment-rails/INTERFACE.md`](payment-rails/INTERFACE.md) | Cash-layer interface used by every engine |
+| [`ops/squads/README.md`](ops/squads/README.md) | Authority migration to Squads |
+| [`DEPLOYMENTS.md`](DEPLOYMENTS.md) | Deployment registry and verification procedure |
 
-## Position
+---
 
-- **Be the mechanism, not the venue.** The venue layer is commoditizing; the pricing/queue/risk-transfer layer is empty.
-- **Never put a passive LP in front of a stale NAV.** Batch auction or nothing.
-- **Compliance at account activation, not at transfer.** Token ACL + SAS, not transfer hooks.
-- **The queue is the asset.** A pro-rated redemption request is a dated, priceable, financeable claim nobody has tokenized on any chain.
+## Security, disclaimer and license
 
-## License
+**Security.** Please report vulnerabilities privately as described in
+[`SECURITY.md`](.github/SECURITY.md). Do not open public issues for
+security findings.
 
-MIT — see [LICENSE](LICENSE). Security-sensitive findings: see [SECURITY.md](.github/SECURITY.md) for responsible disclosure.
+**Disclaimer.** NUNDINA is a devnet pilot. The software has not been audited,
+no counsel has cleared its legal structure, and nothing in this repository is
+an offer of securities, investment advice or a claim about returns. NPCS is a
+pilot asset issued by the team for testing; it is not a fund interest and
+NUNDINA has no protocol token.
+
+**License.** MIT. See [LICENSE](LICENSE).
