@@ -25,15 +25,16 @@ financed.
 2. [Why it matters now](#why-it-matters-now)
 3. [The solution](#the-solution)
 4. [Why we are building this](#why-we-are-building-this)
-5. [Architecture](#architecture)
-6. [Deployed contracts (devnet)](#deployed-contracts-devnet)
-7. [Verify the deployment yourself](#verify-the-deployment-yourself)
-8. [Current status](#current-status)
-9. [Roadmap](#roadmap)
-10. [Repo structure](#repo-structure)
-11. [Build and run locally](#build-and-run-locally)
-12. [Documentation](#documentation)
-13. [Security, disclaimer and license](#security-disclaimer-and-license)
+5. [Hackathon tracks](#hackathon-tracks)
+6. [Architecture](#architecture)
+7. [Deployed contracts (devnet)](#deployed-contracts-devnet)
+8. [Verify the deployment yourself](#verify-the-deployment-yourself)
+9. [Current status](#current-status)
+10. [Roadmap](#roadmap)
+11. [Repo structure](#repo-structure)
+12. [Build and run locally](#build-and-run-locally)
+13. [Documentation](#documentation)
+14. [Security, disclaimer and license](#security-disclaimer-and-license)
 
 ---
 
@@ -122,6 +123,87 @@ issuer opens each session and keeps its right of first refusal. NUNDINA takes
   independent price and a defined liquidation path, lenders such as Kamino
   can accept it with confidence, and holders can borrow against it instead of
   waiting in a queue.
+
+---
+
+## Hackathon tracks
+
+NUNDINA is submitted to the **Colosseum Crypto World's Fair** hackathon. It
+is built entirely on Solana by a team based in India.
+
+| Track | Organizer | Why NUNDINA fits |
+|---|---|---|
+| **Solana Ecosystem Track** (with eligibility for Grand Champion, the Top 20 standout teams and the Colosseum Accelerator) | Colosseum | Solana-native from the asset up: Token-2022, Token ACL (sRFC37), the Solana Attestation Service and Squads v4 are wired together on devnet, and the new primitive (a tokenized redemption-queue claim) exists on no other chain. |
+| **Public Goods Award** | Colosseum | `credit-gate` is a reusable, MIT-licensed Token ACL gate program that any RWA issuer on Solana can point its mint at. `credit-math` is a standalone, fully covered fixed-point library for NAV, clearing, pro-rata and waterfall math. |
+| **Superteam India** | Superteam Earn | A clear problem ($5B+ trapped behind redemption gates), defined users (issuers, holders, market makers, lenders), a working product on devnet with a live application, and partnership discussions with OnRe and Kamino. |
+| **CertiK Security Audit Credits** | Superteam Earn / CertiK | A DeFi/RWA protocol that holds client cash, plans a mainnet launch, and has already written its audit scope. The SRS requires a full external audit before mainnet. |
+| **Adevar Labs Pre-Audit** | Superteam Earn / Adevar Labs | A Solana/Rust codebase of 22,000+ lines across eight programs, with a documented architecture, a complete test and verification setup, and a clear path to launch. |
+
+### What we have implemented
+
+**At a glance**
+
+| Measure | Value |
+|---|---|
+| Anchor programs on devnet | **8 of 8** (`payment-rails`, `credit-gate`, `auction-engine`, `mark-engine`, `queue-claim`, `liquidity-facility`, `tranche-engine`, `npcs-treasury`) |
+| On-chain Rust | **22,100+ lines** across the eight programs and `credit-math` |
+| Off-chain TypeScript | crank **2,800** lines · services **1,500** lines · application **8,900** lines |
+| Rust test cases | **300+** unit, property and integration tests |
+| LiteSVM integration suites | **13** (auction, escrow, facility, gate, keeper, mark, NPCS, payout, queue, settle, tranche, treasury, UI fixture), run against the real SAS, Token ACL and Squads program binaries dumped from devnet |
+| Fuzz targets | **6** (clearing, facility, pro-rata, refund bond, settle fill, waterfall) |
+| Coverage gate | **100%** line and branch coverage on `credit-math` |
+| Governance | Squads v4 **2-of-2** with a **48-hour timelock**, holding the `payment-rails` and `credit-gate` upgrade authorities and the NPCS mint authorities; **3 upgrades executed** through the vault, 2 more approved |
+
+**Solana Ecosystem Track: what is built on Solana primitives**
+
+| Primitive | How NUNDINA uses it | Evidence |
+|---|---|---|
+| Token-2022 | NPCS pilot asset with DefaultAccountState = Frozen, PermanentDelegate, MetadataPointer and on-chain TLV metadata (including a `status` field) | [NPCS on Explorer](https://explorer.solana.com/address/6vt1wHVQVuhnfJ3FtNbq4647mCjWUBmJCDABsYUgVKL4?cluster=devnet) · `cd token && CLUSTER=devnet npm run verify` |
+| Token ACL (sRFC37) | NPCS freeze authority is a Token ACL MintConfig that delegates thaw and freeze decisions to `credit-gate`. Accounts thaw permissionlessly, but only if the gate approves | [MintConfig on Explorer](https://explorer.solana.com/address/3AccB1giyy9Jcc9GZXJKKEqLyNHdY1SPcw1jreX9NRDS?cluster=devnet) |
+| Solana Attestation Service | NUNDINA runs its own SAS credential with three schemas (identity, accreditation, redemption request). `credit-gate` parses attestations on-chain | [`ops/gate/`](ops/gate/) · `npm run sas -- verify` |
+| Squads v4 | Upgrade and mint authorities moved to a 2-of-2 vault with a 48-hour timelock; every migration step is recorded and keylessly re-checkable | [`ops/squads/`](ops/squads/README.md) |
+| Cross-program composition | Eight programs that call each other: the auction checks the gate per order, settles through the rails, and prints into the mark engine; the rails call the gate's `settle_check` on every fill; queue claims sell through the auction or pledge into the facility | [Architecture](#architecture) |
+| Address lookup tables | The crank packs auction settlement into versioned transactions with ALTs to stay inside the packet limit | [`payment-rails/crank/`](payment-rails/crank/) |
+| Circle USDC | All settlement in Circle devnet USDC; a full commit → settle → payout run with DvP fills and refunds is recorded on devnet with every transaction linked | [`payment-rails/DEPLOYMENTS.md`](payment-rails/DEPLOYMENTS.md) |
+
+**Feature by feature**
+
+| Feature | Implemented behaviour | Where it is tested |
+|---|---|---|
+| Compliance at activation | SAS attestation read, eligibility, jurisdiction policy, holder cap (12(g) governor), block-list, per-lot Rule 144 seasoning ledger, issuer flags, minimum ticket, exemption classes, Reg S period, affiliate limit, custody moves for pledged lots | LiteSVM against real SAS and Token ACL; live on devnet (an attested holder thaws, a stranger is rejected with `AttestationInvalid`) |
+| Sealed-bid batch auction | Commit (hash plus escrowed cash and bond) → reveal → per-order gate check with reallocation → uniform-price clear above a mark-based reserve → pro-rata at the margin → issuer ROFR → one-fill-per-instruction DvP → clearing print; investor-level self-trade and cash caps; partial settlement | LiteSVM end to end with three bidders; full session over NPCS rehearsed on a devnet clone (cleared 0.97 against NAV 1.00) |
+| Mark engine | Publisher-set NAV with deviation bound, quorum and SAS-attested NAV; Fresh / Warned / Stale / Suspended / Frozen states with evented transitions; bounded haircuts; decayed-VWAP implied price from prints; protective mark for lending | LiteSVM; live on devnet with NAV #1 published |
+| Queue claim | Attested redemption request → claim token (frozen until issuer consent) → sell in an auction session or pledge into the facility; window fills pay the holder; present-value model; cancel and refund | LiteSVM: sell path through `auction-engine`, pledge path through `liquidity-facility` |
+| Liquidity facility | Advances at the protective mark on a Fresh mark only; maintenance health check with grace and cure; no liquidation on a Stale or Suspended mark; ladder: issuer ROFR → backstop → forced-sale auction → workout with shortfall booked | LiteSVM: full ladder through the auction and the rails |
+| Tranche engine | Pools only with an indenture hash; senior/junior Token-2022 tranches; junior lock-up; mark, realised-loss and recovery books; coupon waterfall through the rails; subordination invariant blocks a junior exit | LiteSVM |
+| Payment rails | Per-escrow vaults and bonds, refunds that anyone can trigger and no admin can pause, atomic DvP cash leg, ROFR, facility funding and sweeps, exact-conservation waterfall, engine role grants, no per-trade fee (`MAX_FEE_BPS = 0`) | LiteSVM, a kill-the-crank drill on a real validator, fuzzing; live on devnet |
+| Asset treasury | NPCS minted only 1:1 against deposited USDC, redeemed at the published NAV | LiteSVM and a localnet end-to-end test with the real Squads program |
+| Off-chain services | Indexer, read API, NAV publisher, treasury backing agent, crank runner (phases, refunds, seasoning, distribution), signed session evidence bundles | Node test suites; run against a local validator and devnet |
+| Application | [nundina.xyz](https://nundina.xyz): auction session (phase clock, sealed and revealed book, clearing curve, fills), portfolio, gate check, queue, facility, tranches, treasury, issuer ROFR, admin authority map, data room, wallet-signed allowlist | Vitest, lint and type checks; full session end to end on a local validator |
+
+**CertiK and Adevar Labs: audit scope**
+
+The programs that hold or move client cash come first. Line counts are
+`src/` only.
+
+| Program | Lines of Rust | Why it is in scope |
+|---|---|---|
+| `payment-rails` | 5,736 | Holds all client USDC: escrow, DvP, refunds, facility cash, waterfall |
+| `credit-gate` | 5,296 | Securities compliance core: decides who may hold and receive the asset |
+| `auction-engine` | 2,339 | Price discovery and settlement instructions |
+| `queue-claim` | 1,969 | New primitive; pays window proceeds to claim holders |
+| `liquidity-facility` | 1,768 | Lending and liquidation ladder |
+| `mark-engine` | 1,713 | Price input for reserves, haircuts and liquidation guards |
+| `tranche-engine` | 1,348 | Loss allocation across tranches |
+| `credit-math` | 1,277 | Every money calculation routes through it |
+| `npcs-treasury` | 683 | Mint and redeem against USDC backing |
+| Crank (TypeScript) | 2,792 | Permissionless settlement and refund automation |
+
+The written audit scope is [`preresearch/architecture/10-Audit-Scope-P7.md`](preresearch/architecture/10-Audit-Scope-P7.md),
+and the launch plan is in the [Roadmap](#roadmap). Launch readiness already in
+place: a deployment registry with build hashes, keyless verification scripts,
+pinned toolchains with SHA-256-verified CLI installs, a lockfile-drift check on
+every SBF build, a key-custody runbook, and Squads-held authorities.
 
 ---
 
