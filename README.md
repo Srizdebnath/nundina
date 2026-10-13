@@ -435,106 +435,50 @@ and [SRS 08 §1.1](preresearch/architecture/08-SRS-Pilot-Rails.md).
 
 ## Audit readiness
 
-**We have not been audited. We are asking to be.**
+**We have not been audited. We are asking to be.** NUNDINA moves other people's USDC
+through a compliance gate that decides who may hold a security, so the two properties
+worth attacking are cash conservation — can any sequence move more USDC out of a
+vault than went in — and gate bypass — can an unseasoned lot be sold, or the gate be
+walked around via thaw, settle or CPI. A pre-audit would find those now rather than in
+a post-mortem.
 
-NUNDINA moves other people's USDC through a compliance gate that decides who may
-hold a security. That makes two properties worth attacking: **cash conservation** —
-can any sequence move more USDC out of a vault than went in, or strand a user's
-funds — and **gate bypass** — can a token reach a wallet the gate would refuse, or an
-unseasoned lot be sold. Both are subtle, both are expensive to get wrong, and neither
-is visible from a skim. We would rather find them before mainnet.
+**22,129 lines of Rust across nine Anchor programs**, plus **15,295 lines of tests** —
+LiteSVM suites against the real SAS, Token ACL and Squads binaries, not mocks.
 
-A pre-audit would do most of the work of a real one and hand a full audit a
-remediated codebase to look at instead of a raw one.
-
-### Scope
-
-**22,129 lines of Rust across nine Anchor programs**, plus **15,295 lines of Rust
-tests** — LiteSVM suites that execute against the real SAS, Token ACL and Squads
-programs, not mocks. The programs CPI into third-party programs, which is where
-auditors earn their fee.
-
-| Program | Lines | Priority | Why it matters |
+| Program | Lines | Scope | Why it matters |
 |---|---:|---|---|
-| `payment-rails` | 5,736 | **Fixed scope** | Holds all client cash: escrow and bonds, never-pausable refunds, the DvP cash leg, issuer ROFR, facility funding / advances / sweep, the coupon waterfall, bonded keepers, engine grants |
-| `credit-gate` | 5,296 | **Fixed scope** | sRFC37 gate: SAS attestation read, holder governor, block-list, lot ledger (seasoning), `validate`, the Token ACL thaw/freeze hooks, and the settle-time `settle_check` every fill CPIs |
-| `auction-engine` | 2,339 | **Fixed scope** (escrow / clearing / settlement paths) | Sealed commitments, uniform-price clearing, pro-rata allocation, the ROFR window, settlement through the rails, the print |
+| `payment-rails` | 5,736 | **Fixed** | Holds all client USDC: escrow, never-pausable refunds, the DvP cash leg, ROFR, facility cash, coupon waterfall |
+| `credit-gate` | 5,296 | **Fixed** | The securities compliance core — decides who may hold and receive the asset |
+| `auction-engine` | 2,339 | **Fixed** (clearing / settlement paths) | Sealed bids, uniform-price clear, pro-rata, DvP settlement, the print |
 | `queue-claim` | 1,969 | Best effort | Redemption-queue claims: sell, pledge, sweep |
-| `liquidity-facility` | 1,768 | **Fixed scope** | Advances at the protective mark, the stale-mark guard, the liquidation ladder (ROFR → backstop → flagged forced sale) |
-| `mark-engine` | 1,713 | Best effort | NAV publication, mark states and haircuts, print ingestion |
-| `tranche-engine` | 1,348 | Best effort | Senior/junior pools, three-book accounting, waterfall through the rails |
-| `credit-math` | 1,277 | **Fixed scope** | Every money path's arithmetic: NAV, clearing, pro-rata, waterfall, PV, accrual, prudential floors. Rounding direction is a protocol rule, not an implementation detail |
-| `npcs-treasury` | 683 | Best effort | I1 mint-on-deposit treasury: the only NPCS mint path |
+| `liquidity-facility` | 1,768 | **Fixed** | Advances at the protective mark; the liquidation ladder |
+| `mark-engine` | 1,713 | Best effort | NAV publication, mark states, haircuts, print ingestion |
+| `tranche-engine` | 1,348 | Best effort | Senior/junior pools, three-book accounting, waterfall |
+| `credit-math` | 1,277 | **Fixed** | Every money calculation routes through it; rounding direction is a protocol rule |
+| `npcs-treasury` | 683 | Best effort | Mint and redeem against USDC backing |
 | **Total** | **22,129** | fixed 16,416 · best effort 5,713 | |
 
-**Out of scope:** the off-chain services and cranks (`services/`,
-`payment-rails/crank`), the UI (`client/`), and the third-party programs we assume
-are correct (Token-2022, Token ACL, SAS, Squads). The *integration* with those is in
-scope: account validation of every CPI target and every account they hand back.
+Out of scope: the off-chain services, crank and UI, and the third-party programs we
+assume are correct (Token-2022, Token ACL, SAS, Squads) — though their *integration* is
+in scope: account validation of every CPI target.
 
-### What an auditor gets before starting
+**Known issues, declared so nobody rediscovers them.** Devnet runs older builds than
+`main` (the audit is of the freeze commit, not devnet); the devnet NPCS MintConfig
+authority is still a single key; `publish_nav` checks the publisher set but not a SAS
+attestation of the NAV; the prudential bounds `H2`/`H3`/`MAX_HOLDER_CAP` await
+sign-off.
 
-Not a sales page — a working pack, in [`preresearch/architecture/10-Audit-Scope-P7.md`](preresearch/architecture/10-Audit-Scope-P7.md)
-and referenced throughout the repo:
+**Six questions we want answered beyond a line-by-line read.** (1) Can any sequence
+across the rails and the engines move out more USDC than went in, or strand a user's
+funds? (2) Can NPCS reach a wallet the gate would refuse, or an unseasoned lot be sold?
+(3) Can an `EngineGrant` act outside its role? (4) Is any rounding floor exploitable by
+repetition? (5) Confirm no liquidation path runs on a Stale or Suspended mark. (6)
+Which keys can change what, and is the Squads timelock really the only upgrade path?
 
-| You get | Why it saves you time |
-|---|---|
-| Per-requirement IDs (`CG-P1..7`, `AE-P1..11`, `ME`, `QC`, `LF`, `TE`) with an as-built grade | You review against a spec, not against a guess about intent |
-| A 141-item threat inventory, ranked S1–S4 by severity and likelihood | The design's answers to each are already written and cross-referenced |
-| Asset invariants with exact integer math and a stated beneficiary for every floor | The rounding questions have documented answers to test |
-| Compliance requirements the programs encode, mapped to the regulation they serve | "Is this lawful" is a separate question from "is this correct" |
-| libFuzzer targets for clearing, pro-rata, settlement, refund bonds and the facility | The cash math is already under continuous fuzzing |
-| LiteSVM suites against the real `.so` files and the real SAS / Token ACL programs | You inherit our test harness, you do not rebuild it |
-| 100% line + branch coverage gate on `credit-math` | The arithmetic layer cannot silently regress |
-| A kill-the-crank drill on a real validator (refund liveness) | Liveness is tested against a real network, not a mock |
-| Deployed build hashes, upgrade authorities, Squads 2-of-2 + 48h timelock record | You can audit what is actually running, not a branch that never shipped |
-
-### Known issues — declared, not findings
-
-Listed here so nobody spends a day rediscovering them:
-
-- Devnet runs older builds than `main`. The audit is of the **freeze commit**, not of
-  what is currently on devnet.
-- The Token ACL MintConfig authority for the devnet NPCS mint is still a single key
-  (`7Udt…`), retained to thaw rails escrow vaults.
-- `publish_nav` validates the publisher set, **not** a SAS attestation of the NAV — the
-  on-chain verifier for that does not exist yet.
-- The prudential bounds `H2`, `H3` and `MAX_HOLDER_CAP` are awaiting sign-off.
-
-### Six questions we want answered beyond a line-by-line read
-
-1. **Cash conservation.** Can any instruction sequence across `payment-rails` and the
-   engines move more USDC out of a vault than went in, or strand a user's funds?
-   Refunds are designed to be permissionless and never pausable.
-2. **Gate bypass.** Can NPCS reach a wallet `credit-gate` would not admit — via thaw,
-   settle, CPI from an engine, or permanent-delegate paths? Can an unseasoned lot be
-   sold?
-3. **Engine authority.** `EngineGrant` roles let engines drive the rails. Can a
-   non-granted program, or a granted one acting outside its role, open sessions,
-   settle fills or distribute coupons?
-4. **Rounding.** Every `credit-math` floor and ceiling has a stated beneficiary. Is any
-   of them exploitable by repetition — dust extraction?
-5. **Liquidation under a stale mark.** No liquidation step should run on a Stale or
-   Suspended mark. Confirm there is no path around it.
-6. **Upgrade and authority model.** Which keys can change what, and is the Squads
-   timelock really the only upgrade path?
-
-### Freeze
-
-The engagement contract names one commit. From that commit, program changes go only
-through the auditor's fix review; the `.so` hashes of the audited build are recorded in
-[`DEPLOYMENTS.md`](DEPLOYMENTS.md); mainnet deploys only that build.
-
-### Why this is worth your time
-
-We are not asking for a rubber stamp. The honest version of this section is that we
-do not yet know whether the code is safe. What we do know is that the failure mode
-being priced here is not a reentrancy bug — it is "the mechanism that turns a denied
-redemption into a saleable claim turns out to let someone sell an unseasoned lot." A
-firm with real Solana and RWA depth is the only way to get a real answer, and we would
-rather pay for that answer now than discover it in a post-mortem.
-
-The repo is MIT. The scope is written down, including what we already know is wrong.
+You also inherit [`10-Audit-Scope-P7.md`](preresearch/architecture/10-Audit-Scope-P7.md):
+requirement IDs per program, a 141-item ranked threat inventory, the asset invariants
+with exact integer math, fuzz targets, and the build hashes and authority map for what
+is actually running. The repo is MIT.
 
 ---
 
