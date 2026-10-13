@@ -17,6 +17,8 @@ quarterly-marked, redemption-gated credit position what it is worth, and that
 turns a denied redemption request into a claim that can be priced, sold or
 financed.
 
+**Site** [nundina.xyz](https://nundina.xyz) · **Pitch** [video](https://youtu.be/iIrXrWH60eg?si=SK31vwWz1tE9BLE_) · **Demo** [video](https://youtu.be/Hk8LGH3vYk4?si=WU2mTEzu2gxJwdOf) · **X** [@nundinafi](https://x.com/nundinafi) · **Colosseum** [arena](https://colosseum.com/arena/projects/nundina)
+
 ---
 
 ## Contents
