@@ -11,7 +11,7 @@
     "test": "bash test-localnet.sh"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.99.0"
+    "@solana/web3.js": "^3.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
