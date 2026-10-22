@@ -65,7 +65,7 @@ jobs:
         with:
           toolchain: ${{ env.NIGHTLY }}
           components: llvm-tools-preview
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-llvm-cov@0.9.1
       - name: Coverage (gate — 100% lines, 100% branches)
@@ -283,7 +283,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: payment-rails/fuzz -> target
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-fuzz@0.13.2
       # The prebuilt cargo-fuzz is a musl binary and defaults --target to its
