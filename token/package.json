@@ -17,7 +17,7 @@
     "@solana/spl-token-metadata": "^0.1.6"
   },
   "devDependencies": {
-    "@types/node": "^24",
+    "@types/node": "^26",
     "tsx": "^4",
     "typescript": "^5"
   }
